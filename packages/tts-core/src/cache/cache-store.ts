@@ -14,9 +14,12 @@ import { basename, join, resolve, sep } from "node:path";
 import {
   createNarrationRequest,
   type NarrationProvider,
+  type NarrationProviderPlugin,
   type NarrationRequest,
+  type NarrationSynthesisFinalizeOutcome,
   type NarrationSynthesisResult,
 } from "../contracts.js";
+import { prepareNarrationProviderRequest } from "../provider-registry.js";
 import {
   createNarrationCacheIdentity,
   createNarrationCacheKey,
@@ -56,7 +59,8 @@ export type NarrationCacheResolveResult = {
 export type ResolveNarrationFromCacheOptions = {
   cacheDir: string;
   request: NarrationRequest;
-  provider: NarrationProvider;
+  provider: NarrationProvider | NarrationProviderPlugin;
+  signal?: AbortSignal;
   version?: number;
   measureDurationMs?: (audioPath: string) => Promise<number>;
   now?: () => Date;
@@ -90,7 +94,15 @@ export async function resolveNarrationFromCache(
   options: ResolveNarrationFromCacheOptions,
 ): Promise<NarrationCacheResolveResult> {
   const cacheDir = resolveCacheDir(options.cacheDir);
-  const request = createNarrationRequest(options.request);
+  const inputRequest = createNarrationRequest(options.request);
+  const signal = options.signal ?? new AbortController().signal;
+  const context = { cacheDir, signal };
+
+  await mkdir(cacheDir, { recursive: true });
+
+  const request = isNarrationProviderPlugin(options.provider)
+    ? await prepareNarrationProviderRequest(options.provider, inputRequest, context)
+    : inputRequest;
   const version = options.version ?? NARRATION_CACHE_SCHEMA_VERSION;
   const key = createNarrationCacheKey(request, { version });
   const paths = getNarrationCachePaths({
@@ -99,8 +111,7 @@ export async function resolveNarrationFromCache(
     format: request.format,
   });
 
-  await mkdir(cacheDir, { recursive: true });
-
+  signal.throwIfAborted();
   const cached = await readNarrationCacheEntry({
     cacheDir,
     key,
@@ -109,6 +120,7 @@ export async function resolveNarrationFromCache(
   });
 
   if (cached?.status === "ready") {
+    signal.throwIfAborted();
     return {
       source: "cache",
       entry: cached.entry,
@@ -119,19 +131,39 @@ export async function resolveNarrationFromCache(
     await removeCacheArtifacts(cached.metadataPath, cached.audioPath);
   }
 
-  const synthesized = await options.provider.synthesize(request);
+  signal.throwIfAborted();
+  const synthesized = isNarrationProviderPlugin(options.provider)
+    ? await options.provider.synthesize(request, context)
+    : await options.provider.synthesize(request);
+  let entry: NarrationCacheEntry | undefined;
+  let failure: { error: unknown } | undefined;
 
-  assertSynthesisMatchesRequest(synthesized, request);
+  try {
+    signal.throwIfAborted();
+    assertSynthesisMatchesRequest(synthesized, request);
 
-  const entry = await persistNarrationCacheEntry({
-    cacheDir,
-    key,
-    request,
-    version,
-    synthesized,
-    measureDurationMs: options.measureDurationMs ?? measureNarrationAudioDuration,
-    now: options.now ?? (() => new Date()),
-  });
+    entry = await persistNarrationCacheEntry({
+      cacheDir,
+      key,
+      request,
+      version,
+      synthesized,
+      measureDurationMs: options.measureDurationMs ?? measureNarrationAudioDuration,
+      now: options.now ?? (() => new Date()),
+    });
+  } catch (error) {
+    failure = { error };
+  }
+
+  await finalizeSynthesisOutput(synthesized, failure);
+
+  if (failure !== undefined) {
+    throw failure.error;
+  }
+
+  if (entry === undefined) {
+    throw new Error("Narration cache persistence completed without an entry.");
+  }
 
   return {
     source: "provider",
@@ -414,6 +446,12 @@ async function writeAudioArtifact(
       await writeFile(temporaryPath, synthesized.output.bytes);
     } else {
       await copyFile(synthesized.output.path, temporaryPath);
+
+      const copied = await stat(temporaryPath);
+
+      if (copied.size === 0) {
+        throw new Error("Narration providers must return a non-empty audio file.");
+      }
     }
 
     await rename(temporaryPath, audioPath);
@@ -524,9 +562,46 @@ function assertSynthesisMatchesRequest(
     || synthesized.metadata.format !== request.format
     || synthesized.metadata.sampleRate !== request.sampleRate
     || synthesized.metadata.language !== request.language
+    || JSON.stringify(createNarrationCacheIdentity({
+      ...request,
+      providerOptions: synthesized.metadata.providerOptions,
+    }).providerOptions) !== JSON.stringify(requestIdentity.providerOptions)
   ) {
     throw new Error("Narration provider returned metadata that does not match the requested cache identity.");
   }
+}
+
+async function finalizeSynthesisOutput(
+  synthesized: NarrationSynthesisResult,
+  failure: { error: unknown } | undefined,
+): Promise<void> {
+  if (synthesized.output.kind !== "file" || synthesized.output.finalize === undefined) {
+    return;
+  }
+
+  const outcome: NarrationSynthesisFinalizeOutcome = failure === undefined
+    ? { status: "persisted" }
+    : { status: "failed", error: failure.error };
+
+  try {
+    await synthesized.output.finalize(outcome);
+  } catch (finalizeError) {
+    if (failure === undefined) {
+      throw finalizeError;
+    }
+
+    throw new AggregateError(
+      [failure.error, finalizeError],
+      "Narration persistence failed and provider output cleanup also failed.",
+      { cause: failure.error },
+    );
+  }
+}
+
+function isNarrationProviderPlugin(
+  provider: NarrationProvider | NarrationProviderPlugin,
+): provider is NarrationProviderPlugin {
+  return "name" in provider && "capabilities" in provider && "prepareRequest" in provider;
 }
 
 async function hashFile(path: string): Promise<string> {

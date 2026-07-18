@@ -4,7 +4,14 @@ export {
   OPENAI_NARRATION_MODELS,
   createNarrationRequest,
   normalizeNarrationText,
+  normalizeNarrationProviderOptions,
+  assertNarrationProviderName,
 } from "./contracts.js";
+export {
+  createNarrationProviderRegistry,
+  prepareNarrationProviderRequest,
+  validateNarrationProviderCapabilities,
+} from "./provider-registry.js";
 export {
   NARRATION_CACHE_SCHEMA_VERSION,
   createNarrationCacheIdentity,
@@ -22,14 +29,25 @@ export {
 } from "./cache/cache-maintenance.js";
 export type {
   NarrationProvider,
+  NarrationProviderCapabilities,
+  NarrationProviderCloseContext,
+  NarrationProviderInstructions,
+  NarrationProviderLanguages,
   NarrationProviderName,
   NarrationProviderOptions,
+  NarrationProviderOutputFormats,
+  NarrationProviderPlugin,
+  NarrationProviderPrepareContext,
+  NarrationProviderSampleRates,
+  NarrationProviderSynthesisContext,
   NarrationRequest,
   NarrationRequestInput,
   NarrationSynthesisMetadata,
   NarrationSynthesisOutput,
+  NarrationSynthesisFinalizeOutcome,
   NarrationSynthesisResult,
 } from "./contracts.js";
+export type { NarrationProviderRegistry } from "./provider-registry.js";
 export type {
   NarrationCacheIdentity,
   NarrationCacheKeyOptions,

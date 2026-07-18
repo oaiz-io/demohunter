@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 
-import { createElevenLabsNarrationProvider } from "./index.js";
+import {
+  createElevenLabsNarrationProvider,
+  createElevenLabsNarrationProviderPlugin,
+} from "./index.js";
 
 const originalApiKey = process.env.ELEVENLABS_API_KEY;
 
@@ -15,6 +18,24 @@ afterEach(() => {
 });
 
 describe("createElevenLabsNarrationProvider", () => {
+  test("exposes provider-defined language and request capabilities through the plugin contract", async () => {
+    const plugin = createElevenLabsNarrationProviderPlugin();
+    const prepared = await plugin.prepareRequest(
+      createRequest({ language: " custom-authored-language " }),
+      { cacheDir: "/tmp/cache", signal: new AbortController().signal },
+    );
+
+    assert.equal(plugin.name, "elevenlabs");
+    assert.deepEqual(plugin.capabilities, {
+      offlineSynthesis: false,
+      languages: "provider-defined",
+      outputFormats: "provider-defined",
+      sampleRates: "provider-defined",
+      instructions: "provider-defined",
+    });
+    assert.equal(prepared.language, "custom-authored-language");
+  });
+
   test("throws only when synthesis is attempted without ELEVENLABS_API_KEY", async () => {
     delete process.env.ELEVENLABS_API_KEY;
     let fetchCalls = 0;
@@ -150,6 +171,24 @@ describe("createElevenLabsNarrationProvider", () => {
         ),
       /ElevenLabs speech synthesis failed \(400 Bad Request\): bad request/,
     );
+  });
+
+  test("the plugin forwards cancellation to fetch while the legacy factory remains compatible", async () => {
+    process.env.ELEVENLABS_API_KEY = "test-key";
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | null | undefined;
+    const plugin = createElevenLabsNarrationProviderPlugin({
+      fetch: async (_input, init) => {
+        receivedSignal = init?.signal;
+        return new Response(new Uint8Array([1]), { status: 200 });
+      },
+    });
+    const context = { cacheDir: "/tmp/cache", signal: controller.signal };
+    const request = await plugin.prepareRequest(createRequest(), context);
+
+    await plugin.synthesize(request, context);
+
+    assert.equal(receivedSignal, controller.signal);
   });
 });
 

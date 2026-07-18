@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 
-import { createOpenAINarrationProvider } from "./index.js";
+import {
+  createOpenAINarrationProvider,
+  createOpenAINarrationProviderPlugin,
+} from "./index.js";
 
 const originalApiKey = process.env.OPENAI_API_KEY;
 
@@ -15,6 +18,25 @@ afterEach(() => {
 });
 
 describe("createOpenAINarrationProvider", () => {
+  test("exposes provider-defined language capabilities through the plugin contract", async () => {
+    const plugin = createOpenAINarrationProviderPlugin();
+    const signal = new AbortController().signal;
+    const prepared = await plugin.prepareRequest(
+      createRequest({ language: " custom-authored-language " }),
+      { cacheDir: "/tmp/cache", signal },
+    );
+
+    assert.equal(plugin.name, "openai");
+    assert.deepEqual(plugin.capabilities, {
+      offlineSynthesis: false,
+      languages: "provider-defined",
+      outputFormats: ["mp3", "opus", "aac", "flac", "wav", "pcm"],
+      sampleRates: "provider-defined",
+      instructions: "supported",
+    });
+    assert.equal(prepared.language, "custom-authored-language");
+  });
+
   test("throws only when synthesis is attempted without OPENAI_API_KEY", async () => {
     delete process.env.OPENAI_API_KEY;
     let fetchCalls = 0;
@@ -142,6 +164,24 @@ describe("createOpenAINarrationProvider", () => {
         ),
       /OpenAI speech synthesis failed \(400 Bad Request\): bad request/,
     );
+  });
+
+  test("the plugin forwards cancellation to fetch while the legacy factory remains compatible", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | null | undefined;
+    const plugin = createOpenAINarrationProviderPlugin({
+      fetch: async (_input, init) => {
+        receivedSignal = init?.signal;
+        return new Response(new Uint8Array([1]), { status: 200 });
+      },
+    });
+    const context = { cacheDir: "/tmp/cache", signal: controller.signal };
+    const request = await plugin.prepareRequest(createRequest(), context);
+
+    await plugin.synthesize(request, context);
+
+    assert.equal(receivedSignal, controller.signal);
   });
 });
 

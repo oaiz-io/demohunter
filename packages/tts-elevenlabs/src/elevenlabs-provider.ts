@@ -1,6 +1,7 @@
 import {
   createNarrationRequest,
   type NarrationProvider,
+  type NarrationProviderPlugin,
   type NarrationRequest,
   type NarrationSynthesisResult,
 } from "@demohunter/tts-core";
@@ -22,10 +23,43 @@ export type ElevenLabsNarrationProviderOptions = {
 export function createElevenLabsNarrationProvider(
   options: ElevenLabsNarrationProviderOptions = {},
 ): NarrationProvider {
+  const plugin = createElevenLabsNarrationProviderPlugin(options);
+
+  return {
+    async synthesize(request) {
+      const context = {
+        cacheDir: process.cwd(),
+        signal: new AbortController().signal,
+      };
+      const prepared = await plugin.prepareRequest(request, context);
+
+      return await plugin.synthesize(prepared, context);
+    },
+  };
+}
+
+export function createElevenLabsNarrationProviderPlugin(
+  options: ElevenLabsNarrationProviderOptions = {},
+): NarrationProviderPlugin {
   const fetchImplementation = options.fetch ?? globalThis.fetch;
 
   return {
-    async synthesize(request: NarrationRequest): Promise<NarrationSynthesisResult> {
+    name: "elevenlabs",
+    capabilities: {
+      offlineSynthesis: false,
+      languages: "provider-defined",
+      outputFormats: "provider-defined",
+      sampleRates: "provider-defined",
+      instructions: "provider-defined",
+    },
+    prepareRequest(request) {
+      if (request.provider !== "elevenlabs") {
+        throw new Error(`ElevenLabs narration received unsupported provider: ${request.provider}`);
+      }
+
+      return createNarrationRequest(request);
+    },
+    async synthesize(request, context): Promise<NarrationSynthesisResult> {
       if (fetchImplementation === undefined) {
         throw new Error("ElevenLabs narration requires a fetch implementation in the current runtime.");
       }
@@ -35,6 +69,7 @@ export function createElevenLabsNarrationProvider(
       }
 
       const normalizedRequest = createNarrationRequest(request);
+      context.signal.throwIfAborted();
 
       const apiKey = process.env.ELEVENLABS_API_KEY;
 
@@ -49,6 +84,7 @@ export function createElevenLabsNarrationProvider(
           "xi-api-key": apiKey,
         },
         body: JSON.stringify(createSpeechBody(normalizedRequest)),
+        signal: context.signal,
       });
 
       if (!response.ok) {
