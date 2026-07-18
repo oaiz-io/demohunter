@@ -1,5 +1,6 @@
 import {
   createNarrationRequest,
+  normalizeNarrationText,
   type NarrationProvider,
   type NarrationProviderPlugin,
   type NarrationRequest,
@@ -57,7 +58,27 @@ export function createElevenLabsNarrationProviderPlugin(
         throw new Error(`ElevenLabs narration received unsupported provider: ${request.provider}`);
       }
 
-      return createNarrationRequest(request);
+      const providerOptions = {
+        ...request.providerOptions,
+      };
+
+      if (request.model === "eleven_v3") {
+        delete providerOptions.previousText;
+        delete providerOptions.nextText;
+      } else {
+        const previousText = normalizeContextText(providerOptions.previousText);
+        const nextText = normalizeContextText(providerOptions.nextText);
+
+        if (previousText === undefined) delete providerOptions.previousText;
+        else providerOptions.previousText = previousText;
+        if (nextText === undefined) delete providerOptions.nextText;
+        else providerOptions.nextText = nextText;
+      }
+
+      return createNarrationRequest({
+        ...request,
+        providerOptions: Object.keys(providerOptions).length === 0 ? undefined : providerOptions,
+      });
     },
     async synthesize(request, context): Promise<NarrationSynthesisResult> {
       if (fetchImplementation === undefined) {
@@ -116,6 +137,15 @@ export function createElevenLabsNarrationProviderPlugin(
       };
     },
   };
+}
+
+function normalizeContextText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = normalizeNarrationText(value);
+  return normalized === "" ? undefined : normalized;
 }
 
 function createSpeechUrl(request: NarrationRequest): string {

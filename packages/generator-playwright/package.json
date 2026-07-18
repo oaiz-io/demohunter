@@ -21,8 +21,6 @@
     "@demohunter/media-ffmpeg": "workspace:*",
     "@demohunter/sdk": "workspace:*",
     "@demohunter/tts-core": "workspace:*",
-    "@demohunter/tts-elevenlabs": "workspace:*",
-    "@demohunter/tts-openai": "workspace:*",
     "playwright": ">=1.61"
   }
 }

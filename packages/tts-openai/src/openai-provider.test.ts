@@ -37,6 +37,22 @@ describe("createOpenAINarrationProvider", () => {
     assert.equal(prepared.language, "custom-authored-language");
   });
 
+  test("drops generator continuity hints during provider preparation", async () => {
+    const plugin = createOpenAINarrationProviderPlugin();
+    const prepared = await plugin.prepareRequest(
+      createRequest({
+        providerOptions: {
+          previousText: "First.",
+          nextText: "Next.",
+          voiceSettings: { stability: 0.5 },
+        },
+      }),
+      { cacheDir: "/tmp/cache", signal: new AbortController().signal },
+    );
+
+    assert.equal(prepared.providerOptions, undefined);
+  });
+
   test("throws only when synthesis is attempted without OPENAI_API_KEY", async () => {
     delete process.env.OPENAI_API_KEY;
     let fetchCalls = 0;
@@ -193,6 +209,7 @@ function createRequest(
     sampleRate: number;
     instructions: string;
     language: string;
+    providerOptions: Record<string, unknown>;
     text: string;
   }> = {},
 ) {
@@ -204,6 +221,7 @@ function createRequest(
     sampleRate: input.sampleRate ?? 24_000,
     instructions: input.instructions ?? "Speak clearly.",
     ...(input.language === undefined ? {} : { language: input.language }),
+    ...(input.providerOptions === undefined ? {} : { providerOptions: input.providerOptions }),
     text: input.text ?? "Explain billing",
   };
 }

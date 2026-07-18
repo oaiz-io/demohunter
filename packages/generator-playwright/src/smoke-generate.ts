@@ -27,6 +27,7 @@ export type SmokeGenerateInput = {
   };
   tourFile: SmokeTourModule;
   onProgress?: GenerationProgressReporter;
+  signal?: AbortSignal;
 };
 
 export type SmokeTourModule = {
@@ -63,7 +64,7 @@ const defaultDependencies: SmokeGenerateDependencies = {
 };
 
 export async function smokeGenerate(
-  { loadedConfig, onProgress, tourFile }: SmokeGenerateInput,
+  { loadedConfig, onProgress, signal, tourFile }: SmokeGenerateInput,
   dependencies: Partial<SmokeGenerateDependencies> = {},
 ): Promise<SmokeGenerateResult> {
   const resolvedDependencies = {
@@ -71,6 +72,7 @@ export async function smokeGenerate(
     ...dependencies,
   };
   const { config } = loadedConfig;
+  signal?.throwIfAborted();
 
   if (!TOUR_ID_PATTERN.test(tourFile.tour.id)) {
     throw new Error(`Tour id must be a lowercase filesystem-safe slug: ${tourFile.path}`);
@@ -119,16 +121,16 @@ export async function smokeGenerate(
     const lifecycleContext = createSmokeLifecycleContext(runtime);
 
     try {
-      await page.goto(new URL(config.baseURL).href);
+      await abortable(page.goto(new URL(config.baseURL).href), signal);
       report(onProgress, {
         phase: "running-flow",
         message: `Validating ${tourFile.tour.id}`,
       });
-      await Promise.resolve(tourFile.tour.setup?.(lifecycleContext));
+      await abortable(Promise.resolve(tourFile.tour.setup?.(lifecycleContext)), signal);
       middlewareArmed = true;
-      await cookieMiddleware.afterSetup(page);
-      await Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext));
-      await Promise.resolve(tourFile.tour.run(runtime));
+      await abortable(cookieMiddleware.afterSetup(page), signal);
+      await abortable(Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext)), signal);
+      await abortable(Promise.resolve(tourFile.tour.run(runtime)), signal);
     } catch (error) {
       primaryError = error;
     } finally {
@@ -204,6 +206,32 @@ export async function smokeGenerate(
       throw closeError;
     }
   }
+}
+
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) {
+    return promise;
+  }
+  signal.throwIfAborted();
+
+  return await new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 async function captureSmokeDebugFailure(input: {

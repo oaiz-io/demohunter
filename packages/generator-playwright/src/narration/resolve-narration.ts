@@ -1,11 +1,8 @@
 import {
   createNarrationRequest,
-  normalizeNarrationText,
   resolveNarrationFromCache,
-  type NarrationProvider,
+  type NarrationProviderRegistry,
 } from "@demohunter/tts-core";
-import { createElevenLabsNarrationProvider } from "@demohunter/tts-elevenlabs";
-import { createOpenAINarrationProvider } from "@demohunter/tts-openai";
 
 import type {
   NarrationResolverContext,
@@ -20,28 +17,15 @@ export type ResolveNarrationSegmentInput = {
   event: NarrationRuntimeEvent;
   loadedConfig: SmokeGenerateInput["loadedConfig"];
   context?: NarrationResolverContext;
+  registry: NarrationProviderRegistry;
+  signal?: AbortSignal;
 };
 
 type ResolveNarrationSegmentDependencies = {
-  createProvider: (
-    loadedConfig: SmokeGenerateInput["loadedConfig"],
-  ) => NarrationProvider;
   resolveNarrationFromCache: typeof resolveNarrationFromCache;
 };
 
 const defaultDependencies: ResolveNarrationSegmentDependencies = {
-  createProvider: (loadedConfig) => {
-    const providerName = loadedConfig.config.tts.provider;
-
-    switch (providerName) {
-      case "openai":
-        return createOpenAINarrationProvider();
-      case "elevenlabs":
-        return createElevenLabsNarrationProvider();
-      default:
-        throw new Error(`Unsupported narration provider: ${String(providerName)}`);
-    }
-  },
   resolveNarrationFromCache,
 };
 
@@ -54,6 +38,8 @@ export async function resolveNarrationSegment(
     ...dependencies,
   };
   const { config } = input.loadedConfig;
+  const signal = input.signal ?? input.context?.signal;
+  signal?.throwIfAborted();
   const request = createNarrationRequest({
     provider: config.tts.provider,
     model: input.event.model ?? config.tts.model,
@@ -69,8 +55,9 @@ export async function resolveNarrationSegment(
   try {
     const { entry } = await resolvedDependencies.resolveNarrationFromCache({
       cacheDir: config.cacheDir,
-      provider: resolvedDependencies.createProvider(input.loadedConfig),
+      provider: input.registry.resolve(config.tts.provider),
       request,
+      signal,
     });
 
     return {
@@ -81,10 +68,10 @@ export async function resolveNarrationSegment(
       text: request.text,
     };
   } catch (error) {
-    if (
-      error instanceof Error &&
-      (error.message.includes("OPENAI_API_KEY") || error.message.includes("ELEVENLABS_API_KEY"))
-    ) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    if (error instanceof Error) {
       throw new Error(
         `Unable to resolve narration segment ${JSON.stringify(request.text)} because ${error.message}`,
         { cause: error },
@@ -100,15 +87,19 @@ function resolveProviderOptions(
   event: NarrationRuntimeEvent,
   context: NarrationResolverContext | undefined,
 ): Record<string, unknown> | undefined {
-  if (tts.provider !== "elevenlabs") {
-    return undefined;
-  }
+  const configuredProviderOptions = "providerOptions" in tts ? tts.providerOptions : undefined;
+  const configuredVoiceSettings = "voiceSettings" in tts ? tts.voiceSettings : undefined;
+  const configuredSpeed = "speed" in tts ? tts.speed : undefined;
+  const providerOptions: Record<string, unknown> = {
+    ...configuredProviderOptions,
+  };
+  const voiceSettings = event.voiceSettings ?? configuredVoiceSettings;
+  const previousText = context?.previousText;
+  const nextText = context?.nextText;
 
-  const providerOptions: Record<string, unknown> = {};
-  const voiceSettings = event.voiceSettings ?? tts.voiceSettings;
-  const supportsRequestStitching = (event.model ?? tts.model) !== "eleven_v3";
-  const previousText = supportsRequestStitching ? normalizeContextText(context?.previousText) : undefined;
-  const nextText = supportsRequestStitching ? normalizeContextText(context?.nextText) : undefined;
+  if (configuredSpeed !== undefined && providerOptions.speed === undefined) {
+    providerOptions.speed = configuredSpeed;
+  }
 
   if (voiceSettings !== undefined) {
     providerOptions.voiceSettings = voiceSettings;
@@ -133,14 +124,4 @@ function resolveNarrationSampleRate(format: string): number {
   }
 
   return Number.parseInt(match[1], 10);
-}
-
-function normalizeContextText(text: string | undefined): string | undefined {
-  if (text === undefined) {
-    return undefined;
-  }
-
-  const normalized = normalizeNarrationText(text);
-
-  return normalized === "" ? undefined : normalized;
 }

@@ -36,6 +36,29 @@ describe("createElevenLabsNarrationProvider", () => {
     assert.equal(prepared.language, "custom-authored-language");
   });
 
+  test("owns stitching normalization and disables continuity for eleven_v3", async () => {
+    const plugin = createElevenLabsNarrationProviderPlugin();
+    const context = { cacheDir: "/tmp/cache", signal: new AbortController().signal };
+    const prepared = await plugin.prepareRequest(createRequest({
+      providerOptions: {
+        previousText: "  First.\r\n",
+        nextText: " Next. ",
+        voiceSettings: { stability: 0.5 },
+      },
+    }), context);
+    const v3 = await plugin.prepareRequest(createRequest({
+      model: "eleven_v3",
+      providerOptions: { previousText: "First.", nextText: "Next." },
+    }), context);
+
+    assert.deepEqual(prepared.providerOptions, {
+      nextText: "Next.",
+      previousText: "First.",
+      voiceSettings: { stability: 0.5 },
+    });
+    assert.equal(v3.providerOptions, undefined);
+  });
+
   test("throws only when synthesis is attempted without ELEVENLABS_API_KEY", async () => {
     delete process.env.ELEVENLABS_API_KEY;
     let fetchCalls = 0;

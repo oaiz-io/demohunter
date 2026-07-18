@@ -54,7 +54,15 @@ export function createOpenAINarrationProviderPlugin(
         throw new Error(`OpenAI narration received unsupported provider: ${request.provider}`);
       }
 
-      const normalizedRequest = createNarrationRequest(request);
+      const providerOptions = { ...request.providerOptions };
+      delete providerOptions.previousText;
+      delete providerOptions.nextText;
+      delete providerOptions.voiceSettings;
+      const { providerOptions: _discardedProviderOptions, ...requestWithoutProviderOptions } = request;
+      const normalizedRequest = createNarrationRequest({
+        ...requestWithoutProviderOptions,
+        ...(Object.keys(providerOptions).length === 0 ? {} : { providerOptions }),
+      });
 
       assertSupportedModel(normalizedRequest.model);
       return normalizedRequest;

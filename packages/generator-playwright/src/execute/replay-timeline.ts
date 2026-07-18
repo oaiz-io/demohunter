@@ -22,6 +22,7 @@ export type ReplayTimelineInput = {
   onMatchedEvent?: (event: TourRuntimeEvent, index: number) => void;
   onRuntimeEvent?: (event: TourRuntimeEvent) => void;
   page: Page;
+  signal?: AbortSignal;
   timeline: CollectedTimeline;
   tourFile: SmokeTourModule;
   now?: () => number;
@@ -52,6 +53,7 @@ export async function replayTimeline({
   onMatchedEvent,
   onRuntimeEvent,
   page,
+  signal,
   timeline,
   tourFile,
   now = () => Date.now(),
@@ -61,6 +63,7 @@ export async function replayTimeline({
     suppressActivity: createRecordingEffectsSuppressor(page, loadedConfig.config.record),
   }),
 }: ReplayTimelineInput): Promise<void> {
+  signal?.throwIfAborted();
   const { config } = loadedConfig;
   const outputDir = path.join(config.outputDir, tourFile.tour.id);
   const replayWait = waitForTimeout ?? ((durationMs: number) => page.waitForTimeout(durationMs));
@@ -91,17 +94,17 @@ export async function replayTimeline({
   });
   const lifecycleContext = createSmokeLifecycleContext(runtime);
 
-  await page.goto(new URL(config.baseURL).href);
+  await abortable(page.goto(new URL(config.baseURL).href), signal);
 
   let primaryError: unknown;
 
   try {
-    await Promise.resolve(tourFile.tour.setup?.(lifecycleContext));
+    await abortable(Promise.resolve(tourFile.tour.setup?.(lifecycleContext)), signal);
     middlewareArmed = true;
-    await cookieMiddleware.afterSetup(page);
-    await Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext));
-    await Promise.resolve(onBeforeRun?.());
-    await Promise.resolve(tourFile.tour.run(runtime));
+    await abortable(cookieMiddleware.afterSetup(page), signal);
+    await abortable(Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext)), signal);
+    await abortable(Promise.resolve(onBeforeRun?.()), signal);
+    await abortable(Promise.resolve(tourFile.tour.run(runtime)), signal);
   } catch (error) {
     primaryError = error;
   } finally {
@@ -123,6 +126,32 @@ export async function replayTimeline({
       pendingNarrationWaitMs = undefined;
     }
   }
+}
+
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) {
+    return promise;
+  }
+  signal.throwIfAborted();
+
+  return await new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 function createReplayRuntime(args: {

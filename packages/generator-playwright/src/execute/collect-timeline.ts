@@ -2,6 +2,7 @@ import path from "node:path";
 
 import type { Page } from "playwright";
 import { DEFAULT_COOKIE_BANNER_CONFIG } from "@demohunter/sdk";
+import type { NarrationProviderRegistry } from "@demohunter/tts-core";
 
 import { resolveNarrationSegment as defaultResolveNarrationSegment } from "../narration/resolve-narration.js";
 import {
@@ -27,6 +28,8 @@ export type CollectTimelineInput = {
   onRuntimeEvent?: (event: TourRuntimeEvent) => void;
   onProgress?: GenerationProgressReporter;
   page: Page;
+  narrationRegistry?: NarrationProviderRegistry;
+  signal?: AbortSignal;
   tourFile: SmokeTourModule;
   resolveNarrationSegment?: NarrationSegmentResolver;
   cookieMiddleware?: CookieBannerMiddleware;
@@ -38,12 +41,20 @@ export async function collectTimeline({
   onRuntimeEvent,
   onProgress,
   page,
-  resolveNarrationSegment = (event, context) => defaultResolveNarrationSegment({ event, loadedConfig, context }),
+  narrationRegistry,
+  signal,
+  resolveNarrationSegment = (event, context) => {
+    if (narrationRegistry === undefined) {
+      throw new Error("A narration provider registry is required to resolve narration.");
+    }
+    return defaultResolveNarrationSegment({ event, loadedConfig, context, registry: narrationRegistry, signal });
+  },
   cookieMiddleware = createCookieBannerMiddleware({
     config: loadedConfig.config.record.cookieBanners ?? DEFAULT_COOKIE_BANNER_CONFIG,
   }),
   tourFile,
 }: CollectTimelineInput): Promise<CollectedTimeline> {
+  signal?.throwIfAborted();
   const { config } = loadedConfig;
   const outputDir = path.join(config.outputDir, tourFile.tour.id);
   const events: TourRuntimeEvent[] = [];
@@ -64,17 +75,17 @@ export async function collectTimeline({
   });
   const lifecycleContext = createSmokeLifecycleContext(runtime);
 
-  await page.goto(new URL(config.baseURL).href);
+  await abortable(page.goto(new URL(config.baseURL).href), signal);
 
   let primaryError: unknown;
 
   try {
-    await Promise.resolve(tourFile.tour.setup?.(lifecycleContext));
+    await abortable(Promise.resolve(tourFile.tour.setup?.(lifecycleContext)), signal);
     middlewareArmed = true;
-    await cookieMiddleware.afterSetup(page);
-    await Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext));
-    await Promise.resolve(onBeforeRun?.());
-    await Promise.resolve(tourFile.tour.run(runtime));
+    await abortable(cookieMiddleware.afterSetup(page), signal);
+    await abortable(Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext)), signal);
+    await abortable(Promise.resolve(onBeforeRun?.()), signal);
+    await abortable(Promise.resolve(tourFile.tour.run(runtime)), signal);
   } catch (error) {
     primaryError = error;
   } finally {
@@ -91,7 +102,7 @@ export async function collectTimeline({
     }
   }
 
-  return buildCollectedTimeline(events, loadedConfig, resolveNarrationSegment, onProgress);
+  return buildCollectedTimeline(events, loadedConfig, resolveNarrationSegment, onProgress, signal);
 }
 
 async function buildCollectedTimeline(
@@ -99,11 +110,13 @@ async function buildCollectedTimeline(
   loadedConfig: SmokeGenerateInput["loadedConfig"],
   resolveNarrationSegment: NarrationSegmentResolver,
   onProgress?: GenerationProgressReporter,
+  signal?: AbortSignal,
 ): Promise<CollectedTimeline> {
   const entries: CollectedTimelineEntry[] = [];
   const narrations: CollectedTimeline["narrations"] = [];
 
   for (const [index, event] of events.entries()) {
+    signal?.throwIfAborted();
     const order = index + 1;
 
     if (event.kind === "narrate") {
@@ -114,7 +127,7 @@ async function buildCollectedTimeline(
       });
       const segment = await resolveNarrationSegment(
         event,
-        buildNarrationResolverContext(events, index, loadedConfig),
+        buildNarrationResolverContext(events, index, loadedConfig, signal),
       );
 
       if (!Number.isFinite(segment.durationMs) || segment.durationMs < 0) {
@@ -152,6 +165,7 @@ function buildNarrationResolverContext(
   events: TourRuntimeEvent[],
   index: number,
   loadedConfig: SmokeGenerateInput["loadedConfig"],
+  signal?: AbortSignal,
 ): NarrationResolverContext | undefined {
   const event = events[index];
 
@@ -159,15 +173,9 @@ function buildNarrationResolverContext(
     return undefined;
   }
 
-  if (loadedConfig.config.tts.provider !== "elevenlabs") {
-    return undefined;
-  }
-
-  if ((event.model ?? loadedConfig.config.tts.model) === "eleven_v3") {
-    return undefined;
-  }
-
-  const context: NarrationResolverContext = {};
+  const context: NarrationResolverContext = {
+    ...(signal === undefined ? {} : { signal }),
+  };
   const previousNarration = findAdjacentNarration(events, index, -1);
   const nextNarration = findAdjacentNarration(events, index, 1);
 
@@ -188,6 +196,32 @@ function buildNarrationResolverContext(
   return context.previousText === undefined && context.nextText === undefined
     ? undefined
     : context;
+}
+
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) {
+    return promise;
+  }
+  signal.throwIfAborted();
+
+  return await new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 function findAdjacentNarration(
@@ -231,9 +265,9 @@ function resolveNarrationIdentity(
     voice: event.voice ?? tts.voice,
     format: event.format ?? tts.format,
     language: normalizeOptionalString(event.language ?? tts.language),
-    voiceSettings: tts.provider === "elevenlabs"
-      ? sortPlainObject(event.voiceSettings ?? tts.voiceSettings)
-      : undefined,
+    voiceSettings: sortPlainObject(
+      event.voiceSettings ?? ("voiceSettings" in tts ? tts.voiceSettings : undefined),
+    ),
   };
 }
 

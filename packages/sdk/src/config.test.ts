@@ -3,9 +3,12 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_DEMOHUNTER_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
+  DEFAULT_KOKORO_TTS_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
   defineConfig,
+  kokoro,
+  kokoroTTS,
 } from "./config.js";
 import * as sdk from "./index.js";
 
@@ -50,6 +53,40 @@ describe("tts defaults", () => {
         useSpeakerBoost: true,
       },
     });
+  });
+
+  test("authors a process-free Kokoro provider descriptor with WAV defaults", () => {
+    const descriptor = kokoro({ runtime: "command", executable: "kokoro" });
+    const authored = defineConfig({
+      baseURL: "http://localhost:3000",
+      providers: { tts: [descriptor] },
+      tts: { provider: "kokoro", voice: "en_us_male_1", language: "en-US" },
+    });
+
+    expect(authored.providers.tts[0]).toEqual({
+      name: "kokoro",
+      options: { runtime: "command", executable: "kokoro" },
+    });
+    expect(kokoroTTS({ voice: "en_us_male_1" })).toEqual({
+      ...DEFAULT_KOKORO_TTS_CONFIG,
+      voice: "en_us_male_1",
+    });
+  });
+
+  test("accepts arbitrary provider names without widening them to OpenAI", () => {
+    const authored = defineConfig({
+      baseURL: "http://localhost:3000",
+      providers: { tts: [{ name: "acme-local", options: { endpoint: "local" } }] },
+      tts: {
+        provider: "acme-local",
+        model: "acme-v1",
+        voice: "demo",
+        format: "wav",
+        instructions: "",
+      },
+    });
+
+    expect(authored.tts.provider).toBe("acme-local");
   });
 });
 
