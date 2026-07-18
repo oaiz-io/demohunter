@@ -92,6 +92,10 @@ export async function generateCommand(
   const resolvedDependencies = {
     ...defaultDependencies,
     ...dependencies,
+    providerDescriptorLoaders: new Map([
+      ...defaultDependencies.providerDescriptorLoaders,
+      ...(dependencies.providerDescriptorLoaders ?? []),
+    ]),
   };
   const resolvedTourPath = path.resolve(cwd, tourPath);
   let loadedConfig: Awaited<ReturnType<typeof loadConfig>> | undefined;

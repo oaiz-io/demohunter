@@ -544,6 +544,81 @@ describe("generateCommand", () => {
     });
     expect(resolved).toBe(true);
   });
+
+  test("extends built-in descriptor loaders when registering Kokoro with a custom provider", async () => {
+    const cwd = await makeTempProject();
+    const kokoroPlugin = makePlugin("kokoro");
+    const customPlugin = makePlugin("acme-local");
+    const createKokoroPlugin = mock(() => kokoroPlugin);
+    const loadedConfig = {
+      ...makeLoadedConfig(cwd),
+      config: {
+        ...makeLoadedConfig(cwd).config,
+        providers: {
+          tts: [
+            {
+              name: "kokoro",
+              options: { runtime: "command" as const, executable: "kokoro" },
+            },
+            { name: "acme-local", options: { endpoint: "local" } },
+          ],
+        },
+        tts: { ...DEFAULT_TTS_CONFIG, provider: "acme-local" },
+      },
+    };
+
+    await generateCommand(cwd, "demos/sample.tour.ts", {
+      createKokoroPlugin,
+      providerDescriptorLoaders: new Map([[
+        "acme-local",
+        async () => customPlugin,
+      ]]),
+      generateTour: async ({ narrationRegistry }) => {
+        expect(narrationRegistry?.resolve("kokoro")).toBe(kokoroPlugin);
+        expect(narrationRegistry?.resolve("acme-local")).toBe(customPlugin);
+        return { outputDir: "out", videoPath: "out/video.mp4" };
+      },
+      loadConfig: async () => loadedConfig,
+      log: () => {},
+    });
+
+    expect(createKokoroPlugin).toHaveBeenCalledTimes(1);
+  });
+
+  test("lets an injected descriptor loader deterministically override a built-in loader", async () => {
+    const cwd = await makeTempProject();
+    const overriddenKokoroPlugin = makePlugin("kokoro");
+    const createKokoroPlugin = mock(() => makePlugin("kokoro"));
+    const loadedConfig = {
+      ...makeLoadedConfig(cwd),
+      config: {
+        ...makeLoadedConfig(cwd).config,
+        providers: {
+          tts: [{
+            name: "kokoro",
+            options: { runtime: "command" as const, executable: "kokoro" },
+          }],
+        },
+        tts: DEFAULT_KOKORO_TTS_CONFIG,
+      },
+    };
+
+    await generateCommand(cwd, "demos/sample.tour.ts", {
+      createKokoroPlugin,
+      providerDescriptorLoaders: new Map([[
+        "kokoro",
+        async () => overriddenKokoroPlugin,
+      ]]),
+      generateTour: async ({ narrationRegistry }) => {
+        expect(narrationRegistry?.resolve("kokoro")).toBe(overriddenKokoroPlugin);
+        return { outputDir: "out", videoPath: "out/video.mp4" };
+      },
+      loadConfig: async () => loadedConfig,
+      log: () => {},
+    });
+
+    expect(createKokoroPlugin).not.toHaveBeenCalled();
+  });
 });
 
 function makePlugin(name: string): NarrationProviderPlugin {
