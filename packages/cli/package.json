@@ -64,7 +64,7 @@
     "clean:package-docs": "node scripts/clean-package-docs.mjs",
     "link:global": "bun run build && npm link",
     "postpack": "node scripts/clean-package-docs.mjs",
-    "prepack": "node scripts/sync-package-docs.mjs && node scripts/sync-kokoro-worker.mjs",
+    "prepack": "node scripts/build-package.mjs && node scripts/sync-package-docs.mjs",
     "unlink:global": "npm unlink -g demohunter",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "bun run build"

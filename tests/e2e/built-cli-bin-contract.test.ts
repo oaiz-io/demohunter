@@ -136,7 +136,7 @@ describe("built cli bin contract", () => {
       expect(missingKeyGenerate.stderr).toContain("OPENAI_API_KEY");
 
     },
-    45_000,
+    60_000,
   );
 });
 

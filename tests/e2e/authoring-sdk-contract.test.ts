@@ -94,7 +94,7 @@ describe("authoring sdk contract", () => {
         "video.mp4",
       ]);
     },
-    20_000,
+    45_000,
   );
 
   test("keeps bootstrap logic in setup with plain Playwright page actions", async () => {

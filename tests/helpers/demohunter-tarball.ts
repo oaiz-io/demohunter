@@ -25,8 +25,6 @@ export function getDemohunterTarballPath(): Promise<string> {
 }
 
 async function buildTarball(): Promise<string> {
-  await runCommand([process.execPath, "run", "build"], cliPackageDir);
-
   const tarballSourceDir = await mkdtemp(path.join(os.tmpdir(), "demohunter-pack-source-"));
   process.on("exit", () => {
     rm(tarballSourceDir, { force: true, recursive: true }).catch(() => {});

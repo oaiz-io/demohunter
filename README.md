@@ -147,7 +147,7 @@ Use ISO 639-1 language codes such as `sv` for Swedish. ElevenLabs receives `lang
 
 ### Local Kokoro
 
-DemoHunter ships a small, weight-free Python worker, not Kokoro, Python packages, model weights, or voices. Install Python 3 and `kokoro-onnx`/`soundfile` yourself, and provide local model and voices files:
+DemoHunter ships a small, weight-free Python worker, not Kokoro, Python packages, model weights, or voices. Install Python `>=3.10,<3.14` and `kokoro-onnx`/`soundfile` yourself, and provide local model and voices files:
 
 ```ts
 import { defineConfig, kokoro, kokoroTTS } from "demohunter";
@@ -164,7 +164,19 @@ export default defineConfig({
 });
 ```
 
-The bundled worker is the default and launches `python3` with literal arguments and no shell. A compatible external DemoHunter JSONL adapter can instead use the minimal command shape `kokoro({ runtime: "command", executable: "kokoro" })`. Its protocol-v1 ready message must report stable model and voices SHA-256 digests plus the backend version, so cache identity remains portable without host asset paths. Full command configuration keeps paths separate from argv:
+The bundled worker is the default and launches `python3` with literal arguments and no shell. A compatible external DemoHunter JSONL adapter can instead use the exact command-mode configuration:
+
+```ts
+import { defineConfig, kokoro } from "demohunter";
+
+export default defineConfig({
+  baseURL: "http://localhost:3000",
+  providers: { tts: [kokoro({ runtime: "command", executable: "kokoro" })] },
+  tts: { provider: "kokoro", voice: "en_us_male_1", language: "en-US" },
+});
+```
+
+The executable must implement DemoHunter's JSONL protocol; it is not assumed to be an upstream Kokoro CLI. Its protocol-v1 ready message must report stable model and voices SHA-256 digests plus the backend version, so cache identity remains portable without host asset paths. Full command configuration keeps paths separate from argv:
 
 ```ts
 kokoro({
@@ -177,6 +189,7 @@ kokoro({
 ```
 
 Kokoro produces ffmpeg-compatible WAV at 24 kHz. Supported language settings are `en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, and `zh`. Run `npx demohunter doctor` before generating. DemoHunter hashes the model, voices, backend version, and worker protocol into cache identity; executable paths are never written into portable cache metadata.
+If `backendVersion` is configured, it must exactly match the version string in the worker's ready message. Leave it unset unless you deliberately want version pinning.
 
 ## Output
 

@@ -8,7 +8,7 @@ This guide walks through installing DemoHunter, scaffolding a starter tour, and 
 - `ffmpeg` and `ffprobe` on your `PATH`
 - A Playwright Chromium runtime (installed once: `npx playwright install chromium`)
 - `OPENAI_API_KEY` or `ELEVENLABS_API_KEY` only when generating uncached narration
-- For local Kokoro only: Python 3, separately installed `kokoro-onnx` and `soundfile`, plus user-provided model and voices files
+- For local Kokoro only: Python `>=3.10,<3.14`, separately installed `kokoro-onnx` and `soundfile`, plus user-provided model and voices files
 
 ## Install
 
@@ -122,7 +122,6 @@ export default defineConfig({
       pythonCommand: "python3",
       modelPath: "/opt/kokoro/kokoro-v1.0.onnx",
       voicesPath: "/opt/kokoro/voices-v1.0.bin",
-      backendVersion: "kokoro-onnx",
     })],
   },
   tts: kokoroTTS({ voice: "af_heart", language: "en-US" }),
@@ -133,7 +132,19 @@ Run `npx demohunter doctor`. It checks only the selected provider, including the
 
 Exact Kokoro languages are `en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, and `zh`. Kokoro output is always WAV at 24 kHz so ffmpeg can mux it directly.
 
-A separately installed compatible adapter may instead use `kokoro({ runtime: "command", executable: "kokoro" })` with no host asset paths. The adapter must identify its model and voices by SHA-256 and report its backend version in the protocol-v1 ready message. DemoHunter stores only those semantic digests in portable cache metadata.
+A separately installed compatible adapter may instead use command mode with no host asset paths:
+
+```ts
+import { defineConfig, kokoro } from "demohunter";
+
+export default defineConfig({
+  baseURL: "http://localhost:3000",
+  providers: { tts: [kokoro({ runtime: "command", executable: "kokoro" })] },
+  tts: { provider: "kokoro", voice: "en_us_male_1", language: "en-US" },
+});
+```
+
+That executable must implement DemoHunter's JSONL protocol; it is not assumed to be an upstream Kokoro CLI. The adapter must identify its model and voices by SHA-256 and report its backend version in the protocol-v1 ready message. DemoHunter stores only those semantic digests in portable cache metadata. If `backendVersion` is configured, it must be the exact version string reported by that ready message; omit it unless you intentionally want to pin the installed backend.
 
 On the first asset-backed run, DemoHunter hashes model and voices content and writes a local identity sidecar. Cache keys also include backend and protocol versions. A fully cached rerun can resolve offline from the verified sidecar even when assets are temporarily unavailable; a cache miss still requires both files. With files present, a corrupt sidecar is replaced from verified hashes. Executable and asset paths do not enter portable narration metadata.
 

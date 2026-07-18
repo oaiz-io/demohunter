@@ -1,13 +1,13 @@
 # Phase 2: Kokoro TTS Research
 
 **Completed:** 2026-07-18  
-**Status:** Ready for planning
+**Status:** Implemented
 
 ## Recommendation
 
-Add Kokoro as an opt-in local provider behind a small TypeScript adapter and a user-provisioned external worker. Use a long-lived, line-delimited JSON (JSONL) protocol over stdin/stdout; let the worker write a 24 kHz WAV to a caller-controlled staging path; return the file through the existing `NarrationSynthesisOutput` `{ kind: "file" }` seam. DemoHunter must not install Python, download models or voices, or bundle weights. Missing runtime dependencies or assets should fail with actionable setup diagnostics.
+Kokoro-82M is an Apache-2.0 open-weight model with 82 million parameters, nine supported language settings, and a reported TTS Arena Elo of 1424. Add it as an opt-in local provider behind a small TypeScript adapter and a user-provisioned external worker. Use a long-lived, line-delimited JSON (JSONL) protocol over stdin/stdout; let the worker write a 24 kHz WAV to a caller-controlled staging path; return the file through the existing `NarrationSynthesisOutput` `{ kind: "file" }` seam. DemoHunter must not install Python, download models or voices, or bundle weights. Missing runtime dependencies or assets should fail with actionable setup diagnostics.
 
-The initial reference path should use the official Python `kokoro` package and `KPipeline`. Keep the wire protocol backend-neutral so a user can substitute `kokoro-onnx` without changing `tts-core` or generator orchestration.
+The implemented reference worker uses `kokoro-onnx` because its explicit ONNX model and voices files fit DemoHunter's no-download generation boundary. The official Python `kokoro` package and `KPipeline` remain a valid user-owned adapter option, but they are not invoked by the bundled worker. The wire protocol stays backend-neutral so either runtime can be substituted without changing `tts-core` or generator orchestration.
 
 ## Execution Choice
 
@@ -54,16 +54,15 @@ Planning therefore needs a `kokoro` provider/config branch, a worker lifecycle a
 
 ## Installation and Ownership
 
-For the official backend, document these user-owned prerequisites:
+For DemoHunter's bundled reference worker, document these user-owned prerequisites:
 
-- Python `>=3.10,<3.13` (the published `kokoro` 0.9.4 constraint).
-- The Python `kokoro` package and `soundfile`.
-- Platform installation of `espeak-ng`.
-- Locally available model and voice assets appropriate to the selected backend.
+- Python `>=3.10,<3.14` (the current `kokoro-onnx` package constraint).
+- Separately installed `kokoro-onnx` and `soundfile` Python packages.
+- Locally available ONNX model and voices assets appropriate to the selected backend.
 
 DemoHunter should only validate these prerequisites (for example through `doctor`/worker preflight). It must never run `pip`, a package manager, Hugging Face download, or an asset installer during `generate`. No weights or voices should be committed to or published with the npm workspace.
 
-`kokoro-onnx` is a viable alternate worker implementation, but it still requires its Python package, `soundfile`, and user-supplied/downloaded ONNX model plus voices assets. Its asset-explicit workflow fits the no-implicit-download boundary, while the official Python pipeline remains the preferred documented reference because it is maintained with Kokoro itself.
+The official `kokoro` 0.9.4 backend instead requires Python `>=3.10,<3.13`, the `kokoro` and `soundfile` packages, and platform `espeak-ng` support. It can be exposed through a compatible external DemoHunter worker, but any package or asset acquisition must happen before `generate` and remain under user control.
 
 ## Piper Comparison
 
