@@ -27,6 +27,7 @@ export type CookieBannerMiddleware = {
 };
 
 export const COOKIE_BANNER_RULESET_VERSION = 1;
+const COOKIE_BANNER_ACTION_TIMEOUT_MS = 250;
 
 /**
  * Built-in selectors are deliberately scoped to recognizable vendor containers. Broad text
@@ -106,7 +107,15 @@ export async function dismissCookieBanner(
   const rules = options.rules ?? COOKIE_BANNER_RULES;
 
   do {
-    const dismissal = await scanFrames(page.frames(), config.action, rules, options.suppressActivity);
+    const actionDeadline = now() + COOKIE_BANNER_ACTION_TIMEOUT_MS;
+    const actionTimeoutMs = () => Math.max(1, actionDeadline - now());
+    const dismissal = await scanFrames(
+      page.frames(),
+      config.action,
+      rules,
+      actionTimeoutMs,
+      options.suppressActivity,
+    );
 
     if (dismissal !== undefined) {
       return dismissal;
@@ -116,6 +125,7 @@ export async function dismissCookieBanner(
       page.frames(),
       config.action,
       config.additionalSelectors,
+      actionTimeoutMs,
       options.suppressActivity,
     );
 
@@ -160,6 +170,7 @@ async function scanFrames(
   frames: readonly Frame[],
   action: CookieDismissAction,
   rules: readonly CookieBannerRule[],
+  actionTimeoutMs: () => number,
   suppressActivity?: <T>(action: () => Promise<T>) => Promise<T>,
 ): Promise<CookieBannerDismissal | undefined> {
   for (const frame of frames) {
@@ -182,6 +193,7 @@ async function scanFrames(
         const clickedSelector = await clickFirstVisible(
           container,
           [...(actionSelectors ?? []), ...(rule.dismissSelectors ?? [])],
+          actionTimeoutMs,
           suppressActivity,
         );
 
@@ -199,6 +211,7 @@ async function scanAdditionalSelectors(
   frames: readonly Frame[],
   action: CookieDismissAction,
   selectors: readonly string[],
+  actionTimeoutMs: () => number,
   suppressActivity?: <T>(action: () => Promise<T>) => Promise<T>,
 ): Promise<CookieBannerDismissal | undefined> {
   for (const frame of frames) {
@@ -209,10 +222,17 @@ async function scanAdditionalSelectors(
         continue;
       }
 
-      if (action === "hide") {
-        await runSuppressed(suppressActivity, () => locator.evaluate((element) => element.remove()));
-      } else {
-        await runSuppressed(suppressActivity, () => locator.click());
+      try {
+        if (action === "hide") {
+          await runSuppressed(suppressActivity, () => locator.evaluate(
+            (element) => element.remove(),
+            { timeout: actionTimeoutMs() },
+          ));
+        } else {
+          await runSuppressed(suppressActivity, () => locator.click({ timeout: actionTimeoutMs() }));
+        }
+      } catch {
+        continue;
       }
 
       return { action, ruleId: "user-additional-selector", selector };
@@ -225,6 +245,7 @@ async function scanAdditionalSelectors(
 async function clickFirstVisible(
   container: Locator,
   selectors: readonly string[],
+  actionTimeoutMs: () => number,
   suppressActivity?: <T>(action: () => Promise<T>) => Promise<T>,
 ): Promise<string | undefined> {
   for (const selector of selectors) {
@@ -238,7 +259,7 @@ async function clickFirstVisible(
     }
 
     try {
-      await runSuppressed(suppressActivity, () => locator.click());
+      await runSuppressed(suppressActivity, () => locator.click({ timeout: actionTimeoutMs() }));
       return selector;
     } catch {
       // The banner may detach or navigate while it is being inspected; continue to the next

@@ -101,6 +101,23 @@ describe("cookie banner middleware", () => {
     expect(await page.locator("#application-secondary").getAttribute("data-clicked")).toBeNull();
   });
 
+  test("bounds actionability waits for a visible but disabled vendor button", async () => {
+    await page.setContent(`
+      <div id="onetrust-banner-sdk">
+        <button id="onetrust-reject-all-handler" disabled>Reject</button>
+      </div>
+    `);
+    const startedAt = Date.now();
+
+    const result = await dismissCookieBanner(page, {
+      ...config("reject"),
+      timeoutMs: 0,
+    });
+
+    expect(result).toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
   test("hide removes only the matched vendor container and backdrop", async () => {
     await page.setContent(`
       <div class="onetrust-pc-dark-filter"></div>
