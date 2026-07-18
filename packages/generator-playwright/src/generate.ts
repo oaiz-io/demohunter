@@ -179,9 +179,11 @@ export async function generateTour(
     const showCursor = config.record.cursor === false
       ? false
       : (config.record.cursor === undefined ? (config.record.showCursor ?? true) : true);
-    const showClickRipple = typeof config.record.cursor === "object"
-      ? config.record.cursor.ripple
-      : (config.record.showClickRipple ?? true);
+    const showClickRipple = config.record.cursor === false
+      ? false
+      : (typeof config.record.cursor === "object"
+          ? config.record.cursor.ripple
+          : (config.record.showClickRipple ?? true));
 
     await resolvedDependencies.installRecordingEffects(passTwoContext, {
       cursor: config.record.cursor,

@@ -145,9 +145,11 @@ export function createRecordingEffectsSuppressor(
         record.cursor === false
           ? false
           : (record.cursor === undefined ? (record.showCursor ?? true) : true),
-        typeof record.cursor === "object"
-          ? record.cursor.ripple
-          : (record.showClickRipple ?? true),
+        record.cursor === false
+          ? false
+          : (typeof record.cursor === "object"
+              ? record.cursor.ripple
+              : (record.showClickRipple ?? true)),
       );
     }
   };

@@ -184,7 +184,7 @@ describe("loadConfig", () => {
       showClickRipple: false,
       highlightStyle: "spotlight",
       cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
-      cursor: false,
+      cursor: undefined,
     });
   });
 
@@ -261,7 +261,10 @@ describe("loadConfig", () => {
       export default { baseURL: "http://localhost:4173", record: { showClickRipple: false } };
     `);
 
-    expect((await loadConfig(hiddenCwd)).config.record.cursor).toBe(false);
+    const hidden = await loadConfig(hiddenCwd);
+    expect(hidden.config.record.cursor).toBeUndefined();
+    expect(hidden.config.record.showCursor).toBe(false);
+    expect(hidden.config.record.showClickRipple).toBe(true);
     expect((await loadConfig(noRippleCwd)).config.record.cursor).toEqual({
       ...DEFAULT_CURSOR_CONFIG,
       ripple: false,

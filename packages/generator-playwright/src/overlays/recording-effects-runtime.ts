@@ -74,6 +74,11 @@ export function installRecordingEffectsRuntime(flags: RecordingEffectsFlags): vo
           ? flags.cursor.ripple
           : (flags.showClickRipple ?? DEFAULT_CURSOR.ripple),
       };
+  const rippleEnabled = flags.cursor === false
+    ? false
+    : (typeof flags.cursor === "object"
+        ? flags.cursor.ripple
+        : (flags.showClickRipple ?? DEFAULT_CURSOR.ripple));
   const CURSOR_ID = "demohunter-cursor";
   const RING_ID = "demohunter-highlight-ring";
   const SPOTLIGHT_ID = "demohunter-spotlight";
@@ -91,7 +96,7 @@ export function installRecordingEffectsRuntime(flags: RecordingEffectsFlags): vo
     rippleEnabled: boolean;
   } = {
     cursorEnabled: resolvedCursor !== false,
-    rippleEnabled: resolvedCursor !== false && resolvedCursor.ripple,
+    rippleEnabled,
   };
 
   const root = (): HTMLElement => document.body ?? document.documentElement;

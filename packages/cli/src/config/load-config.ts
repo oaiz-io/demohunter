@@ -75,8 +75,15 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
 function resolveCursorConfig(
   record: DemoHunterUserConfig["record"],
 ): ResolvedDemoHunterConfig["record"]["cursor"] {
-  if (record?.cursor === false || (record?.cursor === undefined && record?.showCursor === false)) {
+  if (record?.cursor === false) {
     return false;
+  }
+
+  // Preserve the legacy ability to hide the custom cursor while retaining an
+  // independently configured click ripple. An explicit cursor:false uses the
+  // new semantics and disables the entire cursor system.
+  if (record?.cursor === undefined && record?.showCursor === false) {
+    return undefined;
   }
 
   if (record?.cursor !== undefined) {

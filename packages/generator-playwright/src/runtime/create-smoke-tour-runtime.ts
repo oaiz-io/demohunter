@@ -219,6 +219,7 @@ export function createSmokeTourRuntime(args: {
         : { x: box.x + options.position.x, y: box.y + options.position.y };
       const cursor = args.config.record.cursor;
       const cursorConfig = cursor === false
+        || (cursor === undefined && args.config.record.showCursor === false)
         ? false
         : {
             ...DEFAULT_CURSOR_CONFIG,

@@ -176,13 +176,34 @@ describe("installRecordingEffectsRuntime", () => {
     expect(dom.createdCount()).toBe(afterFirst);
   });
 
-  test("does not create the cursor when showCursor is false", () => {
+  test("preserves a legacy click ripple when showCursor is false", () => {
     const dom = createFakeDom();
     withFakeDom(dom);
 
     installRecordingEffectsRuntime({ showCursor: false, showClickRipple: true });
 
     expect(dom.document.getElementById("demohunter-cursor")).toBeNull();
+    dom.dispatch("click", { clientX: 50, clientY: 75 });
+    expect(dom.document.body.children.some(
+      (child) => child.className === "demohunter-click-ripple",
+    )).toBe(true);
+  });
+
+  test("disables both cursor and ripple when cursor is explicitly false", () => {
+    const dom = createFakeDom();
+    withFakeDom(dom);
+
+    installRecordingEffectsRuntime({
+      cursor: false,
+      showCursor: true,
+      showClickRipple: true,
+    });
+    dom.dispatch("click", { clientX: 50, clientY: 75 });
+
+    expect(dom.document.getElementById("demohunter-cursor")).toBeNull();
+    expect(dom.document.body.children.some(
+      (child) => child.className === "demohunter-click-ripple",
+    )).toBe(false);
   });
 
   test("moves the cursor on mousemove and shows it", () => {
