@@ -40,7 +40,7 @@
     },
     "packages/cli": {
       "name": "demohunter",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "bin": {
         "demohunter": "./dist/bin/demohunter.js",
       },
@@ -52,6 +52,9 @@
         "@demohunter/generator-playwright": "workspace:*",
         "@demohunter/sdk": "workspace:*",
         "@demohunter/tts-core": "workspace:*",
+        "@demohunter/tts-elevenlabs": "workspace:*",
+        "@demohunter/tts-kokoro": "workspace:*",
+        "@demohunter/tts-openai": "workspace:*",
         "playwright": ">=1.61",
         "tsup": "^8.5.1",
         "typescript": "^5.9.3",
@@ -68,8 +71,6 @@
         "@demohunter/media-ffmpeg": "workspace:*",
         "@demohunter/sdk": "workspace:*",
         "@demohunter/tts-core": "workspace:*",
-        "@demohunter/tts-elevenlabs": "workspace:*",
-        "@demohunter/tts-openai": "workspace:*",
         "playwright": ">=1.61",
       },
     },

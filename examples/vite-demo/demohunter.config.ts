@@ -9,4 +9,6 @@ export default defineConfig({
   record: {
     showActions: false,
   },
+  // Kokoro remains opt-in: add a kokoro(...) descriptor with explicit local model/voices
+  // and set tts: kokoroTTS(...) after importing both helpers from "demohunter".
 });

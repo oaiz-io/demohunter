@@ -8,6 +8,7 @@ This guide walks through installing DemoHunter, scaffolding a starter tour, and 
 - `ffmpeg` and `ffprobe` on your `PATH`
 - A Playwright Chromium runtime (installed once: `npx playwright install chromium`)
 - `OPENAI_API_KEY` or `ELEVENLABS_API_KEY` only when generating uncached narration
+- For local Kokoro only: Python 3, separately installed `kokoro-onnx` and `soundfile`, plus user-provided model and voices files
 
 ## Install
 
@@ -106,6 +107,33 @@ export default {
 ```
 
 Use `tts.language` for the demo's narration language, with ISO 639-1 codes such as `sv` for Swedish. Use `narrate("...", { voice: "other-voice-id", language: "sv" })` or `narrateWhile(...)` options when a single segment should use a different voice, model, format, language, or ElevenLabs voice settings. DemoHunter does not infer narration language from locale environment variables such as `DEMO_LOCALE`.
+
+### Use Kokoro locally
+
+Install the runtime and assets separately; DemoHunter never downloads or bundles them. The recommended configuration uses DemoHunter's weight-free bundled Python worker:
+
+```ts
+import { defineConfig, kokoro, kokoroTTS } from "demohunter";
+
+export default defineConfig({
+  baseURL: "http://localhost:3000",
+  providers: {
+    tts: [kokoro({
+      pythonCommand: "python3",
+      modelPath: "/opt/kokoro/kokoro-v1.0.onnx",
+      voicesPath: "/opt/kokoro/voices-v1.0.bin",
+      backendVersion: "kokoro-onnx",
+    })],
+  },
+  tts: kokoroTTS({ voice: "af_heart", language: "en-US" }),
+});
+```
+
+Run `npx demohunter doctor`. It checks only the selected provider, including the Python/executable path, model and voices files, dependency startup, JSONL protocol/version handshake, selected language, and the fixed WAV/24 kHz contract. The worker is sequential, receives Unicode JSON, supports cancellation/timeouts, and is terminated on failures. Custom adapters use `runtime: "command"`, an executable, and literal `args`; no shell parses them.
+
+Exact Kokoro languages are `en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, and `zh`. Kokoro output is always WAV at 24 kHz so ffmpeg can mux it directly.
+
+On the first asset-backed run, DemoHunter hashes model and voices content and writes a local identity sidecar. Cache keys also include backend and protocol versions. A fully cached rerun can resolve offline from the verified sidecar even when assets are temporarily unavailable; a cache miss still requires both files. With files present, a corrupt sidecar is replaced from verified hashes. Executable and asset paths do not enter portable narration metadata.
 
 ## Polish and social outputs
 

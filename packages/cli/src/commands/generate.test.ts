@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import os from "node:os";
 import path from "node:path";
 
-import { DEFAULT_DEMOHUNTER_CONFIG, DEFAULT_RECORD_CONFIG, DEFAULT_TTS_CONFIG } from "../../../sdk/src/index.js";
-import { generateCommand } from "./generate.js";
+import {
+  DEFAULT_DEMOHUNTER_CONFIG,
+  DEFAULT_KOKORO_TTS_CONFIG,
+  DEFAULT_RECORD_CONFIG,
+  DEFAULT_TTS_CONFIG,
+} from "../../../sdk/src/index.js";
+import type { NarrationProviderPlugin } from "../../../tts-core/src/index.js";
+import { generateCommand, locateBundledKokoroWorker } from "./generate.js";
 
 const tempRoots: string[] = [];
 
@@ -119,6 +126,11 @@ describe("generateCommand", () => {
     expect(generateTour).toHaveBeenCalledTimes(1);
     expect(generateTour.mock.calls[0]?.[0]).toEqual({
       loadedConfig: makeLoadedConfig(cwd),
+      narrationRegistry: expect.objectContaining({
+        close: expect.any(Function),
+        register: expect.any(Function),
+        resolve: expect.any(Function),
+      }),
       onProgress: expect.any(Function),
       tourFile: {
         path: tourPath,
@@ -336,7 +348,186 @@ describe("generateCommand", () => {
       }),
     ).rejects.toThrow("page.goto: Timeout 30000ms exceeded.");
   });
+
+  test("registers Kokoro with literal command arguments and closes the invocation registry", async () => {
+    const cwd = await makeTempProject();
+    const createKokoroPlugin = mock((options) => makePlugin("kokoro"));
+    const close = mock(async () => {});
+    const loadedConfig = {
+      ...makeLoadedConfig(cwd),
+      config: {
+        ...makeLoadedConfig(cwd).config,
+        providers: {
+          tts: [{
+            name: "kokoro",
+            options: {
+              runtime: "command" as const,
+              executable: "/opt/kokoro;touch /tmp/pwned",
+              args: ["--literal=$(touch nope)", "voice;rm -rf nope"],
+              modelPath: "/models/kokoro.onnx",
+              voicesPath: "/models/voices.bin",
+            },
+          }],
+        },
+        tts: DEFAULT_KOKORO_TTS_CONFIG,
+      },
+    };
+
+    await generateCommand(cwd, "demos/sample.tour.ts", {
+      createKokoroPlugin,
+      generateTour: async ({ narrationRegistry }) => {
+        expect(narrationRegistry?.names()).toEqual(["openai", "elevenlabs", "kokoro"]);
+        return { outputDir: "out", videoPath: "out/video.mp4" };
+      },
+      loadConfig: async () => loadedConfig,
+      log: () => {},
+      createRegistry: () => {
+        const plugins = new Map<string, NarrationProviderPlugin>();
+        return {
+          register(plugin) { plugins.set(plugin.name, plugin); return this; },
+          resolve(name) { const plugin = plugins.get(name); if (!plugin) throw new Error("missing"); return plugin; },
+          has(name) { return plugins.has(name); },
+          names() { return [...plugins.keys()]; },
+          close,
+        };
+      },
+    });
+
+    expect(createKokoroPlugin).toHaveBeenCalledWith(expect.objectContaining({
+      executable: "/opt/kokoro;touch /tmp/pwned",
+      args: ["--literal=$(touch nope)", "voice;rm -rf nope"],
+    }));
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledWith(undefined);
+  });
+
+  test("keeps the generation error primary when provider cleanup also fails", async () => {
+    const cwd = await makeTempProject();
+    const generationError = new Error("generation failed");
+    const cleanupError = new Error("cleanup failed");
+
+    try {
+      await generateCommand(cwd, "demos/sample.tour.ts", {
+        createOpenAIPlugin: () => ({ ...makePlugin("openai"), close: async () => { throw cleanupError; } }),
+        generateTour: async () => { throw generationError; },
+        loadConfig: async () => makeLoadedConfig(cwd),
+        log: () => {},
+      });
+      throw new Error("expected generateCommand to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors).toEqual([generationError, cleanupError]);
+      expect((error as Error).cause).toBe(generationError);
+    }
+  });
+
+  test("closes a partially initialized registry when a built-in plugin factory fails", async () => {
+    const cwd = await makeTempProject();
+    const factoryError = new Error("factory failed");
+    const close = mock(async (primaryError?: unknown) => { if (primaryError) throw primaryError; });
+
+    await expect(generateCommand(cwd, "demos/sample.tour.ts", {
+      createOpenAIPlugin: () => { throw factoryError; },
+      createRegistry: () => ({
+        register() { return this; },
+        resolve() { throw new Error("unused"); },
+        has() { return false; },
+        names() { return []; },
+        close,
+      }),
+      loadConfig: async () => makeLoadedConfig(cwd),
+      log: () => {},
+    })).rejects.toBe(factoryError);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledWith(factoryError);
+  });
+
+  test("resolves authored Kokoro filesystem paths against the loaded project root", async () => {
+    const cwd = await makeTempProject();
+    const createKokoroPlugin = mock(() => makePlugin("kokoro"));
+    const loadedConfig = {
+      ...makeLoadedConfig(cwd),
+      config: {
+        ...makeLoadedConfig(cwd).config,
+        providers: { tts: [{
+          name: "kokoro",
+          options: {
+            runtime: "command" as const,
+            executable: "./bin/kokoro-worker",
+            cwd: "runtime",
+            modelPath: "models/kokoro.onnx",
+            voicesPath: "models/voices.bin",
+          },
+        }] },
+        tts: DEFAULT_KOKORO_TTS_CONFIG,
+      },
+    };
+
+    await generateCommand(cwd, "demos/sample.tour.ts", {
+      createKokoroPlugin,
+      generateTour: async () => ({ outputDir: "out", videoPath: "out/video.mp4" }),
+      loadConfig: async () => loadedConfig,
+      log: () => {},
+    });
+
+    expect(createKokoroPlugin).toHaveBeenCalledWith(expect.objectContaining({
+      executable: path.join(cwd, "bin/kokoro-worker"),
+      cwd: path.join(cwd, "runtime"),
+      modelPath: path.join(cwd, "models/kokoro.onnx"),
+      voicesPath: path.join(cwd, "models/voices.bin"),
+    }));
+  });
+
+  test("discovers the bundled worker from source, dist library, and dist bin layouts", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "demohunter-worker-discovery-"));
+    tempRoots.push(root);
+    const worker = path.join(root, "dist", "workers", "demohunter_kokoro_worker.py");
+    await mkdir(path.dirname(worker), { recursive: true });
+    await writeFile(worker, "# worker\n");
+
+    expect(await locateBundledKokoroWorker(pathToFileURL(path.join(root, "dist", "index.js")).href)).toBe(worker);
+    expect(await locateBundledKokoroWorker(pathToFileURL(path.join(root, "dist", "bin", "demohunter.js")).href)).toBe(worker);
+
+    const sourceWorker = path.join(root, "packages", "tts-kokoro", "worker", "demohunter_kokoro_worker.py");
+    await mkdir(path.dirname(sourceWorker), { recursive: true });
+    await writeFile(sourceWorker, "# source worker\n");
+    expect(await locateBundledKokoroWorker(
+      pathToFileURL(path.join(root, "packages", "cli", "src", "commands", "generate.ts")).href,
+    )).toBe(sourceWorker);
+  });
+
+  test("rejects an authored descriptor without a CLI implementation", async () => {
+    const cwd = await makeTempProject();
+    const loadedConfig = {
+      ...makeLoadedConfig(cwd),
+      config: {
+        ...makeLoadedConfig(cwd).config,
+        providers: { tts: [{ name: "acme-local", options: {} }] },
+        tts: { ...DEFAULT_TTS_CONFIG, provider: "acme-local" },
+      },
+    };
+
+    await expect(generateCommand(cwd, "demos/sample.tour.ts", {
+      loadConfig: async () => loadedConfig,
+      log: () => {},
+    })).rejects.toThrow('Narration provider descriptor "acme-local" has no installed CLI implementation');
+  });
 });
+
+function makePlugin(name: string): NarrationProviderPlugin {
+  return {
+    name,
+    capabilities: {
+      offlineSynthesis: name === "kokoro",
+      languages: "provider-defined",
+      outputFormats: "provider-defined",
+      sampleRates: "provider-defined",
+      instructions: "provider-defined",
+    },
+    prepareRequest: (request) => request,
+    synthesize: async () => { throw new Error("not used"); },
+  };
+}
 
 async function makeTempProject(): Promise<string> {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "demohunter-generate-command-"));

@@ -43,6 +43,10 @@ bun x tsc -b tsconfig.json --pretty false
 
 Use the repo's existing package scripts when they already wrap the CLI. DemoHunter does not start the app for you.
 
+`demohunter doctor` checks only the selected narration provider. For Kokoro it validates the configured executable/Python runtime, model and voices files, dependency startup, worker protocol/version, language, and WAV/24 kHz contract. It never installs packages, downloads weights, or synthesizes narration.
+
+Local Kokoro uses a fresh CLI-owned provider registry per generation. The default bundled worker is a weight-free Python adapter; `runtime: "command"` is for a compatible external DemoHunter JSONL worker. Commands and argv stay separate and no shell participates.
+
 ## Output Expectations
 
 A successful generate run writes portable artifacts under `.demohunter/<tour-id>/`, including:
@@ -57,3 +61,4 @@ A successful generate run writes portable artifacts under `.demohunter/<tour-id>
 
 If narration is used, the output also includes exported audio assets and reuses cached narration when available.
 Multi-format output uses manifest v2. Without format requests, the portable v1 layout remains unchanged.
+Kokoro cache identity includes model/voices content, backend version, and protocol version—not executable or asset paths. A verified identity sidecar permits fully cached offline resolution; uncached synthesis still requires both assets.

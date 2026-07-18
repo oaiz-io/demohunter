@@ -59,12 +59,12 @@
     "playwright": ">=1.61"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/sync-kokoro-worker.mjs",
     "build:tsc": "tsc -p tsconfig.json",
     "clean:package-docs": "node scripts/clean-package-docs.mjs",
     "link:global": "bun run build && npm link",
     "postpack": "node scripts/clean-package-docs.mjs",
-    "prepack": "node scripts/sync-package-docs.mjs",
+    "prepack": "node scripts/sync-package-docs.mjs && node scripts/sync-kokoro-worker.mjs",
     "unlink:global": "npm unlink -g demohunter",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "bun run build"
@@ -73,6 +73,9 @@
     "@demohunter/generator-playwright": "workspace:*",
     "@demohunter/sdk": "workspace:*",
     "@demohunter/tts-core": "workspace:*",
+    "@demohunter/tts-elevenlabs": "workspace:*",
+    "@demohunter/tts-kokoro": "workspace:*",
+    "@demohunter/tts-openai": "workspace:*",
     "playwright": ">=1.61",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"

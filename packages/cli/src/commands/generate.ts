@@ -1,13 +1,25 @@
+import { access } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { generateTour, smokeGenerate } from "@demohunter/generator-playwright";
 import type { GenerationProgressEvent } from "@demohunter/generator-playwright";
+import {
+  createNarrationProviderRegistry,
+  type NarrationProviderPlugin,
+  type NarrationProviderRegistry,
+} from "@demohunter/tts-core";
+import { createElevenLabsNarrationProviderPlugin } from "@demohunter/tts-elevenlabs";
+import { kokoro as createKokoroNarrationProviderPlugin, type KokoroPluginOptions } from "@demohunter/tts-kokoro";
+import { createOpenAINarrationProviderPlugin } from "@demohunter/tts-openai";
 import {
   DEFAULT_COOKIE_BANNER_CONFIG,
   DEFAULT_CURSOR_CONFIG,
   resolveOutputFormatRequests,
   type DemoHunterTour,
   type GenerateOverrides,
+  type KokoroProviderOptions,
+  type NarrationProviderDescriptor,
   type ResolvedDemoHunterConfig,
 } from "@demohunter/sdk";
 
@@ -24,6 +36,11 @@ type GenerateDependencies = {
   loadConfig: typeof loadConfig;
   log: (message: string) => void;
   smokeGenerate: typeof smokeGenerate;
+  createRegistry: () => NarrationProviderRegistry;
+  createOpenAIPlugin: () => NarrationProviderPlugin;
+  createElevenLabsPlugin: () => NarrationProviderPlugin;
+  createKokoroPlugin: (options: KokoroPluginOptions) => NarrationProviderPlugin;
+  locateBundledWorker: (moduleUrl?: string) => Promise<string>;
 };
 
 export type GenerateCommandOptions = {
@@ -40,6 +57,11 @@ const defaultDependencies: GenerateDependencies = {
   loadConfig,
   log: console.log,
   smokeGenerate,
+  createRegistry: createNarrationProviderRegistry,
+  createOpenAIPlugin: createOpenAINarrationProviderPlugin,
+  createElevenLabsPlugin: createElevenLabsNarrationProviderPlugin,
+  createKokoroPlugin: createKokoroNarrationProviderPlugin,
+  locateBundledWorker: locateBundledKokoroWorker,
 };
 
 export async function generateCommand(
@@ -58,14 +80,25 @@ export async function generateCommand(
   };
   const resolvedTourPath = path.resolve(cwd, tourPath);
   let loadedConfig: Awaited<ReturnType<typeof loadConfig>> | undefined;
+  let narrationRegistry: NarrationProviderRegistry | undefined;
+  let primaryError: unknown;
 
   try {
+    narrationRegistry = resolvedDependencies.createRegistry();
+    narrationRegistry.register(resolvedDependencies.createOpenAIPlugin());
+    narrationRegistry.register(resolvedDependencies.createElevenLabsPlugin());
     resolvedDependencies.log(formatProgress({ phase: "loading-config", message: "Loading demohunter.config.ts" }));
     loadedConfig = await resolvedDependencies.loadConfig(cwd);
     loadedConfig = {
       ...loadedConfig,
       config: applyGenerateOverrides(loadedConfig.config, toGenerateOverrides(options)),
     };
+    await registerAuthoredNarrationProviders(
+      narrationRegistry,
+      loadedConfig.config.providers?.tts ?? [],
+      resolvedDependencies,
+      loadedConfig.projectRoot,
+    );
     resolvedDependencies.log(formatProgress({ phase: "loading-tour", message: `Loading ${tourPath}` }));
     const tourModule = await resolvedDependencies.importModule(resolvedTourPath);
     const tourFile = {
@@ -89,6 +122,7 @@ export async function generateCommand(
 
     const result = await resolvedDependencies.generateTour({
       loadedConfig,
+      narrationRegistry,
       onProgress,
       tourFile: {
         path: resolvedTourPath,
@@ -98,12 +132,142 @@ export async function generateCommand(
 
     resolvedDependencies.log(`Generated video: ${result.videoPath}`);
   } catch (error) {
-    throw improveGenerateError({
+    primaryError = improveGenerateError({
       cwd,
       error,
       loadedConfig,
     });
+  } finally {
+    if (narrationRegistry === undefined) {
+      if (primaryError !== undefined) throw primaryError;
+    } else {
+      await narrationRegistry.close(primaryError);
+    }
   }
+}
+
+type ProviderLoaderDependencies = Pick<
+  GenerateDependencies,
+  "createKokoroPlugin" | "locateBundledWorker"
+>;
+
+export async function registerAuthoredNarrationProviders(
+  registry: NarrationProviderRegistry,
+  descriptors: readonly NarrationProviderDescriptor[],
+  dependencies: ProviderLoaderDependencies = defaultDependencies,
+  projectRoot = process.cwd(),
+): Promise<void> {
+  for (const descriptor of descriptors) {
+    if (descriptor.name !== "kokoro") {
+      throw new Error(
+        `Narration provider descriptor ${JSON.stringify(descriptor.name)} has no installed CLI implementation. Install a CLI plugin that implements it or remove the descriptor.`,
+      );
+    }
+
+    registry.register(dependencies.createKokoroPlugin(
+      await resolveKokoroPluginOptions(
+        descriptor.options as KokoroProviderOptions,
+        dependencies.locateBundledWorker,
+        projectRoot,
+      ),
+    ));
+  }
+}
+
+export async function resolveKokoroPluginOptions(
+  options: KokoroProviderOptions,
+  locateBundledWorker: (moduleUrl?: string) => Promise<string> = locateBundledKokoroWorker,
+  projectRoot = process.cwd(),
+): Promise<KokoroPluginOptions> {
+  const modelPath = resolveAuthoredFilesystemPath(
+    requireKokoroAssetPath(options.modelPath, "model"),
+    projectRoot,
+  );
+  const voicesPath = resolveAuthoredFilesystemPath(
+    requireKokoroAssetPath(options.voicesPath, "voices"),
+    projectRoot,
+  );
+
+  if (options.runtime === "command") {
+    return {
+      ...options,
+      executable: resolveAuthoredCommand(options.executable, projectRoot),
+      ...(options.cwd === undefined ? {} : { cwd: resolveAuthoredFilesystemPath(options.cwd, projectRoot) }),
+      modelPath,
+      voicesPath,
+      args: [...(options.args ?? [])],
+    };
+  }
+
+  const workerPath = options.workerPath === undefined
+    ? await locateBundledWorker()
+    : resolveAuthoredFilesystemPath(options.workerPath, projectRoot);
+  const {
+    pythonCommand = "python3",
+    pythonArgs = [],
+    workerPath: _workerPath,
+    runtime: _runtime,
+    ...commonOptions
+  } = options;
+
+  return {
+    ...commonOptions,
+    runtime: "command",
+    executable: resolveAuthoredCommand(pythonCommand, projectRoot),
+    ...(commonOptions.cwd === undefined
+      ? {}
+      : { cwd: resolveAuthoredFilesystemPath(commonOptions.cwd, projectRoot) }),
+    args: [
+      ...pythonArgs,
+      workerPath,
+      "--model",
+      modelPath,
+      "--voices",
+      voicesPath,
+    ],
+    modelPath,
+    voicesPath,
+  };
+}
+
+export function resolveAuthoredFilesystemPath(value: string, projectRoot: string): string {
+  return path.isAbsolute(value) ? path.normalize(value) : path.resolve(projectRoot, value);
+}
+
+export function resolveAuthoredCommand(value: string, projectRoot: string): string {
+  return path.isAbsolute(value) || value.includes("/") || value.includes("\\")
+    ? resolveAuthoredFilesystemPath(value, projectRoot)
+    : value;
+}
+
+export async function locateBundledKokoroWorker(moduleUrl = import.meta.url): Promise<string> {
+  const moduleDirectory = path.dirname(fileURLToPath(moduleUrl));
+  const candidates = [
+    path.resolve(moduleDirectory, "workers/demohunter_kokoro_worker.py"),
+    path.resolve(moduleDirectory, "../workers/demohunter_kokoro_worker.py"),
+    path.resolve(moduleDirectory, "../../../tts-kokoro/worker/demohunter_kokoro_worker.py"),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Continue through source, library-dist, and bin-dist layouts.
+    }
+  }
+
+  throw new Error(
+    `Bundled Kokoro worker was not found. Checked: ${candidates.join(", ")}. Reinstall DemoHunter; model weights are never bundled or downloaded.`,
+  );
+}
+
+function requireKokoroAssetPath(value: string | undefined, label: "model" | "voices"): string {
+  if (value?.trim()) return value;
+  const field = label === "model" ? "modelPath" : "voicesPath";
+  throw new Error(
+    `Kokoro ${label} file missing from config. Set providers.tts[].options.${field} to your local ${label} file; DemoHunter never downloads Kokoro assets.`,
+  );
 }
 
 function isGenerateCommandOptions(

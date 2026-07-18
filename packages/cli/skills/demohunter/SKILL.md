@@ -26,6 +26,8 @@ Use this skill when you need to create or update a DemoHunter `.tour.ts` file in
 - Use `sleep(ms)` inside `narrateWhile(...)` when an action should happen at a specific moment in the voiceover.
 - Prefer editing the existing tour shape and selectors over rewriting the file unless the current file is clearly broken.
 - After changes, run repo-local verification from the closest consumer root instead of assuming the tour is valid.
+- Treat narration providers as config-owned plugins. OpenAI remains the default; local Kokoro requires an explicit `kokoro(...)` descriptor and user-owned runtime/assets.
+- Never install or download Kokoro, model weights, or voices while authoring a tour. Use `demohunter doctor` to report setup problems.
 
 ## Deliverable
 

@@ -1,7 +1,12 @@
 import { describe, expect, mock, test } from "bun:test";
 import path from "node:path";
 
-import { DEFAULT_DEMOHUNTER_CONFIG, DEFAULT_RECORD_CONFIG, DEFAULT_TTS_CONFIG } from "../../../sdk/src/index.js";
+import {
+  DEFAULT_DEMOHUNTER_CONFIG,
+  DEFAULT_KOKORO_TTS_CONFIG,
+  DEFAULT_RECORD_CONFIG,
+  DEFAULT_TTS_CONFIG,
+} from "../../../sdk/src/index.js";
 import { doctorCommand } from "./doctor.js";
 
 describe("doctorCommand", () => {
@@ -122,7 +127,101 @@ describe("doctorCommand", () => {
     expect(ffmpeg?.status).toBe("fail");
     expect(ffmpeg?.message).toBe("missing ffmpeg");
   });
+
+  test("reports an actionable missing Kokoro executable without an irrelevant OpenAI warning", async () => {
+    const log = mock(() => {});
+
+    await expect(doctorCommand("/tmp/project", {
+      ...passingDoctorDependencies(),
+      accessPath: mock(async () => {}),
+      checkCommand: mock(async (command) => {
+        if (command === "which") throw new Error("not found");
+      }),
+      loadConfig: async () => makeKokoroLoadedConfig("/tmp/project", {
+        runtime: "command",
+        executable: "kokoro",
+        modelPath: "/models/kokoro.onnx",
+        voicesPath: "/models/voices.bin",
+      }),
+      log,
+    })).rejects.toThrow("Doctor found failing checks.");
+
+    const parsed = JSON.parse(String(log.mock.calls[0]?.[0])) as {
+      checks: Array<{ name: string; message: string }>;
+    };
+    expect(parsed.checks.find((check) => check.name === "kokoro executable")?.message)
+      .toContain("kokoro executable not found");
+    expect(parsed.checks.some((check) => check.name === "OPENAI_API_KEY")).toBe(false);
+  });
+
+  test("reports the exact missing model and voices configuration", async () => {
+    const log = mock(() => {});
+
+    await expect(doctorCommand("/tmp/project", {
+      ...passingDoctorDependencies(),
+      accessPath: mock(async () => {}),
+      loadConfig: async () => makeKokoroLoadedConfig("/tmp/project", {
+        runtime: "command",
+        executable: "kokoro",
+      }),
+      log,
+    })).rejects.toThrow("Doctor found failing checks.");
+
+    const parsed = JSON.parse(String(log.mock.calls[0]?.[0])) as {
+      checks: Array<{ name: string; message: string }>;
+    };
+    expect(parsed.checks.find((check) => check.name === "kokoro model")?.message).toContain("model file missing");
+    expect(parsed.checks.find((check) => check.name === "kokoro voices")?.message).toContain("voices file missing");
+  });
+
+  test("uses a bounded no-synthesis protocol probe for a valid Kokoro selection", async () => {
+    const log = mock(() => {});
+    const probeKokoroWorker = mock(async () => {});
+    const accessPath = mock(async () => {});
+
+    await doctorCommand("/tmp/project", {
+      ...passingDoctorDependencies(),
+      accessPath,
+      loadConfig: async () => makeKokoroLoadedConfig("/tmp/project", {
+        runtime: "command",
+        executable: "kokoro",
+        args: ["--literal=$(never-executed)"],
+        modelPath: "models/kokoro.onnx",
+        voicesPath: "models/voices.bin",
+      }),
+      log,
+      probeKokoroWorker,
+    });
+
+    const parsed = JSON.parse(String(log.mock.calls[0]?.[0])) as {
+      ok: boolean;
+      checks: Array<{ name: string; status: string }>;
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.checks.find((check) => check.name === "kokoro protocol/version/language/WAV 24k")?.status).toBe("pass");
+    expect(probeKokoroWorker).toHaveBeenCalledWith(expect.objectContaining({
+      executable: "kokoro",
+      args: ["--literal=$(never-executed)"],
+      modelPath: "/tmp/project/models/kokoro.onnx",
+      voicesPath: "/tmp/project/models/voices.bin",
+    }));
+    expect(accessPath).toHaveBeenCalledWith("/tmp/project/models/kokoro.onnx");
+    expect(accessPath).toHaveBeenCalledWith("/tmp/project/models/voices.bin");
+  });
 });
+
+function passingDoctorDependencies() {
+  return {
+    checkCommand: mock(async () => {}),
+    fetch: mock(async () => new Response("ok", { status: 200 })) as never,
+    getPlaywrightVersion: () => "1.61.0",
+    playwright: {
+      chromium: { launch: mock(async () => ({ close: mock(async () => {}) })) } as never,
+      firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) } as never,
+      webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) } as never,
+    },
+  };
+}
 
 function makeLoadedConfig(cwd: string) {
   return {
@@ -137,6 +236,26 @@ function makeLoadedConfig(cwd: string) {
       holdPaddingMs: DEFAULT_DEMOHUNTER_CONFIG.holdPaddingMs,
       record: DEFAULT_RECORD_CONFIG,
       tts: DEFAULT_TTS_CONFIG,
+    },
+  };
+}
+
+function makeKokoroLoadedConfig(
+  cwd: string,
+  options: {
+    runtime: "command";
+    executable: string;
+    args?: readonly string[];
+    modelPath?: string;
+    voicesPath?: string;
+  },
+) {
+  return {
+    ...makeLoadedConfig(cwd),
+    config: {
+      ...makeLoadedConfig(cwd).config,
+      providers: { tts: [{ name: "kokoro" as const, options }] },
+      tts: DEFAULT_KOKORO_TTS_CONFIG,
     },
   };
 }

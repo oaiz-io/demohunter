@@ -79,8 +79,9 @@ Inspect `demohunter.config.ts` before editing:
 - `record.cookieBanners` is disabled by default and can reject, accept, or hide recognized vendor banners before authored `beforeRecord` runs.
 - `record.container` selects MP4/WebM; legacy `record.format` remains accepted. `output.formats` requests standard, square, responsive mobile, or GIF distribution variants.
 - Set `record.showActions: false` for polished videos when Playwright action labels or locator text would distract from the product UI.
-- `tts.provider` is either `openai` or `elevenlabs`; `tts.language` accepts ISO 639-1 language codes and can steer language/accent. ElevenLabs receives it as `language_code`; OpenAI receives it through voice instructions.
+- `tts.provider` is provider-neutral. Built-ins are `openai`, `elevenlabs`, and opt-in local `kokoro`; OpenAI remains the default. ElevenLabs receives `tts.language` as `language_code`; OpenAI receives it through voice instructions.
 - ElevenLabs voices are configured by voice ID and optional `voiceSettings`.
+- Kokoro requires `providers.tts: [kokoro(...)]` plus `tts: kokoroTTS(...)`. It supports `en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, and `zh`, and always produces WAV at 24 kHz. Do not download its separately owned runtime, model, or voices.
 
 Treat config as an input to the tour. Do not duplicate config values inside the tour unless the repo already does that intentionally.
 

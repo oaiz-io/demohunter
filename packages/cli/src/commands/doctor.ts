@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -6,8 +6,19 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import * as playwright from "playwright";
+import {
+  KOKORO_LANGUAGES,
+  parseReadyMessage,
+  type KokoroPluginOptions,
+} from "@demohunter/tts-kokoro";
+import type { KokoroProviderDescriptor, ResolvedDemoHunterConfig } from "@demohunter/sdk";
 
 import { loadConfig } from "../config/load-config.js";
+import {
+  resolveAuthoredCommand,
+  resolveAuthoredFilesystemPath,
+  resolveKokoroPluginOptions,
+} from "./generate.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -56,6 +67,9 @@ type DoctorDependencies = {
   loadConfig: typeof loadConfig;
   log: (message: string) => void;
   playwright: Pick<typeof playwright, "chromium" | "firefox" | "webkit">;
+  accessPath: typeof access;
+  resolveKokoroOptions: typeof resolveKokoroPluginOptions;
+  probeKokoroWorker: typeof probeKokoroWorker;
 };
 
 const defaultDependencies: DoctorDependencies = {
@@ -67,6 +81,9 @@ const defaultDependencies: DoctorDependencies = {
   loadConfig,
   log: console.log,
   playwright,
+  accessPath: access,
+  resolveKokoroOptions: resolveKokoroPluginOptions,
+  probeKokoroWorker,
 };
 
 export async function doctorCommand(
@@ -119,19 +136,19 @@ export async function doctorCommand(
     });
   }
 
-  checks.push(
-    process.env.OPENAI_API_KEY
-      ? {
-          name: "OPENAI_API_KEY",
-          status: "pass",
-          message: "OPENAI_API_KEY is set for uncached narration",
-        }
-      : {
-          name: "OPENAI_API_KEY",
-          status: "warn",
-          message: "OPENAI_API_KEY is not set; generation still works when narration is fully cached",
-        },
-  );
+  if (loadedConfig?.config.tts.provider === "openai") {
+    checks.push(credentialCheck("OPENAI_API_KEY"));
+  } else if (loadedConfig?.config.tts.provider === "elevenlabs") {
+    checks.push(credentialCheck("ELEVENLABS_API_KEY"));
+  } else if (loadedConfig?.config.tts.provider === "kokoro") {
+    await addKokoroChecks(checks, loadedConfig.config, resolvedDependencies, loadedConfig.projectRoot);
+  } else if (loadedConfig !== undefined) {
+    checks.push({
+      name: "narration provider",
+      status: "fail",
+      message: `Narration provider ${JSON.stringify(loadedConfig.config.tts.provider)} has no installed CLI implementation.`,
+    });
+  }
 
   if (loadedConfig !== undefined) {
     await runCheck(checks, "playwright browser", async () => {
@@ -189,6 +206,154 @@ export async function doctorCommand(
 
   if (!summary.ok) {
     throw new Error("Doctor found failing checks.");
+  }
+}
+
+function credentialCheck(name: "OPENAI_API_KEY" | "ELEVENLABS_API_KEY"): DoctorCheck {
+  return process.env[name]
+    ? { name, status: "pass", message: `${name} is set for uncached narration` }
+    : { name, status: "warn", message: `${name} is not set; generation still works when narration is fully cached` };
+}
+
+async function addKokoroChecks(
+  checks: DoctorCheck[],
+  config: ResolvedDemoHunterConfig,
+  dependencies: DoctorDependencies,
+  projectRoot: string,
+): Promise<void> {
+  const descriptors = config.providers?.tts.filter(
+    (descriptor): descriptor is KokoroProviderDescriptor => descriptor.name === "kokoro",
+  ) ?? [];
+
+  if (descriptors.length !== 1) {
+    checks.push({
+      name: "kokoro provider config",
+      status: "fail",
+      message: descriptors.length === 0
+        ? "Kokoro is selected but providers.tts has no kokoro(...) descriptor. DemoHunter never installs or downloads Kokoro."
+        : "Kokoro is configured more than once; keep exactly one kokoro(...) descriptor.",
+    });
+    return;
+  }
+
+  const authoredOptions = descriptors[0].options;
+  const authoredExecutable = authoredOptions.runtime === "command"
+    ? authoredOptions.executable
+    : authoredOptions.pythonCommand ?? "python3";
+  const executable = resolveAuthoredCommand(authoredExecutable, projectRoot);
+  const modelPath = authoredOptions.modelPath === undefined
+    ? undefined
+    : resolveAuthoredFilesystemPath(authoredOptions.modelPath, projectRoot);
+  const voicesPath = authoredOptions.voicesPath === undefined
+    ? undefined
+    : resolveAuthoredFilesystemPath(authoredOptions.voicesPath, projectRoot);
+  const executableReady = await runCheck(checks, "kokoro executable", async () => {
+    try {
+      if (path.isAbsolute(executable) || executable.includes("/") || executable.includes("\\")) {
+        await dependencies.accessPath(executable);
+      } else {
+        await dependencies.checkCommand(process.platform === "win32" ? "where" : "which", [executable]);
+      }
+    } catch (error) {
+      throw new Error(`kokoro executable not found: ${executable}. Install it separately or correct the configured command.`, { cause: error });
+    }
+    return { message: `${executable} is available without shell parsing`, value: true };
+  });
+  const modelReady = await runCheck(checks, "kokoro model", async () => {
+    if (!authoredOptions.modelPath?.trim()) {
+      throw new Error("model file missing from config: set providers.tts[].options.modelPath; DemoHunter never downloads model weights");
+    }
+    try {
+      await dependencies.accessPath(modelPath!);
+    } catch (error) {
+      throw new Error(`model file missing: ${modelPath}`, { cause: error });
+    }
+    return { message: `model file is readable: ${modelPath}`, value: true };
+  });
+  const voicesReady = await runCheck(checks, "kokoro voices", async () => {
+    if (!authoredOptions.voicesPath?.trim()) {
+      throw new Error("voices file missing from config: set providers.tts[].options.voicesPath; DemoHunter never downloads voice assets");
+    }
+    try {
+      await dependencies.accessPath(voicesPath!);
+    } catch (error) {
+      throw new Error(`voices file missing: ${voicesPath}`, { cause: error });
+    }
+    return { message: `voices file is readable: ${voicesPath}`, value: true };
+  });
+
+  if (executableReady && modelReady && voicesReady) {
+    await runCheck(checks, "kokoro protocol/version/language/WAV 24k", async () => {
+      const options = await dependencies.resolveKokoroOptions(authoredOptions, undefined, projectRoot);
+      if (config.tts.format !== "wav") {
+        throw new Error("Kokoro doctor requires WAV output for ffmpeg-compatible narration.");
+      }
+      const normalizedLanguage = config.tts.language?.trim().toLowerCase().replaceAll("_", "-");
+      if (normalizedLanguage === undefined || !KOKORO_LANGUAGES.includes(normalizedLanguage as never)) {
+        throw new Error(`Kokoro language ${JSON.stringify(config.tts.language)} is unsupported. Supported values: ${KOKORO_LANGUAGES.join(", ")}.`);
+      }
+      await dependencies.probeKokoroWorker(options);
+      return {
+        message: "Kokoro dependencies loaded; protocol/version handshake passed and selected language is configured for WAV at 24,000 Hz",
+      };
+    });
+  } else {
+    checks.push({
+      name: "kokoro protocol/version/language/WAV 24k",
+      status: "fail",
+      message: "Skipped until the Kokoro executable, model file, and voices file checks pass",
+    });
+  }
+}
+
+export async function probeKokoroWorker(options: KokoroPluginOptions): Promise<void> {
+  const stdout = await new Promise<string>((resolve, reject) => {
+    const child = spawn(options.executable, [...(options.args ?? [])], {
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      ...(options.env === undefined ? {} : { env: { ...options.env } }),
+    });
+    const maxBytes = 64 * 1024;
+    let output = "";
+    let stderr = "";
+    const timeoutMs = options.startupTimeoutMs ?? 30_000;
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`Kokoro worker protocol probe timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (Buffer.byteLength(output) < maxBytes) output += chunk.toString("utf8").slice(0, maxBytes - Buffer.byteLength(output));
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (Buffer.byteLength(stderr) < maxBytes) stderr += chunk.toString("utf8").slice(0, maxBytes - Buffer.byteLength(stderr));
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`Kokoro worker protocol probe exited with code ${code}.${stderr ? ` ${stderr.trim()}` : ""}`));
+      } else {
+        resolve(output);
+      }
+    });
+    child.stdin.end();
+  });
+  const readyLine = stdout.split(/\r?\n/).find((line) => line.trim() !== "");
+
+  if (readyLine === undefined) {
+    throw new Error("Kokoro worker did not emit its protocol ready message.");
+  }
+
+  const ready = parseReadyMessage(readyLine);
+  const expectedVersion = options.backendVersion ?? options.modelVersion;
+  if (expectedVersion !== undefined && ready.backendVersion !== expectedVersion) {
+    throw new Error(
+      `Kokoro worker backend version ${JSON.stringify(ready.backendVersion)} does not match required version ${JSON.stringify(expectedVersion)}.`,
+    );
   }
 }
 
