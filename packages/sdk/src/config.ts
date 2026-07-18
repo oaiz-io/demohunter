@@ -264,8 +264,8 @@ export function resolveOutputFormatRequests(
     }
     if (request.preset === "gif") {
       const durationMs = request.durationMs ?? 15_000;
-      if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 15_000) {
-        throw new Error("GIF durationMs must be a positive number no greater than 15000");
+      if (!Number.isInteger(durationMs) || durationMs <= 0 || durationMs > 15_000) {
+        throw new Error("GIF durationMs must be a positive integer no greater than 15000");
       }
       if (request.layout === "responsive") {
         throw new Error("The gif preset is derived from MP4 and supports only fit layout");

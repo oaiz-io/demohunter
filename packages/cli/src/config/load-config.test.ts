@@ -374,6 +374,9 @@ describe("loadConfig", () => {
     const tooLong = await writeConfig(`
       export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "gif", durationMs: 16000 }] } };
     `);
+    const fractionalDuration = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "gif", durationMs: 0.5 }] } };
+    `);
     const unknownPreset = await writeConfig(`
       export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "story" }] } };
     `);
@@ -384,6 +387,7 @@ describe("loadConfig", () => {
     expect((await loadConfig(preferred)).config.record.container).toBe("webm");
     await expect(loadConfig(duplicate)).rejects.toThrow("duplicate preset: square");
     await expect(loadConfig(tooLong)).rejects.toThrow("no greater than 15000");
+    await expect(loadConfig(fractionalDuration)).rejects.toThrow("must be a positive integer");
     await expect(loadConfig(unknownPreset)).rejects.toThrow(
       "Invalid output preset: story. Expected standard, square, mobile, or gif.",
     );

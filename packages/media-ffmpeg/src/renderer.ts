@@ -202,8 +202,8 @@ function validateRenderPlan(plan: MediaRenderPlan): void {
       continue;
     }
 
-    if (!Number.isFinite(transform.durationMs) || transform.durationMs <= 0 || transform.durationMs > 15_000) {
-      throw new Error("GIF durationMs must be a positive finite number no greater than 15000");
+    if (!Number.isInteger(transform.durationMs) || transform.durationMs <= 0 || transform.durationMs > 15_000) {
+      throw new Error("GIF durationMs must be a positive integer no greater than 15000");
     }
     if (transform.fps !== undefined && (!Number.isFinite(transform.fps) || transform.fps <= 0)) {
       throw new Error("GIF fps must be a positive finite number");

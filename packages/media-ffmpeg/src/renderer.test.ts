@@ -69,6 +69,10 @@ describe("createFFmpegMediaRenderer", () => {
     })).rejects.toThrow("no greater than 15000");
     await expect(renderer.render({
       ...gifPlan,
+      video: [{ kind: "gif", durationMs: 0.5 }],
+    })).rejects.toThrow("GIF durationMs must be a positive integer");
+    await expect(renderer.render({
+      ...gifPlan,
       video: [{ kind: "gif", durationMs: 1_000, fps: 0 }],
     })).rejects.toThrow("GIF fps must be a positive finite number");
     await expect(renderer.render({
