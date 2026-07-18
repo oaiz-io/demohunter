@@ -10,6 +10,7 @@ import {
   createRecordingEffectsSuppressor,
   type CookieBannerMiddleware,
 } from "../middleware/cookie-banner-middleware.js";
+import { createDeterministicRecordingClickHandler } from "../overlays/recording-effects-control.js";
 import { createSmokeLifecycleContext, createSmokeTourRuntime } from "../runtime/create-smoke-tour-runtime.js";
 import type { SmokeRuntime } from "../runtime/create-smoke-tour-runtime.js";
 import { resolveTypeTextAction } from "../runtime/type-text.js";
@@ -149,6 +150,7 @@ function createReplayRuntime(args: {
       );
     },
     config: args.config,
+    performClick: createDeterministicRecordingClickHandler(args.page, args.config.record),
     onEvent: (actualEvent) => {
       args.onRuntimeEvent?.(actualEvent);
       const expectedEntry = args.timeline.entries[args.getReplayPosition()];

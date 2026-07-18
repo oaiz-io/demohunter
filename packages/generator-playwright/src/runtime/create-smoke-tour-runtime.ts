@@ -59,6 +59,11 @@ export function createSmokeTourRuntime(args: {
   outputDir: string;
   afterNavigation?: () => Promise<void>;
   animateCursorTo?: (x: number, y: number, durationMs: number) => Promise<void>;
+  performClick?: (
+    target: Locator,
+    options: Parameters<Locator["click"]>[0],
+    destination: { x: number; y: number },
+  ) => Promise<void>;
   onEvent?: (event: SmokeTourRuntimeEvent) => void;
   waitForTimeout?: (durationMs: number) => Promise<void>;
 }): SmokeRuntime {
@@ -271,10 +276,16 @@ export function createSmokeTourRuntime(args: {
       }
 
       explicitCursorPosition = destination;
-      await target.click({
+      const clickOptions = {
         ...(options?.position === undefined ? {} : { position: options.position }),
         ...(options?.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
-      });
+      };
+
+      if (args.performClick === undefined) {
+        await target.click(clickOptions);
+      } else {
+        await args.performClick(target, clickOptions, destination);
+      }
     },
   };
 

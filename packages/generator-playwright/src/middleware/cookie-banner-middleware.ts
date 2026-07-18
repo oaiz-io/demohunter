@@ -1,6 +1,11 @@
 import type { CookieBannerConfig, CookieDismissAction, RecordConfig } from "@demohunter/sdk";
 import type { Frame, Locator, Page } from "playwright";
 
+import {
+  resolveRecordingEffectsState,
+  setRecordingEffectsEnabled,
+} from "../overlays/recording-effects-control.js";
+
 export type CookieBannerRule = {
   id: string;
   containerSelectors: readonly string[];
@@ -134,6 +139,8 @@ export function createRecordingEffectsSuppressor(
   page: Page,
   record: Pick<RecordConfig, "cursor" | "showCursor" | "showClickRipple">,
 ): <T>(action: () => Promise<T>) => Promise<T> {
+  const restoredState = resolveRecordingEffectsState(record);
+
   return async <T>(action: () => Promise<T>): Promise<T> => {
     await setRecordingEffectsEnabled(page, false, false);
 
@@ -142,14 +149,8 @@ export function createRecordingEffectsSuppressor(
     } finally {
       await setRecordingEffectsEnabled(
         page,
-        record.cursor === false
-          ? false
-          : (record.cursor === undefined ? (record.showCursor ?? true) : true),
-        record.cursor === false
-          ? false
-          : (typeof record.cursor === "object"
-              ? record.cursor.ripple
-              : (record.showClickRipple ?? true)),
+        restoredState.cursorEnabled,
+        restoredState.rippleEnabled,
       );
     }
   };
@@ -271,25 +272,4 @@ async function runSuppressed<T>(
   action: () => Promise<T>,
 ): Promise<T> {
   return suppressActivity === undefined ? action() : suppressActivity(action);
-}
-
-async function setRecordingEffectsEnabled(
-  page: Page,
-  cursorEnabled: boolean,
-  rippleEnabled: boolean,
-): Promise<void> {
-  await Promise.all(page.frames().map(async (frame) => {
-    try {
-      await frame.evaluate(
-        ([showCursor, showRipple]) => {
-          window.__demohunterEffects?.setCursorEnabled(showCursor);
-          window.__demohunterEffects?.setRippleEnabled(showRipple);
-        },
-        [cursorEnabled, rippleEnabled] as const,
-      );
-    } catch {
-      // Consent clicks can detach or navigate individual frames. The init script restores the
-      // configured effects in each next document, so a destroyed execution context is safe here.
-    }
-  }));
 }
