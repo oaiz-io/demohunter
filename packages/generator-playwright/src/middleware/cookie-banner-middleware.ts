@@ -278,16 +278,18 @@ async function setRecordingEffectsEnabled(
   cursorEnabled: boolean,
   rippleEnabled: boolean,
 ): Promise<void> {
-  try {
-    await page.evaluate(
-      ([showCursor, showRipple]) => {
-        window.__demohunterEffects?.setCursorEnabled(showCursor);
-        window.__demohunterEffects?.setRippleEnabled(showRipple);
-      },
-      [cursorEnabled, rippleEnabled] as const,
-    );
-  } catch {
-    // Consent clicks can navigate. The init script restores the configured effects on the next
-    // document, so a destroyed execution context is safe to ignore here.
-  }
+  await Promise.all(page.frames().map(async (frame) => {
+    try {
+      await frame.evaluate(
+        ([showCursor, showRipple]) => {
+          window.__demohunterEffects?.setCursorEnabled(showCursor);
+          window.__demohunterEffects?.setRippleEnabled(showRipple);
+        },
+        [cursorEnabled, rippleEnabled] as const,
+      );
+    } catch {
+      // Consent clicks can detach or navigate individual frames. The init script restores the
+      // configured effects in each next document, so a destroyed execution context is safe here.
+    }
+  }));
 }

@@ -4,6 +4,7 @@ import { chromium } from "playwright";
 
 import {
   createCookieBannerMiddleware,
+  createRecordingEffectsSuppressor,
   dismissCookieBanner,
 } from "./cookie-banner-middleware.js";
 
@@ -144,6 +145,48 @@ describe("cookie banner middleware", () => {
     });
 
     expect(order).toEqual(["suppress", "restore"]);
+  });
+
+  test("suppresses and restores recording effects in child frames", async () => {
+    await page.setContent('<iframe srcdoc="<p>embedded consent frame</p>"></iframe>');
+    await Promise.all(page.frames().map((frame) => frame.evaluate(() => {
+      const calls: Array<["cursor" | "ripple", boolean]> = [];
+      Object.assign(window, {
+        __demohunterEffectCalls: calls,
+        __demohunterEffects: {
+          setCursorEnabled: (enabled: boolean) => calls.push(["cursor", enabled]),
+          setRippleEnabled: (enabled: boolean) => calls.push(["ripple", enabled]),
+        },
+      });
+    })));
+
+    const suppress = createRecordingEffectsSuppressor(page, {
+      cursor: undefined,
+      showCursor: true,
+      showClickRipple: true,
+    });
+    await suppress(async () => undefined);
+
+    const frameCalls = await Promise.all(page.frames().map((frame) => frame.evaluate(() => (
+      window as Window & {
+        __demohunterEffectCalls: Array<["cursor" | "ripple", boolean]>;
+      }
+    ).__demohunterEffectCalls)));
+    expect(frameCalls).toHaveLength(2);
+    expect(frameCalls).toEqual([
+      [
+        ["cursor", false],
+        ["ripple", false],
+        ["cursor", true],
+        ["ripple", true],
+      ],
+      [
+        ["cursor", false],
+        ["ripple", false],
+        ["cursor", true],
+        ["ripple", true],
+      ],
+    ]);
   });
 });
 
