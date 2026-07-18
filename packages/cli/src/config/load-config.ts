@@ -12,6 +12,7 @@ import {
   resolveOutputFormatRequests,
 } from "@demohunter/sdk";
 import type {
+  CookieBannerConfig,
   DemoHunterUserConfig,
   ResolvedDemoHunterConfig,
 } from "@demohunter/sdk";
@@ -49,14 +50,7 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
       format: authoredConfig.record?.container
         ?? authoredConfig.record?.format
         ?? DEFAULT_RECORD_CONFIG.container,
-      cookieBanners: {
-        ...DEFAULT_COOKIE_BANNER_CONFIG,
-        ...authoredConfig.record?.cookieBanners,
-        additionalSelectors: [
-          ...(authoredConfig.record?.cookieBanners?.additionalSelectors
-            ?? DEFAULT_COOKIE_BANNER_CONFIG.additionalSelectors),
-        ],
-      },
+      cookieBanners: resolveCookieBannerConfig(authoredConfig.record?.cookieBanners),
       cursor: resolveCursorConfig(authoredConfig.record),
     },
     output: {
@@ -69,6 +63,50 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
     projectRoot,
     configPath,
     config,
+  };
+}
+
+function resolveCookieBannerConfig(
+  authoredConfig: Partial<CookieBannerConfig> | undefined,
+): CookieBannerConfig {
+  if (
+    authoredConfig !== undefined
+    && (typeof authoredConfig !== "object" || authoredConfig === null || Array.isArray(authoredConfig))
+  ) {
+    throw new Error("record.cookieBanners must be an object");
+  }
+
+  const enabled = authoredConfig?.enabled ?? DEFAULT_COOKIE_BANNER_CONFIG.enabled;
+  const action = authoredConfig?.action ?? DEFAULT_COOKIE_BANNER_CONFIG.action;
+  const timeoutMs = authoredConfig?.timeoutMs ?? DEFAULT_COOKIE_BANNER_CONFIG.timeoutMs;
+  const additionalSelectors = authoredConfig?.additionalSelectors
+    ?? DEFAULT_COOKIE_BANNER_CONFIG.additionalSelectors;
+
+  if (typeof enabled !== "boolean") {
+    throw new Error("record.cookieBanners.enabled must be a boolean");
+  }
+  if (action !== "reject" && action !== "accept" && action !== "hide") {
+    throw new Error(
+      `Invalid record.cookieBanners.action: ${String(action)}. Expected reject, accept, or hide.`,
+    );
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error("record.cookieBanners.timeoutMs must be a non-negative finite number");
+  }
+  if (
+    !Array.isArray(additionalSelectors)
+    || !additionalSelectors.every(
+      (selector): selector is string => typeof selector === "string" && selector.trim().length > 0,
+    )
+  ) {
+    throw new Error("record.cookieBanners.additionalSelectors must contain only non-empty strings");
+  }
+
+  return {
+    enabled,
+    action,
+    timeoutMs,
+    additionalSelectors: [...additionalSelectors],
   };
 }
 

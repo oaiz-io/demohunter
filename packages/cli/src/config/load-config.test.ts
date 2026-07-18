@@ -235,6 +235,33 @@ describe("loadConfig", () => {
     });
   });
 
+  test.each([
+    [
+      "action",
+      '{ enabled: true, action: "deny" }',
+      "Invalid record.cookieBanners.action: deny. Expected reject, accept, or hide.",
+    ],
+    [
+      "timeout",
+      "{ enabled: true, timeoutMs: -1 }",
+      "record.cookieBanners.timeoutMs must be a non-negative finite number",
+    ],
+    [
+      "selectors",
+      '{ enabled: true, additionalSelectors: ["  "] }',
+      "record.cookieBanners.additionalSelectors must contain only non-empty strings",
+    ],
+  ])("rejects invalid cookie banner %s configuration", async (_label, cookieBanners, message) => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: { cookieBanners: ${cookieBanners} }
+      };
+    `);
+
+    await expect(loadConfig(cwd)).rejects.toThrow(message);
+  });
+
   test("deep-merges explicit cursor settings", async () => {
     const cwd = await writeConfig(`
       export default {
