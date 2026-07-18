@@ -53,6 +53,7 @@ generate flags:
   --flow-only              Alias for --dry-run
   --cookie-dismiss <mode>  Dismiss recognized consent banners: reject, accept, or hide
   --no-cookie-dismiss      Disable cookie-banner automation for this run
+  --cursor <preset>        Cursor rendering: none, highlight, smooth, or ripple
 
 add-skill flags:
   --target <name>          Repeatable. One of: claude, codex, both.
@@ -164,6 +165,25 @@ export function parseGenerateArgs(args: readonly string[]): {
       continue;
     }
 
+    if (arg === "--cursor") {
+      assertCursorNotSet(options);
+      const value = args[index + 1];
+
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error("--cursor requires one of: none, highlight, smooth, ripple");
+      }
+
+      options.cursor = parseCursorPreset(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--cursor=")) {
+      assertCursorNotSet(options);
+      options.cursor = parseCursorPreset(arg.slice("--cursor=".length));
+      continue;
+    }
+
     if (arg.startsWith("-")) {
       throw new Error(`Unknown generate flag: ${arg}`);
     }
@@ -176,6 +196,20 @@ export function parseGenerateArgs(args: readonly string[]): {
   }
 
   return { options, tourPath };
+}
+
+function parseCursorPreset(value: string): "none" | "highlight" | "smooth" | "ripple" {
+  if (value === "none" || value === "highlight" || value === "smooth" || value === "ripple") {
+    return value;
+  }
+
+  throw new Error(`Invalid --cursor value: ${value}. Expected none, highlight, smooth, or ripple.`);
+}
+
+function assertCursorNotSet(options: GenerateCommandOptions): void {
+  if (options.cursor !== undefined) {
+    throw new Error("--cursor may only be provided once per generation.");
+  }
 }
 
 function parseCookieDismissAction(value: string): "reject" | "accept" | "hide" {

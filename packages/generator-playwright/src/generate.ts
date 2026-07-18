@@ -154,10 +154,15 @@ export async function generateTour(
       viewport: config.viewport,
     });
 
-    const showCursor = config.record.showCursor ?? true;
-    const showClickRipple = config.record.showClickRipple ?? true;
+    const showCursor = config.record.cursor === false
+      ? false
+      : (config.record.cursor === undefined ? (config.record.showCursor ?? true) : true);
+    const showClickRipple = typeof config.record.cursor === "object"
+      ? config.record.cursor.ripple
+      : (config.record.showClickRipple ?? true);
 
     await resolvedDependencies.installRecordingEffects(passTwoContext, {
+      cursor: config.record.cursor,
       showCursor,
       showClickRipple,
     });

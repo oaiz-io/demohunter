@@ -211,6 +211,7 @@ describe("defineTour", () => {
       highlight: async () => undefined,
       snapshot: async () => undefined,
       assertVisible: async () => undefined,
+      click: async () => undefined,
     };
     expectType<DemoHunterRunContext>(legacyRunContext);
 
@@ -232,6 +233,7 @@ describe("defineTour", () => {
       highlight: async () => undefined,
       snapshot: async () => undefined,
       assertVisible: async () => undefined,
+      click: async () => undefined,
     });
 
     await setup({ config, goto, page });
@@ -316,6 +318,7 @@ const legacyRunContext = {
   highlight: async () => undefined,
   snapshot: async () => undefined,
   assertVisible: async () => undefined,
+  click: async () => undefined,
 } satisfies DemoHunterRunContext;
 
 void legacyRunContext;

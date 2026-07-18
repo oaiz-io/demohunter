@@ -90,6 +90,34 @@ describe("runCli", () => {
     );
   });
 
+  test.each(["none", "highlight", "smooth", "ripple"] as const)(
+    "dispatches the %s cursor preset",
+    async (cursor) => {
+      const stubs = buildStubs();
+
+      await runCli([
+        "generate",
+        "demos/sample.tour.ts",
+        `--cursor=${cursor}`,
+      ], "/tmp/demo", stubs);
+
+      expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", {
+        cursor,
+      });
+    },
+  );
+
+  test("rejects invalid cursor presets", async () => {
+    await expect(runCli([
+      "generate",
+      "demos/sample.tour.ts",
+      "--cursor",
+      "teleport",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow(
+      "Invalid --cursor value: teleport",
+    );
+  });
+
   test("dispatches doctor", async () => {
     const stubs = buildStubs();
 

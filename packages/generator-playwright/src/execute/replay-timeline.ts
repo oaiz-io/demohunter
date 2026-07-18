@@ -140,6 +140,14 @@ function createReplayRuntime(args: {
 }): SmokeRuntime {
   const runtime = createSmokeTourRuntime({
     afterNavigation: args.afterNavigation,
+    animateCursorTo: async (x, y, durationMs) => {
+      await args.page.evaluate(
+        async ({ cursorX, cursorY, motionDurationMs }) => {
+          await window.__demohunterEffects?.moveCursorTo(cursorX, cursorY, motionDurationMs);
+        },
+        { cursorX: x, cursorY: y, motionDurationMs: durationMs },
+      );
+    },
     config: args.config,
     onEvent: (actualEvent) => {
       args.onRuntimeEvent?.(actualEvent);
@@ -319,6 +327,8 @@ function describeEvent(event: TourRuntimeEvent): string {
       return `narration "${event.text}" in chapter "${chapter}"`;
     case "narration-sleep":
       return `narration sleep ${event.durationMs}ms in chapter "${chapter}"`;
+    case "click":
+      return `click after ${event.durationMs}ms cursor motion in chapter "${chapter}"`;
     default:
       return `${event.kind} event in chapter "${chapter}"`;
   }

@@ -4,6 +4,7 @@ import { generateTour, smokeGenerate } from "@demohunter/generator-playwright";
 import type { GenerationProgressEvent } from "@demohunter/generator-playwright";
 import {
   DEFAULT_COOKIE_BANNER_CONFIG,
+  DEFAULT_CURSOR_CONFIG,
   type DemoHunterTour,
   type ResolvedDemoHunterConfig,
 } from "@demohunter/sdk";
@@ -27,6 +28,7 @@ export type GenerateCommandOptions = {
   dryRun?: boolean;
   flowOnly?: boolean;
   cookieDismiss?: false | "reject" | "accept" | "hide";
+  cursor?: "none" | "highlight" | "smooth" | "ripple";
 };
 
 const defaultDependencies: GenerateDependencies = {
@@ -104,14 +106,14 @@ export async function generateCommand(
 function isGenerateCommandOptions(
   value: GenerateCommandOptions | Partial<GenerateDependencies>,
 ): value is GenerateCommandOptions {
-  return "dryRun" in value || "flowOnly" in value || "cookieDismiss" in value;
+  return "dryRun" in value || "flowOnly" in value || "cookieDismiss" in value || "cursor" in value;
 }
 
 export function applyGenerateOverrides(
   config: ResolvedDemoHunterConfig,
   options: GenerateCommandOptions,
 ): ResolvedDemoHunterConfig {
-  if (options.cookieDismiss === undefined) {
+  if (options.cookieDismiss === undefined && options.cursor === undefined) {
     return config;
   }
 
@@ -119,13 +121,32 @@ export function applyGenerateOverrides(
     ...config,
     record: {
       ...config.record,
-      cookieBanners: {
-        ...DEFAULT_COOKIE_BANNER_CONFIG,
-        ...config.record.cookieBanners,
-        enabled: options.cookieDismiss !== false,
-        ...(options.cookieDismiss === false ? {} : { action: options.cookieDismiss }),
-      },
+      cookieBanners: options.cookieDismiss === undefined
+        ? config.record.cookieBanners
+        : {
+            ...DEFAULT_COOKIE_BANNER_CONFIG,
+            ...config.record.cookieBanners,
+            enabled: options.cookieDismiss !== false,
+            ...(options.cookieDismiss === false ? {} : { action: options.cookieDismiss }),
+          },
+      cursor: options.cursor === undefined
+        ? config.record.cursor
+        : resolveCursorOverride(options.cursor),
     },
+  };
+}
+
+function resolveCursorOverride(
+  preset: NonNullable<GenerateCommandOptions["cursor"]>,
+): ResolvedDemoHunterConfig["record"]["cursor"] {
+  if (preset === "none") {
+    return false;
+  }
+
+  return {
+    ...DEFAULT_CURSOR_CONFIG,
+    mode: preset === "highlight" ? "highlight" : "smooth",
+    ripple: preset === "ripple",
   };
 }
 

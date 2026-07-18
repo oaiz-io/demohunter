@@ -23,6 +23,7 @@ export async function showChapterOverlay({
       if (overlay === null) {
         overlay = document.createElement("div");
         overlay.id = overlayId;
+        overlay.setAttribute("data-demohunter-overlay", "");
         overlay.style.position = "fixed";
         overlay.style.top = "24px";
         overlay.style.left = "24px";

@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   DEFAULT_DEMOHUNTER_CONFIG,
   DEFAULT_COOKIE_BANNER_CONFIG,
+  DEFAULT_CURSOR_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
@@ -48,6 +49,7 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
             ?? DEFAULT_COOKIE_BANNER_CONFIG.additionalSelectors),
         ],
       },
+      cursor: resolveCursorConfig(authoredConfig.record),
     },
     tts: resolveTTSConfig(authoredConfig.tts),
   };
@@ -57,6 +59,48 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
     configPath,
     config,
   };
+}
+
+function resolveCursorConfig(
+  record: DemoHunterUserConfig["record"],
+): ResolvedDemoHunterConfig["record"]["cursor"] {
+  if (record?.cursor === false || (record?.cursor === undefined && record?.showCursor === false)) {
+    return false;
+  }
+
+  if (record?.cursor !== undefined) {
+    return validateCursorConfig({
+      ...DEFAULT_CURSOR_CONFIG,
+      ...record.cursor,
+    });
+  }
+
+  return validateCursorConfig({
+    ...DEFAULT_CURSOR_CONFIG,
+    ripple: record?.showClickRipple ?? DEFAULT_CURSOR_CONFIG.ripple,
+  });
+}
+
+function validateCursorConfig(
+  cursor: Exclude<ResolvedDemoHunterConfig["record"]["cursor"], false | undefined>,
+): Exclude<ResolvedDemoHunterConfig["record"]["cursor"], false | undefined> {
+  if (!Number.isFinite(cursor.sizePx) || cursor.sizePx <= 0) {
+    throw new Error("record.cursor.sizePx must be a positive finite number");
+  }
+  if (!Number.isFinite(cursor.minDurationMs) || cursor.minDurationMs < 0) {
+    throw new Error("record.cursor.minDurationMs must be a non-negative finite number");
+  }
+  if (!Number.isFinite(cursor.maxDurationMs) || cursor.maxDurationMs < cursor.minDurationMs) {
+    throw new Error("record.cursor.maxDurationMs must be finite and at least minDurationMs");
+  }
+  if (!Number.isFinite(cursor.pixelsPerMs) || cursor.pixelsPerMs <= 0) {
+    throw new Error("record.cursor.pixelsPerMs must be a positive finite number");
+  }
+  if (!Number.isFinite(cursor.arcHeightPx) || cursor.arcHeightPx < 0) {
+    throw new Error("record.cursor.arcHeightPx must be a non-negative finite number");
+  }
+
+  return cursor;
 }
 
 async function assertConfigExists(configPath: string, cwd: string): Promise<void> {

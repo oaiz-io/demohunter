@@ -3,6 +3,22 @@ import type { Locator, Page, Response } from "playwright";
 export type BrowserName = "chromium" | "firefox" | "webkit";
 export type RecordFormat = "mp4" | "webm";
 export type HighlightStyle = "ring" | "spotlight";
+export type CursorMode = "highlight" | "smooth";
+export type CursorShape = "dot" | "pointer";
+
+export type CursorOptions = {
+  mode: CursorMode;
+  shape: CursorShape;
+  color: string;
+  sizePx: number;
+  minDurationMs: number;
+  maxDurationMs: number;
+  pixelsPerMs: number;
+  arcHeightPx: number;
+  ripple: boolean;
+};
+
+export type CursorConfig = false | CursorOptions;
 export type CookieDismissAction = "reject" | "accept" | "hide";
 
 export type CookieBannerConfig = {
@@ -25,17 +41,20 @@ export type RecordConfig = {
   showCursor?: boolean;
   /** Render a ripple animation on clicks during the recording pass. Default: true */
   showClickRipple?: boolean;
+  cursor?: CursorConfig;
   /** Default highlight style applied when a tour omits a per-call style. Default: "ring" */
   highlightStyle?: HighlightStyle;
   cookieBanners?: CookieBannerConfig;
 };
 
-export type DemoHunterUserRecordConfig = Partial<Omit<RecordConfig, "cookieBanners">> & {
+export type DemoHunterUserRecordConfig = Partial<Omit<RecordConfig, "cookieBanners" | "cursor">> & {
   cookieBanners?: Partial<CookieBannerConfig>;
+  cursor?: false | Partial<CursorOptions>;
 };
 
 export type GenerateOverrides = {
   cookieDismiss?: false | CookieDismissAction;
+  cursor?: false | "highlight" | "smooth" | "ripple";
 };
 
 export type TTSProviderName = "openai" | "elevenlabs";
@@ -149,6 +168,12 @@ export type TypeTextOptions = {
   timeoutMs?: number;
 };
 
+export type DemoHunterClickOptions = {
+  position?: { x: number; y: number };
+  motion?: "smooth" | "instant";
+  timeoutMs?: number;
+};
+
 export type DemoHunterLifecycleContext = {
   config: ResolvedDemoHunterConfig;
   goto: DemoHunterGoto;
@@ -165,6 +190,11 @@ export type DemoHunterTypeText = (
   target: Locator,
   text: string,
   options?: TypeTextOptions,
+) => Promise<void>;
+
+export type DemoHunterClick = (
+  target: Locator,
+  options?: DemoHunterClickOptions,
 ) => Promise<void>;
 
 export type DemoHunterNarrationTimeline = {
@@ -212,6 +242,7 @@ export type DemoHunterRunContext<
   highlight: DemoHunterHighlight;
   snapshot: DemoHunterSnapshot;
   assertVisible: DemoHunterAssertVisible;
+  click: DemoHunterClick;
 };
 
 export type DemoHunterAuthorRunContext = DemoHunterRunContext<DemoHunterNarrateWhileTimeline>;
@@ -237,12 +268,25 @@ export const DEFAULT_COOKIE_BANNER_CONFIG: CookieBannerConfig = {
   additionalSelectors: [],
 };
 
+export const DEFAULT_CURSOR_CONFIG: CursorOptions = {
+  mode: "smooth",
+  shape: "pointer",
+  color: "#3b82f6",
+  sizePx: 20,
+  minDurationMs: 400,
+  maxDurationMs: 1200,
+  pixelsPerMs: 1.4,
+  arcHeightPx: 56,
+  ripple: true,
+};
+
 export const DEFAULT_RECORD_CONFIG: RecordConfig = {
   showActions: true,
   showChapters: true,
   format: "mp4",
   showCursor: true,
   showClickRipple: true,
+  cursor: DEFAULT_CURSOR_CONFIG,
   highlightStyle: "ring",
   cookieBanners: DEFAULT_COOKIE_BANNER_CONFIG,
 };

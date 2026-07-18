@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { installRecordingEffectsRuntime } from "./recording-effects-runtime.js";
+import {
+  calculateCursorDuration,
+  installRecordingEffectsRuntime,
+  quadraticBezierPoint,
+} from "./recording-effects-runtime.js";
 
 type FakeElement = {
   tagName: string;
@@ -10,8 +14,10 @@ type FakeElement = {
   style: Record<string, string>;
   children: FakeElement[];
   parent: FakeElement | null;
+  attributes: Record<string, string>;
   appendChild: (child: FakeElement) => FakeElement;
   remove: () => void;
+  setAttribute: (name: string, value: string) => void;
 };
 
 type Listener = (event: unknown) => void;
@@ -20,7 +26,10 @@ function createFakeDom() {
   const byId = new Map<string, FakeElement>();
   const listeners = new Map<string, Listener[]>();
   const timeouts: Array<() => void> = [];
+  const animationFrames = new Map<number, (timestamp: number) => void>();
   let created = 0;
+  let nextAnimationFrame = 1;
+  let clock = 0;
 
   const register = (element: FakeElement): void => {
     if (element.id) {
@@ -38,6 +47,7 @@ function createFakeDom() {
       style: {},
       children: [],
       parent: null,
+      attributes: {},
       appendChild(child: FakeElement): FakeElement {
         child.parent = element;
         element.children.push(child);
@@ -51,6 +61,9 @@ function createFakeDom() {
         if (element.id) {
           byId.delete(element.id);
         }
+      },
+      setAttribute(name: string, value: string): void {
+        element.attributes[name] = value;
       },
     };
     return element;
@@ -66,6 +79,7 @@ function createFakeDom() {
     head,
     documentElement,
     createElement,
+    createElementNS: (_namespace: string, tagName: string) => createElement(tagName),
     getElementById: (id: string): FakeElement | null => byId.get(id) ?? null,
     addEventListener: (type: string, listener: Listener): void => {
       const existing = listeners.get(type) ?? [];
@@ -75,6 +89,20 @@ function createFakeDom() {
   };
 
   const window = {
+    innerWidth: 1920,
+    innerHeight: 1080,
+    performance: {
+      now: () => clock,
+    },
+    requestAnimationFrame: (callback: (timestamp: number) => void): number => {
+      const id = nextAnimationFrame;
+      nextAnimationFrame += 1;
+      animationFrames.set(id, callback);
+      return id;
+    },
+    cancelAnimationFrame: (id: number): void => {
+      animationFrames.delete(id);
+    },
     setTimeout: (callback: () => void): number => {
       timeouts.push(callback);
       return timeouts.length;
@@ -93,6 +121,12 @@ function createFakeDom() {
       while (timeouts.length > 0) {
         timeouts.shift()?.();
       }
+    },
+    runAnimationFrame: (timestamp: number): void => {
+      clock = timestamp;
+      const callbacks = [...animationFrames.values()];
+      animationFrames.clear();
+      callbacks.forEach((callback) => callback(timestamp));
     },
     createdCount: (): number => created,
   };
@@ -120,11 +154,14 @@ describe("installRecordingEffectsRuntime", () => {
       | undefined;
     expect(typeof api?.setCursorEnabled).toBe("function");
     expect(typeof api?.setRippleEnabled).toBe("function");
+    expect(typeof api?.moveCursorTo).toBe("function");
     expect(typeof api?.showRing).toBe("function");
     expect(typeof api?.clearRing).toBe("function");
     expect(typeof api?.showSpotlight).toBe("function");
     expect(typeof api?.clearSpotlight).toBe("function");
     expect(dom.document.getElementById("demohunter-cursor")).not.toBeNull();
+    expect(dom.document.getElementById("demohunter-cursor")?.tagName).toBe("svg");
+    expect(dom.document.getElementById("demohunter-cursor")?.attributes["data-demohunter-overlay"]).toBe("");
     expect(dom.document.getElementById("demohunter-effects-style")).not.toBeNull();
   });
 
@@ -189,11 +226,67 @@ describe("installRecordingEffectsRuntime", () => {
     );
     expect(ripple?.style.left).toBe("50px");
     expect(ripple?.style.top).toBe("75px");
+    expect(ripple?.attributes["data-demohunter-overlay"]).toBe("");
 
     dom.runTimeouts();
     expect(
       dom.document.body.children.some((child) => child.className === "demohunter-click-ripple"),
     ).toBe(false);
+  });
+
+  test("calculates clamped motion durations and quadratic bezier points deterministically", () => {
+    const config = {
+      mode: "smooth" as const,
+      shape: "pointer" as const,
+      color: "#3b82f6",
+      sizePx: 20,
+      minDurationMs: 400,
+      maxDurationMs: 1200,
+      pixelsPerMs: 1,
+      arcHeightPx: 56,
+      ripple: true,
+    };
+
+    expect(calculateCursorDuration(10, config)).toBe(400);
+    expect(calculateCursorDuration(800, config)).toBe(800);
+    expect(calculateCursorDuration(5000, config)).toBe(1200);
+    expect(quadraticBezierPoint({ x: 0, y: 0 }, { x: 50, y: 50 }, { x: 100, y: 0 }, 0.5)).toEqual({
+      x: 50,
+      y: 25,
+    });
+  });
+
+  test("animates smooth cursor movement with requestAnimationFrame and lands exactly", async () => {
+    const dom = createFakeDom();
+    withFakeDom(dom);
+    installRecordingEffectsRuntime({
+      cursor: {
+        mode: "smooth",
+        shape: "pointer",
+        color: "#ef4444",
+        sizePx: 24,
+        minDurationMs: 400,
+        maxDurationMs: 1200,
+        pixelsPerMs: 1,
+        arcHeightPx: 80,
+        ripple: false,
+      },
+    });
+    const api = (dom.window as unknown as {
+      __demohunterEffects: { moveCursorTo: (x: number, y: number, duration?: number) => Promise<void> };
+    }).__demohunterEffects;
+
+    await api.moveCursorTo(100, 100);
+    const motion = api.moveCursorTo(500, 100, 400);
+    dom.runAnimationFrame(200);
+    const cursor = dom.document.getElementById("demohunter-cursor");
+    expect(cursor?.style.left).not.toBe("100px");
+    expect(cursor?.style.top).not.toBe("100px");
+    dom.runAnimationFrame(400);
+    await motion;
+
+    expect(cursor?.style.left).toBe("500px");
+    expect(cursor?.style.top).toBe("100px");
   });
 
   test("does not spawn a ripple when click ripple is disabled", () => {

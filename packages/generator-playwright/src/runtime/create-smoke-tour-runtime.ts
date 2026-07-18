@@ -1,3 +1,4 @@
+import { DEFAULT_CURSOR_CONFIG } from "@demohunter/sdk";
 import type {
   AssertVisibleOptions,
   ChapterOptions,
@@ -30,6 +31,7 @@ const LIFECYCLE_BLOCKED_HELPERS = new Set<PropertyKey>([
   "highlight",
   "snapshot",
   "assertVisible",
+  "click",
 ]);
 
 export function createSmokeLifecycleContext(runtime: SmokeRuntime): DemoHunterLifecycleContext {
@@ -56,10 +58,12 @@ export function createSmokeTourRuntime(args: {
   page: Page;
   outputDir: string;
   afterNavigation?: () => Promise<void>;
+  animateCursorTo?: (x: number, y: number, durationMs: number) => Promise<void>;
   onEvent?: (event: SmokeTourRuntimeEvent) => void;
   waitForTimeout?: (durationMs: number) => Promise<void>;
 }): SmokeRuntime {
   let currentChapter: string | undefined;
+  let explicitCursorPosition: { x: number; y: number } | undefined;
 
   const emit = (event: TourRuntimeEvent): void => {
     args.onEvent?.(event);
@@ -195,6 +199,64 @@ export function createSmokeTourRuntime(args: {
         chapterTitle: currentChapter,
         kind: "assert-visible",
         timeoutMs: options?.timeoutMs,
+      });
+    },
+    async click(target, options): Promise<void> {
+      await target.waitFor({ state: "visible" });
+      await target.scrollIntoViewIfNeeded();
+      const box = await target.boundingBox();
+
+      if (box === null) {
+        throw new Error("DemoHunter click target detached before its cursor destination could be measured.");
+      }
+
+      const destination = options?.position === undefined
+        ? { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+        : { x: box.x + options.position.x, y: box.y + options.position.y };
+      const cursor = args.config.record.cursor;
+      const cursorConfig = cursor === false
+        ? false
+        : {
+            ...DEFAULT_CURSOR_CONFIG,
+            ...(cursor ?? {}),
+            ripple: cursor?.ripple ?? args.config.record.showClickRipple ?? DEFAULT_CURSOR_CONFIG.ripple,
+          };
+      const shouldAnimate = cursorConfig !== false
+        && cursorConfig.mode === "smooth"
+        && options?.motion !== "instant"
+        && explicitCursorPosition !== undefined;
+      const distance = explicitCursorPosition === undefined
+        ? 0
+        : Math.hypot(
+            destination.x - explicitCursorPosition.x,
+            destination.y - explicitCursorPosition.y,
+          );
+      const durationMs = shouldAnimate
+        ? Math.round(Math.min(
+            cursorConfig.maxDurationMs,
+            Math.max(cursorConfig.minDurationMs, distance / cursorConfig.pixelsPerMs),
+          ))
+        : 0;
+
+      emit({
+        chapterTitle: currentChapter,
+        durationMs,
+        kind: "click",
+        ...(options?.motion === undefined ? {} : { motion: options.motion }),
+        ...(options?.position === undefined ? {} : { position: { ...options.position } }),
+        ...(options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      });
+
+      if (args.animateCursorTo !== undefined) {
+        await args.animateCursorTo(destination.x, destination.y, durationMs);
+      } else if (durationMs > 0) {
+        await (args.waitForTimeout ?? ((ms: number) => args.page.waitForTimeout(ms)))(durationMs);
+      }
+
+      explicitCursorPosition = destination;
+      await target.click({
+        ...(options?.position === undefined ? {} : { position: options.position }),
+        ...(options?.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
       });
     },
   };

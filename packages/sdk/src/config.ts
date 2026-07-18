@@ -1,6 +1,22 @@
 export type BrowserName = "chromium" | "firefox" | "webkit";
 export type RecordFormat = "mp4" | "webm";
 export type HighlightStyle = "ring" | "spotlight";
+export type CursorMode = "highlight" | "smooth";
+export type CursorShape = "dot" | "pointer";
+
+export type CursorOptions = {
+  mode: CursorMode;
+  shape: CursorShape;
+  color: string;
+  sizePx: number;
+  minDurationMs: number;
+  maxDurationMs: number;
+  pixelsPerMs: number;
+  arcHeightPx: number;
+  ripple: boolean;
+};
+
+export type CursorConfig = false | CursorOptions;
 export type CookieDismissAction = "reject" | "accept" | "hide";
 
 export type CookieBannerConfig = {
@@ -20,21 +36,27 @@ export type RecordConfig = {
   showChapters: boolean;
   format: RecordFormat;
   /** Render a custom DOM cursor in the recording pass. Default: true */
+  /** @deprecated Use cursor instead. */
   showCursor?: boolean;
   /** Render a ripple animation on clicks during the recording pass. Default: true */
+  /** @deprecated Use cursor.ripple instead. */
   showClickRipple?: boolean;
+  /** Configures the rendered cursor. Set false to use Playwright's native action cursor. */
+  cursor?: CursorConfig;
   /** Default highlight style applied when a tour omits a per-call style. Default: "ring" */
   highlightStyle?: HighlightStyle;
   /** Safely dismiss recognized vendor cookie banners before recording. Default: disabled. */
   cookieBanners?: CookieBannerConfig;
 };
 
-export type DemoHunterUserRecordConfig = Partial<Omit<RecordConfig, "cookieBanners">> & {
+export type DemoHunterUserRecordConfig = Partial<Omit<RecordConfig, "cookieBanners" | "cursor">> & {
   cookieBanners?: Partial<CookieBannerConfig>;
+  cursor?: false | Partial<CursorOptions>;
 };
 
 export type GenerateOverrides = {
   cookieDismiss?: false | CookieDismissAction;
+  cursor?: false | "highlight" | "smooth" | "ripple";
 };
 
 export type TTSProviderName = "openai" | "elevenlabs";
@@ -106,12 +128,25 @@ export const DEFAULT_COOKIE_BANNER_CONFIG: CookieBannerConfig = {
   additionalSelectors: [],
 };
 
+export const DEFAULT_CURSOR_CONFIG: CursorOptions = {
+  mode: "smooth",
+  shape: "pointer",
+  color: "#3b82f6",
+  sizePx: 20,
+  minDurationMs: 400,
+  maxDurationMs: 1200,
+  pixelsPerMs: 1.4,
+  arcHeightPx: 56,
+  ripple: true,
+};
+
 export const DEFAULT_RECORD_CONFIG: RecordConfig = {
   showActions: true,
   showChapters: true,
   format: "mp4",
   showCursor: true,
   showClickRipple: true,
+  cursor: DEFAULT_CURSOR_CONFIG,
   highlightStyle: "ring",
   cookieBanners: DEFAULT_COOKIE_BANNER_CONFIG,
 };

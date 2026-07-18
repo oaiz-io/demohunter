@@ -132,7 +132,7 @@ export async function dismissCookieBanner(
 
 export function createRecordingEffectsSuppressor(
   page: Page,
-  record: Pick<RecordConfig, "showCursor" | "showClickRipple">,
+  record: Pick<RecordConfig, "cursor" | "showCursor" | "showClickRipple">,
 ): <T>(action: () => Promise<T>) => Promise<T> {
   return async <T>(action: () => Promise<T>): Promise<T> => {
     await setRecordingEffectsEnabled(page, false, false);
@@ -142,8 +142,12 @@ export function createRecordingEffectsSuppressor(
     } finally {
       await setRecordingEffectsEnabled(
         page,
-        record.showCursor ?? true,
-        record.showClickRipple ?? true,
+        record.cursor === false
+          ? false
+          : (record.cursor === undefined ? (record.showCursor ?? true) : true),
+        typeof record.cursor === "object"
+          ? record.cursor.ripple
+          : (record.showClickRipple ?? true),
       );
     }
   };

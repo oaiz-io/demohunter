@@ -156,6 +156,7 @@ const legacyRunContext = {
   highlight: async () => undefined,
   snapshot: async () => undefined,
   assertVisible: async () => undefined,
+  click: async () => undefined,
 } satisfies DemoHunterRunContext;
 
 void legacyRunContext;

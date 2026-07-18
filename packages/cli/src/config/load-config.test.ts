@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   DEFAULT_DEMOHUNTER_CONFIG,
+  DEFAULT_CURSOR_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
@@ -90,6 +91,7 @@ describe("loadConfig", () => {
       showClickRipple: true,
       highlightStyle: "ring",
       cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: DEFAULT_CURSOR_CONFIG,
     });
   });
 
@@ -111,6 +113,7 @@ describe("loadConfig", () => {
       showClickRipple: true,
       highlightStyle: "ring",
       cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: DEFAULT_CURSOR_CONFIG,
     });
   });
 
@@ -148,6 +151,7 @@ describe("loadConfig", () => {
       showClickRipple: true,
       highlightStyle: "ring",
       cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: DEFAULT_CURSOR_CONFIG,
     });
   });
 
@@ -173,6 +177,7 @@ describe("loadConfig", () => {
       showClickRipple: false,
       highlightStyle: "spotlight",
       cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: false,
     });
   });
 
@@ -194,6 +199,7 @@ describe("loadConfig", () => {
       showClickRipple: true,
       highlightStyle: "spotlight",
       cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: DEFAULT_CURSOR_CONFIG,
     });
   });
 
@@ -219,6 +225,52 @@ describe("loadConfig", () => {
       timeoutMs: 750,
       additionalSelectors: ["[data-cookie-close]"],
     });
+  });
+
+  test("deep-merges explicit cursor settings", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: { cursor: { color: "#ef4444", shape: "dot", ripple: false } }
+      };
+    `);
+
+    const loaded = await loadConfig(cwd);
+
+    expect(loaded.config.record.cursor).toEqual({
+      ...DEFAULT_CURSOR_CONFIG,
+      color: "#ef4444",
+      shape: "dot",
+      ripple: false,
+    });
+  });
+
+  test("maps legacy cursor booleans into the new cursor config", async () => {
+    const hiddenCwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: { showCursor: false } };
+    `);
+    const noRippleCwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: { showClickRipple: false } };
+    `);
+
+    expect((await loadConfig(hiddenCwd)).config.record.cursor).toBe(false);
+    expect((await loadConfig(noRippleCwd)).config.record.cursor).toEqual({
+      ...DEFAULT_CURSOR_CONFIG,
+      ripple: false,
+    });
+  });
+
+  test("rejects unsafe cursor timing configuration", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: { cursor: { pixelsPerMs: 0 } }
+      };
+    `);
+
+    await expect(loadConfig(cwd)).rejects.toThrow(
+      "record.cursor.pixelsPerMs must be a positive finite number",
+    );
   });
 
   test.each([

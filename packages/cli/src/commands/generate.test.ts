@@ -41,6 +41,35 @@ describe("generateCommand", () => {
     expect(loadedConfig.config.record.cookieBanners?.enabled).toBe(false);
   });
 
+  test("resolves cursor presets as immutable generation overrides", async () => {
+    const cwd = await makeTempProject();
+    const loadedConfig = makeLoadedConfig(cwd);
+    const generateTour = mock(async () => ({
+      outputDir: path.join(cwd, ".demohunter/sample-smoke"),
+      videoPath: path.join(cwd, ".demohunter/sample-smoke/video.mp4"),
+    }));
+
+    await generateCommand(
+      cwd,
+      "demos/sample.tour.ts",
+      { cursor: "smooth" },
+      { generateTour, loadConfig: async () => loadedConfig, log: () => {} },
+    );
+
+    expect(generateTour.mock.calls[0]?.[0].loadedConfig.config.record.cursor).toEqual({
+      mode: "smooth",
+      shape: "pointer",
+      color: "#3b82f6",
+      sizePx: 20,
+      minDurationMs: 400,
+      maxDurationMs: 1200,
+      pixelsPerMs: 1.4,
+      arcHeightPx: 56,
+      ripple: false,
+    });
+    expect(loadedConfig.config.record.cursor).toEqual(DEFAULT_RECORD_CONFIG.cursor);
+  });
+
   test("loads the requested tour file and forwards a valid phase 3 tour to generateTour", async () => {
     const cwd = await makeTempProject();
     const tourPath = path.join(cwd, "demos", "sample.tour.ts");

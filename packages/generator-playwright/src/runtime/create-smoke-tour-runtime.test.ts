@@ -192,6 +192,59 @@ describe("createSmokeTourRuntime", () => {
     expect(calls).toEqual(["goto", "middleware"]);
   });
 
+  test("coordinates deterministic cursor motion before locator clicks", async () => {
+    const events: unknown[] = [];
+    const waits: number[] = [];
+    const first = {
+      boundingBox: mock(async () => ({ x: 0, y: 0, width: 100, height: 100 })),
+      click: mock(async () => {}),
+      scrollIntoViewIfNeeded: mock(async () => {}),
+      waitFor: mock(async () => {}),
+    };
+    const second = {
+      boundingBox: mock(async () => ({ x: 560, y: 0, width: 100, height: 100 })),
+      click: mock(async () => {}),
+      scrollIntoViewIfNeeded: mock(async () => {}),
+      waitFor: mock(async () => {}),
+    };
+    const runtime = createSmokeTourRuntime({
+      config: {
+        ...createConfig(),
+        record: {
+          ...createConfig().record,
+          cursor: {
+            mode: "smooth",
+            shape: "pointer",
+            color: "#3b82f6",
+            sizePx: 20,
+            minDurationMs: 400,
+            maxDurationMs: 1200,
+            pixelsPerMs: 1,
+            arcHeightPx: 56,
+            ripple: true,
+          },
+        },
+      },
+      page: {} as never,
+      outputDir: "/tmp/demohunter-output",
+      onEvent: (event) => events.push(event),
+      waitForTimeout: async (durationMs) => {
+        waits.push(durationMs);
+      },
+    });
+
+    await runtime.click(first as never);
+    await runtime.click(second as never, { timeoutMs: 2000 });
+
+    expect(waits).toEqual([560]);
+    expect(events).toEqual([
+      { kind: "click", durationMs: 0 },
+      { kind: "click", durationMs: 560, timeoutMs: 2000 },
+    ]);
+    expect(first.click).toHaveBeenCalledWith({});
+    expect(second.click).toHaveBeenCalledWith({ timeout: 2000 });
+  });
+
   test("types text incrementally inside narrateWhile with deterministic sleep events", async () => {
     const events: unknown[] = [];
     const waitForTimeout = mock(async () => {});
@@ -419,6 +472,7 @@ describe("createSmokeTourRuntime", () => {
       "highlight",
       "snapshot",
       "assert-visible",
+      "click",
     ]);
     expect(COLLECTED_TIMELINE_ENTRY_KINDS).toEqual(["event", "narration"]);
     expect(timeline.entries).toHaveLength(2);
