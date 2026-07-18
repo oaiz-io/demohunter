@@ -40,27 +40,44 @@ export async function exportAudio(
     return [];
   }
 
-  await resolvedDependencies.mkdir(audioDir, { recursive: true });
-
-  const exported = new Map<string, ExportedNarrationAudio>();
+  const planned = new Map<string, { artifact: ExportedNarrationAudio; sourcePath: string }>();
+  const sourcesByPortableOutput = new Map<string, string>();
 
   for (const narration of narrations) {
-    if (exported.has(narration.audioPath)) {
+    const normalizedSourcePath = resolve(narration.audioPath);
+    if (planned.has(normalizedSourcePath)) {
       continue;
     }
 
     const fileName = `${basename(narration.audioPath, extname(narration.audioPath))}${extname(narration.audioPath)}`;
     const outputPath = join(audioDir, fileName);
-    await resolvedDependencies.copyFile(narration.audioPath, outputPath);
-    exported.set(narration.audioPath, {
-      cacheKey: narration.cacheKey,
-      durationMs: narration.durationMs,
-      outputPath,
+    const portableOutputKey = resolve(outputPath).toLowerCase();
+    const conflictingSourcePath = sourcesByPortableOutput.get(portableOutputKey);
+
+    if (conflictingSourcePath !== undefined && conflictingSourcePath !== normalizedSourcePath) {
+      throw new Error(
+        `Cannot export narration audio: "${conflictingSourcePath}" and "${normalizedSourcePath}" both map to "audio/${fileName}". Ensure cached narration files have unique names.`,
+      );
+    }
+
+    sourcesByPortableOutput.set(portableOutputKey, normalizedSourcePath);
+    planned.set(normalizedSourcePath, {
+      artifact: {
+        cacheKey: narration.cacheKey,
+        durationMs: narration.durationMs,
+        outputPath,
+      },
+      sourcePath: narration.audioPath,
     });
   }
 
+  await resolvedDependencies.mkdir(audioDir, { recursive: true });
+  await Promise.all([...planned.values()].map(async ({ artifact, sourcePath }) => {
+    await resolvedDependencies.copyFile(sourcePath, artifact.outputPath);
+  }));
+
   const expectedPaths = new Set(
-    [...exported.values()].map((artifact) => resolve(artifact.outputPath)),
+    [...planned.values()].map(({ artifact }) => resolve(artifact.outputPath)),
   );
   const existingEntries = await resolvedDependencies.readdir(audioDir, { withFileTypes: true });
   await Promise.all(existingEntries
@@ -68,5 +85,5 @@ export async function exportAudio(
     .filter((entryPath) => !expectedPaths.has(resolve(entryPath)))
     .map((entryPath) => resolvedDependencies.rm(entryPath, { recursive: true, force: true })));
 
-  return [...exported.values()];
+  return [...planned.values()].map(({ artifact }) => artifact);
 }
