@@ -89,6 +89,7 @@ describe("loadConfig", () => {
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "ring",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
     });
   });
 
@@ -109,6 +110,7 @@ describe("loadConfig", () => {
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "ring",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
     });
   });
 
@@ -145,6 +147,7 @@ describe("loadConfig", () => {
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "ring",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
     });
   });
 
@@ -169,6 +172,7 @@ describe("loadConfig", () => {
       showCursor: false,
       showClickRipple: false,
       highlightStyle: "spotlight",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
     });
   });
 
@@ -189,6 +193,31 @@ describe("loadConfig", () => {
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "spotlight",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+    });
+  });
+
+  test("deep-merges cookie banner settings while preserving safe defaults", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: {
+          cookieBanners: {
+            enabled: true,
+            action: "accept",
+            additionalSelectors: ["[data-cookie-close]"]
+          }
+        }
+      };
+    `);
+
+    const loaded = await loadConfig(cwd);
+
+    expect(loaded.config.record.cookieBanners).toEqual({
+      enabled: true,
+      action: "accept",
+      timeoutMs: 750,
+      additionalSelectors: ["[data-cookie-close]"],
     });
   });
 

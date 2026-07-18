@@ -50,6 +50,46 @@ describe("runCli", () => {
     expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", { flowOnly: true });
   });
 
+  test("dispatches generate with cookie dismissal overrides", async () => {
+    const stubs = buildStubs();
+
+    await runCli([
+      "generate",
+      "demos/sample.tour.ts",
+      "--cookie-dismiss=reject",
+    ], "/tmp/demo", stubs);
+
+    expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", {
+      cookieDismiss: "reject",
+    });
+  });
+
+  test("supports disabling cookie dismissal for one run", async () => {
+    const stubs = buildStubs();
+
+    await runCli([
+      "generate",
+      "--no-cookie-dismiss",
+      "demos/sample.tour.ts",
+    ], "/tmp/demo", stubs);
+
+    expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", {
+      cookieDismiss: false,
+    });
+  });
+
+  test("rejects conflicting cookie dismissal flags", async () => {
+    await expect(runCli([
+      "generate",
+      "demos/sample.tour.ts",
+      "--cookie-dismiss",
+      "accept",
+      "--no-cookie-dismiss",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow(
+      "Use only one of --cookie-dismiss or --no-cookie-dismiss",
+    );
+  });
+
   test("dispatches doctor", async () => {
     const stubs = buildStubs();
 

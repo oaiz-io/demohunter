@@ -51,6 +51,8 @@ Commands:
 generate flags:
   --dry-run                Validate the browser flow without narration or video
   --flow-only              Alias for --dry-run
+  --cookie-dismiss <mode>  Dismiss recognized consent banners: reject, accept, or hide
+  --no-cookie-dismiss      Disable cookie-banner automation for this run
 
 add-skill flags:
   --target <name>          Repeatable. One of: claude, codex, both.
@@ -118,14 +120,15 @@ export async function runCli(
   }
 }
 
-function parseGenerateArgs(args: readonly string[]): {
+export function parseGenerateArgs(args: readonly string[]): {
   options: GenerateCommandOptions;
   tourPath?: string;
 } {
   const options: GenerateCommandOptions = {};
   let tourPath: string | undefined;
 
-  for (const arg of args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
     if (arg === "--dry-run") {
       options.dryRun = true;
       continue;
@@ -133,6 +136,31 @@ function parseGenerateArgs(args: readonly string[]): {
 
     if (arg === "--flow-only") {
       options.flowOnly = true;
+      continue;
+    }
+
+    if (arg === "--no-cookie-dismiss") {
+      assertCookieDismissNotSet(options);
+      options.cookieDismiss = false;
+      continue;
+    }
+
+    if (arg === "--cookie-dismiss") {
+      assertCookieDismissNotSet(options);
+      const value = args[index + 1];
+
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error("--cookie-dismiss requires one of: reject, accept, hide");
+      }
+
+      options.cookieDismiss = parseCookieDismissAction(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--cookie-dismiss=")) {
+      assertCookieDismissNotSet(options);
+      options.cookieDismiss = parseCookieDismissAction(arg.slice("--cookie-dismiss=".length));
       continue;
     }
 
@@ -148,6 +176,20 @@ function parseGenerateArgs(args: readonly string[]): {
   }
 
   return { options, tourPath };
+}
+
+function parseCookieDismissAction(value: string): "reject" | "accept" | "hide" {
+  if (value === "reject" || value === "accept" || value === "hide") {
+    return value;
+  }
+
+  throw new Error(`Invalid --cookie-dismiss value: ${value}. Expected reject, accept, or hide.`);
+}
+
+function assertCookieDismissNotSet(options: GenerateCommandOptions): void {
+  if (options.cookieDismiss !== undefined) {
+    throw new Error("Use only one of --cookie-dismiss or --no-cookie-dismiss per generation.");
+  }
 }
 
 function isCacheAction(action: string | undefined): action is "list" | "prune" | "clear" {

@@ -13,6 +13,34 @@ afterEach(async () => {
 });
 
 describe("generateCommand", () => {
+  test("applies cookie dismissal overrides without mutating the loaded config", async () => {
+    const cwd = await makeTempProject();
+    const loadedConfig = makeLoadedConfig(cwd);
+    const generateTour = mock(async () => ({
+      outputDir: path.join(cwd, ".demohunter/sample-smoke"),
+      videoPath: path.join(cwd, ".demohunter/sample-smoke/video.mp4"),
+    }));
+
+    await generateCommand(
+      cwd,
+      "demos/sample.tour.ts",
+      { cookieDismiss: "accept" },
+      {
+        generateTour,
+        loadConfig: async () => loadedConfig,
+        log: () => {},
+      },
+    );
+
+    expect(generateTour.mock.calls[0]?.[0].loadedConfig.config.record.cookieBanners).toEqual({
+      enabled: true,
+      action: "accept",
+      timeoutMs: 750,
+      additionalSelectors: [],
+    });
+    expect(loadedConfig.config.record.cookieBanners?.enabled).toBe(false);
+  });
+
   test("loads the requested tour file and forwards a valid phase 3 tour to generateTour", async () => {
     const cwd = await makeTempProject();
     const tourPath = path.join(cwd, "demos", "sample.tour.ts");

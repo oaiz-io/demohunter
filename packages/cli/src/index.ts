@@ -3,6 +3,14 @@ import type { Locator, Page, Response } from "playwright";
 export type BrowserName = "chromium" | "firefox" | "webkit";
 export type RecordFormat = "mp4" | "webm";
 export type HighlightStyle = "ring" | "spotlight";
+export type CookieDismissAction = "reject" | "accept" | "hide";
+
+export type CookieBannerConfig = {
+  enabled: boolean;
+  action: CookieDismissAction;
+  timeoutMs: number;
+  additionalSelectors: string[];
+};
 
 export type ViewportConfig = {
   width: number;
@@ -19,6 +27,15 @@ export type RecordConfig = {
   showClickRipple?: boolean;
   /** Default highlight style applied when a tour omits a per-call style. Default: "ring" */
   highlightStyle?: HighlightStyle;
+  cookieBanners?: CookieBannerConfig;
+};
+
+export type DemoHunterUserRecordConfig = Partial<Omit<RecordConfig, "cookieBanners">> & {
+  cookieBanners?: Partial<CookieBannerConfig>;
+};
+
+export type GenerateOverrides = {
+  cookieDismiss?: false | CookieDismissAction;
 };
 
 export type TTSProviderName = "openai" | "elevenlabs";
@@ -63,7 +80,7 @@ export type DemoHunterUserConfig = {
   browser?: BrowserName;
   viewport?: ViewportConfig;
   holdPaddingMs?: number;
-  record?: Partial<RecordConfig>;
+  record?: DemoHunterUserRecordConfig;
   tts?: DemoHunterUserTTSConfig;
 };
 
@@ -213,6 +230,13 @@ export const DEFAULT_VIEWPORT_CONFIG: ViewportConfig = {
   height: 900,
 };
 
+export const DEFAULT_COOKIE_BANNER_CONFIG: CookieBannerConfig = {
+  enabled: false,
+  action: "reject",
+  timeoutMs: 750,
+  additionalSelectors: [],
+};
+
 export const DEFAULT_RECORD_CONFIG: RecordConfig = {
   showActions: true,
   showChapters: true,
@@ -220,6 +244,7 @@ export const DEFAULT_RECORD_CONFIG: RecordConfig = {
   showCursor: true,
   showClickRipple: true,
   highlightStyle: "ring",
+  cookieBanners: DEFAULT_COOKIE_BANNER_CONFIG,
 };
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {

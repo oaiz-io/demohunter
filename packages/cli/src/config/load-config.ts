@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   DEFAULT_DEMOHUNTER_CONFIG,
+  DEFAULT_COOKIE_BANNER_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
@@ -39,6 +40,14 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
     record: {
       ...DEFAULT_RECORD_CONFIG,
       ...authoredConfig.record,
+      cookieBanners: {
+        ...DEFAULT_COOKIE_BANNER_CONFIG,
+        ...authoredConfig.record?.cookieBanners,
+        additionalSelectors: [
+          ...(authoredConfig.record?.cookieBanners?.additionalSelectors
+            ?? DEFAULT_COOKIE_BANNER_CONFIG.additionalSelectors),
+        ],
+      },
     },
     tts: resolveTTSConfig(authoredConfig.tts),
   };

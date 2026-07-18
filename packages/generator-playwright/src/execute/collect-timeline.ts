@@ -1,8 +1,13 @@
 import path from "node:path";
 
 import type { Page } from "playwright";
+import { DEFAULT_COOKIE_BANNER_CONFIG } from "@demohunter/sdk";
 
 import { resolveNarrationSegment as defaultResolveNarrationSegment } from "../narration/resolve-narration.js";
+import {
+  createCookieBannerMiddleware,
+  type CookieBannerMiddleware,
+} from "../middleware/cookie-banner-middleware.js";
 import type { SmokeGenerateInput, SmokeTourModule } from "../smoke-generate.js";
 import { createSmokeLifecycleContext, createSmokeTourRuntime } from "../runtime/create-smoke-tour-runtime.js";
 import type {
@@ -24,6 +29,7 @@ export type CollectTimelineInput = {
   page: Page;
   tourFile: SmokeTourModule;
   resolveNarrationSegment?: NarrationSegmentResolver;
+  cookieMiddleware?: CookieBannerMiddleware;
 };
 
 export async function collectTimeline({
@@ -33,12 +39,21 @@ export async function collectTimeline({
   onProgress,
   page,
   resolveNarrationSegment = (event, context) => defaultResolveNarrationSegment({ event, loadedConfig, context }),
+  cookieMiddleware = createCookieBannerMiddleware({
+    config: loadedConfig.config.record.cookieBanners ?? DEFAULT_COOKIE_BANNER_CONFIG,
+  }),
   tourFile,
 }: CollectTimelineInput): Promise<CollectedTimeline> {
   const { config } = loadedConfig;
   const outputDir = path.join(config.outputDir, tourFile.tour.id);
   const events: TourRuntimeEvent[] = [];
+  let middlewareArmed = false;
   const runtime = createSmokeTourRuntime({
+    afterNavigation: async () => {
+      if (middlewareArmed) {
+        await cookieMiddleware.afterNavigation(page);
+      }
+    },
     config,
     onEvent: (event) => {
       events.push(event);
@@ -55,6 +70,8 @@ export async function collectTimeline({
 
   try {
     await Promise.resolve(tourFile.tour.setup?.(lifecycleContext));
+    middlewareArmed = true;
+    await cookieMiddleware.afterSetup(page);
     await Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext));
     await Promise.resolve(onBeforeRun?.());
     await Promise.resolve(tourFile.tour.run(runtime));

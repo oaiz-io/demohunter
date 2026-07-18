@@ -55,6 +55,7 @@ export function createSmokeTourRuntime(args: {
   config: ResolvedDemoHunterConfig;
   page: Page;
   outputDir: string;
+  afterNavigation?: () => Promise<void>;
   onEvent?: (event: SmokeTourRuntimeEvent) => void;
   waitForTimeout?: (durationMs: number) => Promise<void>;
 }): SmokeRuntime {
@@ -82,8 +83,9 @@ export function createSmokeTourRuntime(args: {
   };
   const goto: DemoHunterRunContext["goto"] = async (url, options) => {
     const resolvedUrl = new URL(url, args.config.baseURL).href;
-
-    return args.page.goto(resolvedUrl, options);
+    const response = await args.page.goto(resolvedUrl, options);
+    await args.afterNavigation?.();
+    return response;
   };
 
   const runtime: SmokeRuntime = {

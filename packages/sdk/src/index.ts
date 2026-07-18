@@ -1,5 +1,6 @@
 export {
   DEFAULT_DEMOHUNTER_CONFIG,
+  DEFAULT_COOKIE_BANNER_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
@@ -8,10 +9,14 @@ export {
 } from "./config.js";
 export type {
   BrowserName,
+  CookieBannerConfig,
+  CookieDismissAction,
   DemoHunterUserTTSConfig,
+  DemoHunterUserRecordConfig,
   ElevenLabsTTSConfig,
   ElevenLabsVoiceSettings,
   HighlightStyle,
+  GenerateOverrides,
   OpenAITTSConfig,
   DemoHunterUserConfig,
   RecordConfig,

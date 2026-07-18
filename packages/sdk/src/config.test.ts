@@ -62,6 +62,12 @@ describe("record defaults", () => {
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "ring",
+      cookieBanners: {
+        enabled: false,
+        action: "reject",
+        timeoutMs: 750,
+        additionalSelectors: [],
+      },
     });
     expect(DEFAULT_DEMOHUNTER_CONFIG.record.format).toBe("mp4");
   });

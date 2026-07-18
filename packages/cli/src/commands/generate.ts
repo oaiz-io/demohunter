@@ -2,7 +2,11 @@ import path from "node:path";
 
 import { generateTour, smokeGenerate } from "@demohunter/generator-playwright";
 import type { GenerationProgressEvent } from "@demohunter/generator-playwright";
-import type { DemoHunterTour } from "@demohunter/sdk";
+import {
+  DEFAULT_COOKIE_BANNER_CONFIG,
+  type DemoHunterTour,
+  type ResolvedDemoHunterConfig,
+} from "@demohunter/sdk";
 
 import { loadConfig } from "../config/load-config.js";
 import { loadAuthoredModule } from "../utils/load-authored-module.js";
@@ -22,6 +26,7 @@ type GenerateDependencies = {
 export type GenerateCommandOptions = {
   dryRun?: boolean;
   flowOnly?: boolean;
+  cookieDismiss?: false | "reject" | "accept" | "hide";
 };
 
 const defaultDependencies: GenerateDependencies = {
@@ -52,6 +57,10 @@ export async function generateCommand(
   try {
     resolvedDependencies.log(formatProgress({ phase: "loading-config", message: "Loading demohunter.config.ts" }));
     loadedConfig = await resolvedDependencies.loadConfig(cwd);
+    loadedConfig = {
+      ...loadedConfig,
+      config: applyGenerateOverrides(loadedConfig.config, options),
+    };
     resolvedDependencies.log(formatProgress({ phase: "loading-tour", message: `Loading ${tourPath}` }));
     const tourModule = await resolvedDependencies.importModule(resolvedTourPath);
     const tourFile = {
@@ -95,7 +104,29 @@ export async function generateCommand(
 function isGenerateCommandOptions(
   value: GenerateCommandOptions | Partial<GenerateDependencies>,
 ): value is GenerateCommandOptions {
-  return "dryRun" in value || "flowOnly" in value;
+  return "dryRun" in value || "flowOnly" in value || "cookieDismiss" in value;
+}
+
+export function applyGenerateOverrides(
+  config: ResolvedDemoHunterConfig,
+  options: GenerateCommandOptions,
+): ResolvedDemoHunterConfig {
+  if (options.cookieDismiss === undefined) {
+    return config;
+  }
+
+  return {
+    ...config,
+    record: {
+      ...config.record,
+      cookieBanners: {
+        ...DEFAULT_COOKIE_BANNER_CONFIG,
+        ...config.record.cookieBanners,
+        enabled: options.cookieDismiss !== false,
+        ...(options.cookieDismiss === false ? {} : { action: options.cookieDismiss }),
+      },
+    },
+  };
 }
 
 function formatProgress(event: GenerationProgressEvent): string {

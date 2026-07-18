@@ -170,6 +170,28 @@ describe("createSmokeTourRuntime", () => {
     ]);
   });
 
+  test("awaits navigation middleware after runtime.goto", async () => {
+    const calls: string[] = [];
+    const page = {
+      goto: mock(async () => {
+        calls.push("goto");
+        return null;
+      }),
+    } as never;
+    const runtime = createSmokeTourRuntime({
+      afterNavigation: async () => {
+        calls.push("middleware");
+      },
+      config: createConfig(),
+      page,
+      outputDir: "/tmp/demohunter-output",
+    });
+
+    await runtime.goto("/after-navigation");
+
+    expect(calls).toEqual(["goto", "middleware"]);
+  });
+
   test("types text incrementally inside narrateWhile with deterministic sleep events", async () => {
     const events: unknown[] = [];
     const waitForTimeout = mock(async () => {});
