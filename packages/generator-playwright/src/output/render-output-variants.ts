@@ -65,9 +65,9 @@ export async function renderOutputVariants(
     path.join(path.dirname(input.outputDir), ".demohunter-variants-"),
   );
   const stagedOutputDir = path.join(stagingRoot, "output");
-  const originalManifest = await readV1Manifest(input.outputDir, resolved);
 
   try {
+    const originalManifest = await readV1Manifest(input.outputDir, resolved);
     await resolved.cp(input.outputDir, stagedOutputDir, { recursive: true });
     await resolved.rm(path.join(stagedOutputDir, "variants"), { recursive: true, force: true });
 

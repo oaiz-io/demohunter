@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -86,6 +86,22 @@ describe("renderOutputVariants", () => {
     expect(await readFile(path.join(outputDir, "video.mp4"))).toEqual(videoBefore);
     expect(await readdir(outputDir)).not.toContain("variants");
   }, 30_000);
+
+  test("cleans staging when the source manifest is invalid", async () => {
+    const root = await makeRoot();
+    const outputDir = path.join(root, "outputs", "invalid");
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(path.join(outputDir, "manifest.json"), "{}\n");
+
+    await expect(renderOutputVariants({
+      outputDir,
+      formats: [{ preset: "square", layout: "fit" }],
+    })).rejects.toThrow();
+
+    expect((await readdir(path.dirname(outputDir))).filter(
+      (entry) => entry.startsWith(".demohunter-variants-"),
+    )).toEqual([]);
+  });
 });
 
 async function makeRoot(): Promise<string> {
