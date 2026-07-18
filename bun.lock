@@ -105,6 +105,13 @@
         "@demohunter/tts-core": "workspace:*",
       },
     },
+    "packages/tts-kokoro": {
+      "name": "@demohunter/tts-kokoro",
+      "version": "0.0.0",
+      "dependencies": {
+        "@demohunter/tts-core": "workspace:*",
+      },
+    },
     "packages/tts-openai": {
       "name": "@demohunter/tts-openai",
       "version": "0.0.0",
@@ -125,6 +132,8 @@
     "@demohunter/tts-core": ["@demohunter/tts-core@workspace:packages/tts-core"],
 
     "@demohunter/tts-elevenlabs": ["@demohunter/tts-elevenlabs@workspace:packages/tts-elevenlabs"],
+
+    "@demohunter/tts-kokoro": ["@demohunter/tts-kokoro@workspace:packages/tts-kokoro"],
 
     "@demohunter/tts-openai": ["@demohunter/tts-openai@workspace:packages/tts-openai"],
 
