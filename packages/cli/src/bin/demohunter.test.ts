@@ -150,7 +150,11 @@ describe("runCli", () => {
 
     await expect(runCli([
       "generate", "demos/sample.tour.ts", "--format", "gif", "--duration", "16",
-    ], "/tmp/demo", buildStubs())).rejects.toThrow("up to 15");
+    ], "/tmp/demo", buildStubs())).rejects.toThrow("0.001 to 15");
+
+    await expect(runCli([
+      "generate", "demos/sample.tour.ts", "--format", "gif", "--duration", "0.0004",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow("0.001 to 15");
   });
 
   test("dispatches doctor", async () => {

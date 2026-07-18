@@ -55,7 +55,7 @@ generate flags:
   --no-cookie-dismiss      Disable cookie-banner automation for this run
   --cursor <preset>        Cursor rendering: none, highlight, smooth, or ripple
   --format <preset>        Repeatable output: standard, square, mobile, or gif
-  --duration <seconds>     GIF duration in seconds (maximum 15)
+  --duration <seconds>     GIF duration in seconds (0.001 to 15)
 
 add-skill flags:
   --target <name>          Repeatable. One of: claude, codex, both.
@@ -208,7 +208,7 @@ export function parseGenerateArgs(args: readonly string[]): {
       }
       const value = arg === "--duration" ? args[index + 1] : arg.slice("--duration=".length);
       if (value === undefined || value.startsWith("-")) {
-        throw new Error("--duration requires a positive number of seconds up to 15");
+        throw new Error("--duration requires a number of seconds from 0.001 to 15");
       }
       gifDurationMs = parseGifDuration(value);
       if (arg === "--duration") index += 1;
@@ -250,8 +250,8 @@ function addOutputFormat(options: GenerateCommandOptions, value: string): void {
 
 function parseGifDuration(value: string): number {
   const seconds = Number(value);
-  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 15) {
-    throw new Error("--duration requires a positive number of seconds up to 15");
+  if (!Number.isFinite(seconds) || seconds < 0.001 || seconds > 15) {
+    throw new Error("--duration requires a number of seconds from 0.001 to 15");
   }
   return Math.round(seconds * 1000);
 }
