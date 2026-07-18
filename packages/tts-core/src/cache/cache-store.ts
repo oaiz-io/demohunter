@@ -7,8 +7,10 @@ import {
   rename,
   rm,
   stat,
+  utimes,
   writeFile,
 } from "node:fs/promises";
+import { hostname } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
 import {
@@ -27,6 +29,11 @@ import {
 } from "./cache-key.js";
 
 export const NARRATION_CACHE_METADATA_EXTENSION = ".json";
+
+const NARRATION_CACHE_LOCK_DIRECTORY = ".locks";
+const DEFAULT_CACHE_LOCK_WAIT_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_CACHE_LOCK_STALE_MS = 10 * 60_000;
+const DEFAULT_CACHE_LOCK_POLL_INTERVAL_MS = 50;
 
 export type NarrationCacheMetadata = {
   key: string;
@@ -64,6 +71,12 @@ export type ResolveNarrationFromCacheOptions = {
   version?: number;
   measureDurationMs?: (audioPath: string) => Promise<number>;
   now?: () => Date;
+  /** Maximum time spent waiting for another process writing the same cache key. */
+  lockWaitTimeoutMs?: number;
+  /** Lease age after which a lock whose owner is no longer alive may be recovered. */
+  lockStaleMs?: number;
+  /** Poll interval used while another process owns the same cache key. */
+  lockPollIntervalMs?: number;
 };
 
 export type MeasureNarrationAudioDurationOptions = {
@@ -103,6 +116,18 @@ type CacheKeyLockState = {
   waiters: CacheKeyLockWaiter[];
 };
 
+type FilesystemCacheLockOwner = {
+  schema: 1;
+  token: string;
+  pid: number;
+  hostname: string;
+  createdAt: string;
+};
+
+type FilesystemCacheLock = {
+  release(): Promise<void>;
+};
+
 const cacheKeyLocks = new Map<string, CacheKeyLockState>();
 
 export async function resolveNarrationFromCache(
@@ -128,7 +153,29 @@ export async function resolveNarrationFromCache(
 
   signal.throwIfAborted();
   const releaseCacheKey = await acquireCacheKeyLock(`${cacheDir}\0${key}`, signal);
+  let filesystemLock: FilesystemCacheLock | undefined;
+  let operationError: unknown;
   try {
+    filesystemLock = await acquireFilesystemCacheLock({
+      cacheDir,
+      key,
+      signal,
+      waitTimeoutMs: positiveLockOption(
+        options.lockWaitTimeoutMs,
+        DEFAULT_CACHE_LOCK_WAIT_TIMEOUT_MS,
+        "lockWaitTimeoutMs",
+      ),
+      staleMs: positiveLockOption(
+        options.lockStaleMs,
+        DEFAULT_CACHE_LOCK_STALE_MS,
+        "lockStaleMs",
+      ),
+      pollIntervalMs: positiveLockOption(
+        options.lockPollIntervalMs,
+        DEFAULT_CACHE_LOCK_POLL_INTERVAL_MS,
+        "lockPollIntervalMs",
+      ),
+    });
     signal.throwIfAborted();
     const cached = await readNarrationCacheEntry({
       cacheDir,
@@ -189,9 +236,268 @@ export async function resolveNarrationFromCache(
       source: "provider",
       entry,
     };
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    releaseCacheKey();
+    let releaseError: unknown;
+
+    try {
+      await filesystemLock?.release();
+    } catch (error) {
+      releaseError = error;
+    } finally {
+      releaseCacheKey();
+    }
+
+    if (releaseError !== undefined) {
+      if (operationError !== undefined) {
+        throw new AggregateError(
+          [operationError, releaseError],
+          "Narration cache operation failed and its filesystem lock could not be released.",
+          { cause: operationError },
+        );
+      }
+
+      throw releaseError;
+    }
   }
+}
+
+async function acquireFilesystemCacheLock(options: {
+  cacheDir: string;
+  key: string;
+  signal: AbortSignal;
+  waitTimeoutMs: number;
+  staleMs: number;
+  pollIntervalMs: number;
+}): Promise<FilesystemCacheLock> {
+  const lockRoot = join(options.cacheDir, NARRATION_CACHE_LOCK_DIRECTORY);
+  const lockPath = join(lockRoot, `${options.key}.lock`);
+  const startedAt = Date.now();
+
+  await mkdir(lockRoot, { recursive: true });
+
+  while (true) {
+    options.signal.throwIfAborted();
+    const token = randomUUID();
+
+    try {
+      await mkdir(lockPath);
+      const owner: FilesystemCacheLockOwner = {
+        schema: 1,
+        token,
+        pid: process.pid,
+        hostname: hostname(),
+        createdAt: new Date().toISOString(),
+      };
+
+      try {
+        await writeFile(join(lockPath, "owner.json"), `${JSON.stringify(owner)}\n`, {
+          encoding: "utf8",
+          flag: "wx",
+          mode: 0o600,
+        });
+      } catch (error) {
+        await rm(lockPath, { recursive: true, force: true });
+        throw error;
+      }
+
+      return createFilesystemCacheLock(lockPath, owner, options.staleMs);
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) {
+        throw error;
+      }
+    }
+
+    if (await recoverStaleFilesystemCacheLock(lockPath, options.staleMs)) {
+      continue;
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs >= options.waitTimeoutMs) {
+      throw new Error(
+        `Timed out after ${options.waitTimeoutMs}ms waiting for narration cache key ${options.key} to be released by another process.`,
+      );
+    }
+
+    await abortableDelay(
+      Math.min(options.pollIntervalMs, options.waitTimeoutMs - elapsedMs),
+      options.signal,
+    );
+  }
+}
+
+function createFilesystemCacheLock(
+  lockPath: string,
+  owner: FilesystemCacheLockOwner,
+  staleMs: number,
+): FilesystemCacheLock {
+  const heartbeatIntervalMs = Math.max(1, Math.min(30_000, Math.floor(staleMs / 3)));
+  const heartbeat = setInterval(() => {
+    const now = new Date();
+    void utimes(lockPath, now, now).catch(() => undefined);
+  }, heartbeatIntervalMs);
+  heartbeat.unref();
+  let released = false;
+
+  return {
+    async release() {
+      if (released) return;
+      released = true;
+      clearInterval(heartbeat);
+
+      const currentOwner = await readFilesystemCacheLockOwner(lockPath);
+      if (currentOwner === null) return;
+      if (currentOwner.token !== owner.token) {
+        throw new Error("Refusing to release a narration cache filesystem lock owned by another process.");
+      }
+
+      const releasePath = `${lockPath}.release-${owner.token}`;
+      try {
+        await rename(lockPath, releasePath);
+      } catch (error) {
+        if (isMissingFileError(error)) return;
+        throw error;
+      }
+      await rm(releasePath, { recursive: true, force: true });
+    },
+  };
+}
+
+async function recoverStaleFilesystemCacheLock(lockPath: string, staleMs: number): Promise<boolean> {
+  const firstStats = await stat(lockPath).catch((error: unknown) => {
+    if (isMissingFileError(error)) return null;
+    throw error;
+  });
+  if (firstStats === null) return true;
+  if (Date.now() - firstStats.mtimeMs < staleMs) return false;
+
+  const firstOwnerText = await readFile(join(lockPath, "owner.json"), "utf8").catch((error: unknown) => {
+    if (isMissingFileError(error)) return null;
+    throw error;
+  });
+  const firstOwner = parseFilesystemCacheLockOwner(firstOwnerText);
+
+  if (
+    firstOwner !== null
+    && firstOwner.hostname === hostname()
+    && isProcessAlive(firstOwner.pid)
+  ) {
+    return false;
+  }
+
+  const secondStats = await stat(lockPath).catch((error: unknown) => {
+    if (isMissingFileError(error)) return null;
+    throw error;
+  });
+  if (secondStats === null) return true;
+  if (secondStats.mtimeMs !== firstStats.mtimeMs || Date.now() - secondStats.mtimeMs < staleMs) {
+    return false;
+  }
+
+  const secondOwnerText = await readFile(join(lockPath, "owner.json"), "utf8").catch((error: unknown) => {
+    if (isMissingFileError(error)) return null;
+    throw error;
+  });
+  if (secondOwnerText !== firstOwnerText) return false;
+
+  const quarantinePath = `${lockPath}.stale-${randomUUID()}`;
+  try {
+    await rename(lockPath, quarantinePath);
+  } catch (error) {
+    if (isMissingFileError(error)) return true;
+    throw error;
+  }
+
+  await rm(quarantinePath, { recursive: true, force: true });
+  return true;
+}
+
+async function readFilesystemCacheLockOwner(lockPath: string): Promise<FilesystemCacheLockOwner | null> {
+  const text = await readFile(join(lockPath, "owner.json"), "utf8").catch((error: unknown) => {
+    if (isMissingFileError(error)) return null;
+    throw error;
+  });
+
+  return parseFilesystemCacheLockOwner(text);
+}
+
+function parseFilesystemCacheLockOwner(text: string | null): FilesystemCacheLockOwner | null {
+  if (text === null) return null;
+
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Partial<FilesystemCacheLockOwner>;
+
+  return candidate.schema === 1
+    && typeof candidate.token === "string"
+    && candidate.token.length > 0
+    && Number.isInteger(candidate.pid)
+    && (candidate.pid ?? 0) > 0
+    && typeof candidate.hostname === "string"
+    && candidate.hostname.length > 0
+    && typeof candidate.createdAt === "string"
+    ? candidate as FilesystemCacheLockOwner
+    : null;
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "ESRCH"
+    );
+  }
+}
+
+function positiveLockOption(value: number | undefined, fallback: number, name: string): number {
+  const resolvedValue = value ?? fallback;
+  if (!Number.isInteger(resolvedValue) || resolvedValue <= 0) {
+    throw new Error(`Narration cache ${name} must be a positive integer.`);
+  }
+  return resolvedValue;
+}
+
+async function abortableDelay(durationMs: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+
+  await new Promise<void>((resolvePromise, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolvePromise();
+    }, durationMs);
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+}
+
+function isAlreadyExistsError(error: unknown): error is NodeJS.ErrnoException {
+  return (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "EEXIST"
+  );
 }
 
 function acquireCacheKeyLock(key: string, signal: AbortSignal): Promise<() => void> {

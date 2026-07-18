@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, unlink, utimes, writeFile } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   createNarrationCacheKey,
@@ -16,6 +18,11 @@ import {
 } from "../index.js";
 import { NARRATION_CACHE_SCHEMA_VERSION } from "./cache-key.js";
 import { resolveNarrationFromCache } from "./cache-store.js";
+
+const multiprocessWorkerPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../test/fixtures/cache-process-worker.ts",
+);
 
 describe("resolveNarrationFromCache", () => {
   test("returns persisted audio path and metadata on cache hit without invoking the provider again", async () => {
@@ -306,6 +313,122 @@ describe("resolveNarrationFromCache", () => {
       assert.equal(secondResult.source, "cache");
       assert.equal(secondResult.entry.audioPath, firstResult.entry.audioPath);
       assert.deepEqual(await readFile(firstResult.entry.audioPath), Buffer.from([4, 3, 2, 1]));
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("coordinates one committed cache entry across separate processes", async () => {
+    const fixture = await createFixture();
+    const invocationLog = join(fixture.tempRoot, "synthesis.log");
+
+    try {
+      const [first, second] = await Promise.all([
+        runCacheProcess(fixture.cacheDir, invocationLog, "first"),
+        runCacheProcess(fixture.cacheDir, invocationLog, "second"),
+      ]);
+      const results = [first, second];
+      const invocationLines = (await readFile(invocationLog, "utf8")).trim().split("\n");
+
+      assert.equal(invocationLines.length, 1);
+      assert.equal(first.key, second.key);
+      assert.deepEqual(results.map((result) => result.source).sort(), ["cache", "provider"]);
+      assert.equal(first.metadataPath, second.metadataPath);
+
+      const metadata = JSON.parse(await readFile(first.metadataPath, "utf8")) as {
+        key: string;
+        output: { audioPath: string; byteSize: number; sha256: string };
+      };
+      const audioBytes = await readFile(join(fixture.cacheDir, metadata.output.audioPath));
+
+      assert.equal(metadata.key, first.key);
+      assert.equal(metadata.output.byteSize, audioBytes.byteLength);
+      assert.equal(metadata.output.sha256, createHash("sha256").update(audioBytes).digest("hex"));
+      assert.deepEqual(await readdir(join(fixture.cacheDir, ".locks")), []);
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("recovers a stale dead-owner lock but never reclaims a stale-looking live-owner lock", async () => {
+    const fixture = await createFixture();
+    const key = createNarrationCacheKey(fixture.request);
+    const lockPath = join(fixture.cacheDir, ".locks", `${key}.lock`);
+    const staleTime = new Date(Date.now() - 60_000);
+
+    try {
+      await writeCacheLock(lockPath, {
+        token: "dead-owner",
+        pid: 999_999_999,
+      });
+      await utimes(lockPath, staleTime, staleTime);
+
+      const provider = createProvider([new Uint8Array([8, 6, 7, 5])]);
+      const recovered = await resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider: provider.provider,
+        measureDurationMs: async () => 400,
+        lockStaleMs: 10,
+        lockPollIntervalMs: 5,
+        lockWaitTimeoutMs: 200,
+      });
+
+      assert.equal(recovered.source, "provider");
+      assert.equal(provider.callCount, 1);
+      await assert.rejects(access(lockPath), /ENOENT/);
+
+      await writeCacheLock(lockPath, {
+        token: "live-owner",
+        pid: process.pid,
+      });
+      await utimes(lockPath, staleTime, staleTime);
+
+      await assert.rejects(
+        resolveNarrationFromCache({
+          cacheDir: fixture.cacheDir,
+          request: fixture.request,
+          provider: createProvider([new Uint8Array([1])]).provider,
+          measureDurationMs: async () => 100,
+          lockStaleMs: 10,
+          lockPollIntervalMs: 5,
+          lockWaitTimeoutMs: 40,
+        }),
+        /Timed out after 40ms waiting for narration cache key/,
+      );
+      await access(lockPath);
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("cancels a filesystem-lock waiter without deleting the current owner's lock", async () => {
+    const fixture = await createFixture();
+    const key = createNarrationCacheKey(fixture.request);
+    const lockPath = join(fixture.cacheDir, ".locks", `${key}.lock`);
+    const controller = new AbortController();
+    const cancellation = new Error("filesystem cache wait cancelled");
+    const provider = createProvider([new Uint8Array([1, 2, 3])]);
+
+    try {
+      await writeCacheLock(lockPath, { token: "active-owner", pid: process.pid });
+      const pending = resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider: provider.provider,
+        signal: controller.signal,
+        measureDurationMs: async () => 100,
+        lockStaleMs: 60_000,
+        lockPollIntervalMs: 100,
+        lockWaitTimeoutMs: 5_000,
+      });
+      setTimeout(() => controller.abort(cancellation), 20);
+
+      await assert.rejects(pending, (error: unknown) => error === cancellation);
+      assert.equal(provider.callCount, 0);
+      await access(lockPath);
+      const owner = JSON.parse(await readFile(join(lockPath, "owner.json"), "utf8")) as { token: string };
+      assert.equal(owner.token, "active-owner");
     } finally {
       await rm(fixture.tempRoot, { recursive: true, force: true });
     }
@@ -812,4 +935,55 @@ function createDeferred(): {
   });
 
   return { promise, resolve: resolvePromise };
+}
+
+async function writeCacheLock(
+  lockPath: string,
+  owner: { token: string; pid: number },
+): Promise<void> {
+  await mkdir(lockPath, { recursive: true });
+  await writeFile(join(lockPath, "owner.json"), JSON.stringify({
+    schema: 1,
+    token: owner.token,
+    pid: owner.pid,
+    hostname: hostname(),
+    createdAt: new Date(0).toISOString(),
+  }), "utf8");
+}
+
+async function runCacheProcess(
+  cacheDir: string,
+  invocationLog: string,
+  label: string,
+): Promise<{ source: "cache" | "provider"; key: string; metadataPath: string }> {
+  return await new Promise((resolvePromise, reject) => {
+    const child = spawn(process.execPath, [multiprocessWorkerPath, cacheDir, invocationLog, label], {
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Cache process ${label} exited with code ${code}: ${stderr}`));
+        return;
+      }
+
+      try {
+        resolvePromise(JSON.parse(stdout) as {
+          source: "cache" | "provider";
+          key: string;
+          metadataPath: string;
+        });
+      } catch (error) {
+        reject(new Error(`Cache process ${label} returned invalid JSON: ${stdout}`, { cause: error }));
+      }
+    });
+  });
 }
