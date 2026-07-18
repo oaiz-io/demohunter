@@ -311,6 +311,32 @@ describe("loadConfig", () => {
     );
   });
 
+  test.each([
+    ["container", '{ container: "avi" }', "record.container must be either mp4 or webm"],
+    ["highlight style", '{ highlightStyle: "glow" }', "record.highlightStyle must be either ring or spotlight"],
+    ["cursor shape", '{ cursor: { shape: "crosshair" } }', "record.cursor.shape must be either dot or pointer"],
+    ["cursor ripple", '{ cursor: { ripple: "yes" } }', "record.cursor.ripple must be a boolean"],
+    ["cursor object", '{ cursor: "smooth" }', "record.cursor must be false or an object"],
+  ])("rejects invalid authored record %s", async (_label, record, message) => {
+    const cwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: ${record} };
+    `);
+
+    await expect(loadConfig(cwd)).rejects.toThrow(message);
+  });
+
+  test("rejects non-object record and output blocks", async () => {
+    const invalidRecord = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: "mp4" };
+    `);
+    const invalidOutput = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: "gif" };
+    `);
+
+    await expect(loadConfig(invalidRecord)).rejects.toThrow("record must be an object");
+    await expect(loadConfig(invalidOutput)).rejects.toThrow("output must be an object");
+  });
+
   test("resolves output presets and migrates record.format to record.container", async () => {
     const cwd = await writeConfig(`
       export default {

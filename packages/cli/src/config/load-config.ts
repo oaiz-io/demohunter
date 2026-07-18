@@ -33,6 +33,8 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
 
   const configModule = await loadAuthoredModule(configPath);
   const authoredConfig = readDefaultExport(configModule.default);
+  validateAuthoredRecordConfig(authoredConfig.record);
+  validateAuthoredOutputConfig(authoredConfig.output);
 
   const config: ResolvedDemoHunterConfig = {
     baseURL: authoredConfig.baseURL,
@@ -64,6 +66,57 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
     configPath,
     config,
   };
+}
+
+function validateAuthoredRecordConfig(record: DemoHunterUserConfig["record"]): void {
+  if (record === undefined) {
+    return;
+  }
+  if (!isRecordObject(record)) {
+    throw new Error("record must be an object");
+  }
+
+  for (const [field, value] of [
+    ["container", record.container],
+    ["format", record.format],
+  ] as const) {
+    if (value !== undefined && value !== "mp4" && value !== "webm") {
+      throw new Error(`record.${field} must be either mp4 or webm`);
+    }
+  }
+
+  for (const [field, value] of [
+    ["showActions", record.showActions],
+    ["showChapters", record.showChapters],
+    ["showCursor", record.showCursor],
+    ["showClickRipple", record.showClickRipple],
+  ] as const) {
+    if (value !== undefined && typeof value !== "boolean") {
+      throw new Error(`record.${field} must be a boolean`);
+    }
+  }
+
+  if (
+    record.highlightStyle !== undefined
+    && record.highlightStyle !== "ring"
+    && record.highlightStyle !== "spotlight"
+  ) {
+    throw new Error("record.highlightStyle must be either ring or spotlight");
+  }
+
+  if (
+    record.cursor !== undefined
+    && record.cursor !== false
+    && !isRecordObject(record.cursor)
+  ) {
+    throw new Error("record.cursor must be false or an object");
+  }
+}
+
+function validateAuthoredOutputConfig(output: DemoHunterUserConfig["output"]): void {
+  if (output !== undefined && !isRecordObject(output)) {
+    throw new Error("output must be an object");
+  }
 }
 
 function resolveCookieBannerConfig(
@@ -140,6 +193,18 @@ function resolveCursorConfig(
 function validateCursorConfig(
   cursor: Exclude<ResolvedDemoHunterConfig["record"]["cursor"], false | undefined>,
 ): Exclude<ResolvedDemoHunterConfig["record"]["cursor"], false | undefined> {
+  if (cursor.mode !== "highlight" && cursor.mode !== "smooth") {
+    throw new Error("record.cursor.mode must be either highlight or smooth");
+  }
+  if (cursor.shape !== "dot" && cursor.shape !== "pointer") {
+    throw new Error("record.cursor.shape must be either dot or pointer");
+  }
+  if (typeof cursor.color !== "string" || cursor.color.trim().length === 0) {
+    throw new Error("record.cursor.color must be a non-empty string");
+  }
+  if (typeof cursor.ripple !== "boolean") {
+    throw new Error("record.cursor.ripple must be a boolean");
+  }
   if (!Number.isFinite(cursor.sizePx) || cursor.sizePx <= 0) {
     throw new Error("record.cursor.sizePx must be a positive finite number");
   }
@@ -176,6 +241,10 @@ function readDefaultExport(config: unknown): DemoHunterUserConfig {
 }
 
 function isPlainObject(value: unknown): value is DemoHunterUserConfig {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRecordObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
