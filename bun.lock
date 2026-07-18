@@ -65,6 +65,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@demohunter/manifest": "workspace:*",
+        "@demohunter/media-ffmpeg": "workspace:*",
         "@demohunter/sdk": "workspace:*",
         "@demohunter/tts-core": "workspace:*",
         "@demohunter/tts-elevenlabs": "workspace:*",
@@ -78,6 +79,10 @@
       "dependencies": {
         "zod": "^4.1.11",
       },
+    },
+    "packages/media-ffmpeg": {
+      "name": "@demohunter/media-ffmpeg",
+      "version": "0.0.0",
     },
     "packages/sdk": {
       "name": "@demohunter/sdk",
@@ -112,6 +117,8 @@
     "@demohunter/generator-playwright": ["@demohunter/generator-playwright@workspace:packages/generator-playwright"],
 
     "@demohunter/manifest": ["@demohunter/manifest@workspace:packages/manifest"],
+
+    "@demohunter/media-ffmpeg": ["@demohunter/media-ffmpeg@workspace:packages/media-ffmpeg"],
 
     "@demohunter/sdk": ["@demohunter/sdk@workspace:packages/sdk"],
 

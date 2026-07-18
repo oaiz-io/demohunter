@@ -8,6 +8,9 @@
       "path": "./packages/generator-playwright"
     },
     {
+      "path": "./packages/media-ffmpeg"
+    },
+    {
       "path": "./packages/manifest"
     },
     {
