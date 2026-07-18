@@ -228,9 +228,32 @@ export function defineConfig<T extends DemoHunterUserConfig>(config: T): T {
 export function resolveOutputFormatRequests(
   formats: readonly OutputFormatRequest[],
 ): OutputFormatRequest[] {
+  if (!Array.isArray(formats)) {
+    throw new Error("output.formats must be an array of output format requests");
+  }
+
   const seen = new Set<OutputPresetName>();
 
   return formats.map((request) => {
+    if (typeof request !== "object" || request === null || Array.isArray(request)) {
+      throw new Error("Each output.formats entry must be an object with a preset");
+    }
+    if (
+      request.preset !== "standard"
+      && request.preset !== "square"
+      && request.preset !== "mobile"
+      && request.preset !== "gif"
+    ) {
+      throw new Error(
+        `Invalid output preset: ${String(request.preset)}. Expected standard, square, mobile, or gif.`,
+      );
+    }
+    if (request.layout !== undefined && request.layout !== "fit" && request.layout !== "responsive") {
+      throw new Error(
+        `Invalid output layout for ${request.preset}: ${String(request.layout)}. Expected fit or responsive.`,
+      );
+    }
+
     if (seen.has(request.preset)) {
       throw new Error(`output.formats contains duplicate preset: ${request.preset}`);
     }

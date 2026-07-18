@@ -318,10 +318,22 @@ describe("loadConfig", () => {
     const tooLong = await writeConfig(`
       export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "gif", durationMs: 16000 }] } };
     `);
+    const unknownPreset = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "story" }] } };
+    `);
+    const unknownLayout = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "square", layout: "crop" }] } };
+    `);
 
     expect((await loadConfig(preferred)).config.record.container).toBe("webm");
     await expect(loadConfig(duplicate)).rejects.toThrow("duplicate preset: square");
     await expect(loadConfig(tooLong)).rejects.toThrow("no greater than 15000");
+    await expect(loadConfig(unknownPreset)).rejects.toThrow(
+      "Invalid output preset: story. Expected standard, square, mobile, or gif.",
+    );
+    await expect(loadConfig(unknownLayout)).rejects.toThrow(
+      "Invalid output layout for square: crop. Expected fit or responsive.",
+    );
   });
 
   test.each([
