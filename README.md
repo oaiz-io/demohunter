@@ -20,6 +20,9 @@ DemoHunter is local-first. It does not require a hosted backend, and OpenAI or E
 - [x] SRT and VTT captions generated from narration.
 - [x] Chapter markers and overlays.
 - [x] Action overlays (mouse clicks visible on the recording).
+- [x] Smooth SVG cursor motion with deterministic `click(locator)` choreography.
+- [x] Opt-in dismissal for recognized cookie-consent vendors.
+- [x] Standard, square, responsive mobile, and GIF social outputs.
 - [x] All three Playwright browsers: Chromium, Firefox, WebKit.
 - [x] Per-call voice and tone overrides on `narrate()`.
 - [x] OpenAI TTS (`gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`).
@@ -73,7 +76,7 @@ export default defineTour({
     await goto("/");
     await page.getByRole("heading", { name: "Workspace" }).waitFor();
   },
-  async run({ page, chapter, step, narrate, narrateWhile }) {
+  async run({ page, chapter, click, step, narrate, narrateWhile }) {
     await chapter("Open the workspace");
 
     await step("Land on the dashboard", async () => {
@@ -82,7 +85,7 @@ export default defineTour({
 
     await step("Create a new invoice", async () => {
       await narrateWhile("Creating an invoice is one step now. The customer field has type-ahead search built in.", async ({ sleep, typeText }) => {
-        await page.getByRole("button", { name: "New invoice" }).click();
+        await click(page.getByRole("button", { name: "New invoice" }));
         await sleep(700);
         await typeText(page.getByLabel("Customer"), "Acme", { replace: true });
       });
@@ -109,8 +112,14 @@ export default defineConfig({
   baseURL: "http://localhost:3000",
   // tts: { voice: "marin", model: "gpt-4o-mini-tts", language: "sv" },
   // viewport: { width: 1440, height: 900 },
+  // record: { container: "mp4", cursor: { color: "#3b82f6" } },
+  // output: { formats: [{ preset: "square" }, { preset: "gif", durationMs: 12_000 }] },
 });
 ```
+
+Cookie automation ships disabled. Enable it for known OneTrust, Cookiebot, Didomi, TrustArc, or Quantcast banners with `record.cookieBanners.enabled`, or for one run with `--cookie-dismiss reject`. Custom `beforeRecord` logic runs after the built-in dismissal step.
+
+`record.container` selects MP4/WebM recording output. The older `record.format` spelling remains accepted during migration; `--format` refers only to distribution presets.
 
 OpenAI remains the default TTS provider and reads `OPENAI_API_KEY` only when uncached narration is needed. To use ElevenLabs instead:
 
@@ -147,7 +156,10 @@ captions.vtt    WebVTT subtitles
 chapters.json   chapter timeline
 manifest.json   portable, checksummed index
 audio/          per-segment narration clips
+variants/       requested square, mobile, or GIF derivatives
 ```
+
+With no `output.formats` or `--format` flags, DemoHunter keeps the original manifest v1 layout unchanged. Multi-format runs publish a checksummed manifest v2 atomically. Mobile uses its own 390×844 two-pass browser capture so responsive navigation and selectors are validated rather than stretched from desktop.
 
 Identical narration text is cached locally. Reruns don't re-pay for TTS.
 
@@ -172,6 +184,9 @@ npx demohunter init                       # scaffold starter tour + config
 npx demohunter generate <tour-file>       # run a tour, write output
 npx demohunter generate <tour-file> --dry-run
                                            # validate browser flow without TTS/video
+npx demohunter generate <tour-file> --cursor smooth --cookie-dismiss reject
+npx demohunter generate <tour-file> --format standard --format square
+npx demohunter generate <tour-file> --format gif --duration 12
 npx demohunter doctor                     # check local prerequisites
 npx demohunter cache list|prune|clear     # manage narration cache
 npx demohunter add-skill [--target ...]   # install agent skill (claude | codex | both)

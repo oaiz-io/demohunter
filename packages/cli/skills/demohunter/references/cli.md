@@ -8,6 +8,11 @@ The current CLI surface is:
 - `demohunter generate <tour-file>`
 - `demohunter generate <tour-file> --dry-run`
 - `demohunter generate <tour-file> --flow-only`
+- `demohunter generate <tour-file> --cookie-dismiss reject|accept|hide`
+- `demohunter generate <tour-file> --no-cookie-dismiss`
+- `demohunter generate <tour-file> --cursor none|highlight|smooth|ripple`
+- `demohunter generate <tour-file> --format standard|square|mobile|gif` (repeatable)
+- `demohunter generate <tour-file> --format gif --duration <seconds>`
 - `demohunter doctor`
 - `demohunter cache list`
 - `demohunter cache prune`
@@ -48,5 +53,7 @@ A successful generate run writes portable artifacts under `.demohunter/<tour-id>
 - `captions.vtt`
 - `manifest.json`
 - `chapters.json`
+- requested variants under `variants/<preset>/`
 
 If narration is used, the output also includes exported audio assets and reuses cached narration when available.
+Multi-format output uses manifest v2. Without format requests, the portable v1 layout remains unchanged.

@@ -63,14 +63,14 @@ export default defineTour({
     await goto("/");
     await page.getByRole("heading", { name: "Workspace" }).waitFor();
   },
-  async run({ page, chapter, step, narrate, narrateWhile }) {
+  async run({ page, chapter, click, step, narrate, narrateWhile }) {
     await chapter("Open the workspace");
 
     await step("Land on the dashboard", async () => {
       await narrate("Welcome to the billing workspace. Invoices, exports, and credits all live here.");
       await narrateWhile("Now we open the invoice form while the overview stays in context.", async ({ sleep }) => {
         await sleep(800);
-        await page.getByRole("button", { name: "New invoice" }).click();
+        await click(page.getByRole("button", { name: "New invoice" }));
       });
     });
   },
@@ -106,6 +106,50 @@ export default {
 ```
 
 Use `tts.language` for the demo's narration language, with ISO 639-1 codes such as `sv` for Swedish. Use `narrate("...", { voice: "other-voice-id", language: "sv" })` or `narrateWhile(...)` options when a single segment should use a different voice, model, format, language, or ElevenLabs voice settings. DemoHunter does not infer narration language from locale environment variables such as `DEMO_LOCALE`.
+
+## Polish and social outputs
+
+Use DemoHunter's deterministic click helper for visible interactions. It performs the same timing in both passes and completes the configured cursor arc before the trusted Playwright click:
+
+```ts
+await click(page.getByRole("button", { name: "Publish" }));
+```
+
+Cookie dismissal is opt-in and restricted to recognized vendor-scoped selectors:
+
+```sh
+npx demohunter generate demos/billing-overview.tour.ts --cookie-dismiss reject
+```
+
+Generate multiple distribution formats in one run:
+
+```sh
+npx demohunter generate demos/billing-overview.tour.ts \
+  --format standard --format square --format gif --duration 12
+```
+
+Or configure them permanently:
+
+```ts
+export default {
+  baseURL: "http://localhost:3000",
+  record: {
+    container: "mp4",
+    cursor: { mode: "smooth", shape: "pointer", color: "#3b82f6" },
+    cookieBanners: { enabled: true, action: "reject" },
+  },
+  output: {
+    formats: [
+      { preset: "standard" },
+      { preset: "square", layout: "fit" },
+      { preset: "mobile" },
+      { preset: "gif", durationMs: 12_000 },
+    ],
+  },
+};
+```
+
+Square defaults to scale-and-pad. Mobile always runs its own responsive capture at 390×844 and encodes to 1080×1920. GIF is silent, palette-based, and limited to 15 seconds. Requested derivatives live under `variants/<preset>/`; the baseline MP4 remains at the output root.
 
 ## Install the agent skill (optional)
 

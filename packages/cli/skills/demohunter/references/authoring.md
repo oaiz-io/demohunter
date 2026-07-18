@@ -38,6 +38,7 @@ The current SDK exposes these helpers on `run(...)`:
 - `highlight(locator, options?)`
 - `snapshot(options?)`
 - `assertVisible(locator, options?)`
+- `click(locator, options?)`
 
 Useful option details:
 
@@ -50,6 +51,7 @@ Useful option details:
 - `highlight(..., { name?, paddingPx?, style?, durationMs? })`
 - `snapshot(..., { name? })`
 - `assertVisible(..., { timeoutMs? })`
+- `click(..., { button?, clickCount?, force?, modifiers?, position?, timeout? })`
 
 ## Editing Rules
 
@@ -73,7 +75,9 @@ Inspect `demohunter.config.ts` before editing:
 - `baseURL` tells you which app entrypoint the tour expects.
 - `outputDir` and `cacheDir` affect where generated artifacts land.
 - `holdPaddingMs`, `record`, and `tts` can explain timing or narration behavior.
-- `record.showCursor` and `record.showClickRipple` (both default `true`) toggle the injected cursor and click ripple in the recording. `record.highlightStyle` (`"ring"` | `"spotlight"`, default `"ring"`) sets the default `highlight()` style.
+- `record.cursor` controls the smooth SVG cursor (`false` or mode, shape, color, timing, arc, and ripple options). Legacy `record.showCursor` and `record.showClickRipple` remain accepted. `record.highlightStyle` (`"ring"` | `"spotlight"`, default `"ring"`) sets the default `highlight()` style.
+- `record.cookieBanners` is disabled by default and can reject, accept, or hide recognized vendor banners before authored `beforeRecord` runs.
+- `record.container` selects MP4/WebM; legacy `record.format` remains accepted. `output.formats` requests standard, square, responsive mobile, or GIF distribution variants.
 - Set `record.showActions: false` for polished videos when Playwright action labels or locator text would distract from the product UI.
 - `tts.provider` is either `openai` or `elevenlabs`; `tts.language` accepts ISO 639-1 language codes and can steer language/accent. ElevenLabs receives it as `language_code`; OpenAI receives it through voice instructions.
 - ElevenLabs voices are configured by voice ID and optional `voiceSettings`.
@@ -158,8 +162,7 @@ export default defineConfig({
   baseURL: "http://127.0.0.1:3200",
   record: {
     showActions: false,
-    showCursor: true,
-    showClickRipple: true,
+    cursor: { mode: "smooth", shape: "pointer", color: "#3b82f6", ripple: true },
   },
 });
 ```
@@ -169,41 +172,8 @@ Authoring guidance:
 - Say which effect is being shown in narration: ring highlight, injected cursor, click ripple, or spotlight.
 - Use longer highlight holds for demos, typically `durationMs: 3000` to `4000`.
 - Avoid Playwright action annotations for showcase videos; they can reveal selector text and distract from the UI.
-- Move the mouse deliberately before clicking. A slow move, short pause, small circle around the target, and final settle feels more human than a direct jump.
+- Prefer `click(locator)` for visible interactions so cursor motion completes before the trusted click in both passes.
 - Keep these gestures inside `narrateWhile(...)` so the voiceover explains the visual motion while it happens.
-
-Example helper for a human-like cursor gesture:
-
-```ts
-async function gestureAroundLocator(page: Page, locator: Locator): Promise<void> {
-  const box = await locator.boundingBox();
-
-  if (box === null) {
-    return;
-  }
-
-  const centerX = box.x + box.width / 2;
-  const centerY = box.y + box.height / 2;
-  const radiusX = box.width / 2 + 24;
-  const radiusY = box.height / 2 + 20;
-
-  await page.mouse.move(centerX - radiusX - 120, centerY - radiusY - 40, { steps: 18 });
-  await page.waitForTimeout(180);
-  await page.mouse.move(centerX, centerY, { steps: 28 });
-  await page.waitForTimeout(220);
-
-  for (let index = 0; index <= 24; index += 1) {
-    const angle = (Math.PI * 2 * index) / 24;
-    await page.mouse.move(centerX + Math.cos(angle) * radiusX, centerY + Math.sin(angle) * radiusY, {
-      steps: 2,
-    });
-    await page.waitForTimeout(24);
-  }
-
-  await page.waitForTimeout(180);
-  await page.mouse.move(centerX, centerY, { steps: 18 });
-}
-```
 
 Example sequence:
 
@@ -218,9 +188,7 @@ await narrateWhile("The blue ring is a Pass 2-only highlight added to the video.
 
 await narrateWhile("The cursor moves naturally, clicks with a ripple, then the result is spotlighted.", async () => {
   const button = page.getByRole("button", { name: "Show the finale" });
-  await gestureAroundLocator(page, button);
-  await page.waitForTimeout(450);
-  await button.click();
+  await click(button);
 
   const result = page.getByRole("status");
   await result.waitFor();
