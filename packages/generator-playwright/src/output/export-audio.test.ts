@@ -14,6 +14,9 @@ afterEach(async () => {
 describe("exportAudio", () => {
   test("copies unique narration audio files into audio/ while preserving extensions", async () => {
     const fixture = await makeFixture();
+    await mkdir(path.join(fixture.outputDir, "audio", "stale"), { recursive: true });
+    await writeFile(path.join(fixture.outputDir, "audio", "obsolete.mp3"), "obsolete bytes");
+    await writeFile(path.join(fixture.outputDir, "audio", "stale", "nested.wav"), "stale bytes");
 
     const exported = await exportAudio(fixture.outputDir, [
       {
@@ -67,6 +70,8 @@ describe("exportAudio", () => {
 
   test("does not create placeholder audio output when narrations are empty", async () => {
     const fixture = await makeFixture();
+    await mkdir(path.join(fixture.outputDir, "audio"), { recursive: true });
+    await writeFile(path.join(fixture.outputDir, "audio", "obsolete.mp3"), "obsolete bytes");
 
     const exported = await exportAudio(fixture.outputDir, []);
 

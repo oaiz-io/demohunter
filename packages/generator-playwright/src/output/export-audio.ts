@@ -1,5 +1,5 @@
-import { basename, extname, join } from "node:path";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
+import { basename, extname, join, resolve } from "node:path";
 
 import type { RecordedNarration } from "../execute/generator-types.js";
 
@@ -12,11 +12,15 @@ export type ExportedNarrationAudio = {
 type ExportAudioDependencies = {
   copyFile: typeof copyFile;
   mkdir: typeof mkdir;
+  readdir: typeof readdir;
+  rm: typeof rm;
 };
 
 const defaultDependencies: ExportAudioDependencies = {
   copyFile,
   mkdir,
+  readdir,
+  rm,
 };
 
 export async function exportAudio(
@@ -29,11 +33,13 @@ export async function exportAudio(
     ...dependencies,
   };
 
+  const audioDir = join(outputDir, "audio");
+
   if (narrations.length === 0) {
+    await resolvedDependencies.rm(audioDir, { recursive: true, force: true });
     return [];
   }
 
-  const audioDir = join(outputDir, "audio");
   await resolvedDependencies.mkdir(audioDir, { recursive: true });
 
   const exported = new Map<string, ExportedNarrationAudio>();
@@ -52,6 +58,15 @@ export async function exportAudio(
       outputPath,
     });
   }
+
+  const expectedPaths = new Set(
+    [...exported.values()].map((artifact) => resolve(artifact.outputPath)),
+  );
+  const existingEntries = await resolvedDependencies.readdir(audioDir, { withFileTypes: true });
+  await Promise.all(existingEntries
+    .map((entry) => join(audioDir, entry.name))
+    .filter((entryPath) => !expectedPaths.has(resolve(entryPath)))
+    .map((entryPath) => resolvedDependencies.rm(entryPath, { recursive: true, force: true })));
 
   return [...exported.values()];
 }

@@ -77,7 +77,10 @@ export async function writeGenerationOutput(
     .filter((candidatePath) => !expectedVideoPaths.has(path.resolve(candidatePath)));
   const subtitles = serializeNarrationSubtitles(input.recordedNarrations);
 
-  await Promise.all(staleVideoPaths.map((candidatePath) => resolvedDependencies.rm(candidatePath, { force: true })));
+  await Promise.all([
+    ...staleVideoPaths.map((candidatePath) => resolvedDependencies.rm(candidatePath, { force: true })),
+    resolvedDependencies.rm(path.join(input.outputDir, "variants"), { recursive: true, force: true }),
+  ]);
 
   await Promise.all(
     videoArtifacts.map(async (artifact) => {
