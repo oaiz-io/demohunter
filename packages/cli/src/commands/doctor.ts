@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +69,7 @@ type DoctorDependencies = {
   log: (message: string) => void;
   playwright: Pick<typeof playwright, "chromium" | "firefox" | "webkit">;
   accessPath: typeof access;
+  statPath: typeof stat;
   resolveKokoroOptions: typeof resolveKokoroPluginOptions;
   probeKokoroWorker: typeof probeKokoroWorker;
 };
@@ -82,6 +84,7 @@ const defaultDependencies: DoctorDependencies = {
   log: console.log,
   playwright,
   accessPath: access,
+  statPath: stat,
   resolveKokoroOptions: resolveKokoroPluginOptions,
   probeKokoroWorker,
 };
@@ -250,7 +253,8 @@ async function addKokoroChecks(
   const executableReady = await runCheck(checks, "kokoro executable", async () => {
     try {
       if (path.isAbsolute(executable) || executable.includes("/") || executable.includes("\\")) {
-        await dependencies.accessPath(executable);
+        await dependencies.accessPath(executable, constants.X_OK);
+        if (!(await dependencies.statPath(executable)).isFile()) throw new Error("not a regular executable file");
       } else {
         await dependencies.checkCommand(process.platform === "win32" ? "where" : "which", [executable]);
       }
@@ -261,10 +265,14 @@ async function addKokoroChecks(
   });
   const modelReady = await runCheck(checks, "kokoro model", async () => {
     if (!authoredOptions.modelPath?.trim()) {
+      if (authoredOptions.runtime === "command" && !authoredOptions.voicesPath?.trim()) {
+        return { message: "model identity is supplied by the external command protocol", value: true };
+      }
       throw new Error("model file missing from config: set providers.tts[].options.modelPath; DemoHunter never downloads model weights");
     }
     try {
-      await dependencies.accessPath(modelPath!);
+      await dependencies.accessPath(modelPath!, constants.R_OK);
+      if (!(await dependencies.statPath(modelPath!)).isFile()) throw new Error("not a regular file");
     } catch (error) {
       throw new Error(`model file missing: ${modelPath}`, { cause: error });
     }
@@ -272,10 +280,14 @@ async function addKokoroChecks(
   });
   const voicesReady = await runCheck(checks, "kokoro voices", async () => {
     if (!authoredOptions.voicesPath?.trim()) {
+      if (authoredOptions.runtime === "command" && !authoredOptions.modelPath?.trim()) {
+        return { message: "voices identity is supplied by the external command protocol", value: true };
+      }
       throw new Error("voices file missing from config: set providers.tts[].options.voicesPath; DemoHunter never downloads voice assets");
     }
     try {
-      await dependencies.accessPath(voicesPath!);
+      await dependencies.accessPath(voicesPath!, constants.R_OK);
+      if (!(await dependencies.statPath(voicesPath!)).isFile()) throw new Error("not a regular file");
     } catch (error) {
       throw new Error(`voices file missing: ${voicesPath}`, { cause: error });
     }
@@ -283,7 +295,7 @@ async function addKokoroChecks(
   });
 
   if (executableReady && modelReady && voicesReady) {
-    await runCheck(checks, "kokoro protocol/version/language/WAV 24k", async () => {
+    await runCheck(checks, "kokoro protocol/version/language capability", async () => {
       const options = await dependencies.resolveKokoroOptions(authoredOptions, undefined, projectRoot);
       if (config.tts.format !== "wav") {
         throw new Error("Kokoro doctor requires WAV output for ffmpeg-compatible narration.");
@@ -294,12 +306,12 @@ async function addKokoroChecks(
       }
       await dependencies.probeKokoroWorker(options);
       return {
-        message: "Kokoro dependencies loaded; protocol/version handshake passed and selected language is configured for WAV at 24,000 Hz",
+        message: "Kokoro protocol/version/asset identity handshake passed; selected language is configured for WAV at 24,000 Hz",
       };
     });
   } else {
     checks.push({
-      name: "kokoro protocol/version/language/WAV 24k",
+      name: "kokoro protocol/version/language capability",
       status: "fail",
       message: "Skipped until the Kokoro executable, model file, and voices file checks pass",
     });
@@ -312,7 +324,7 @@ export async function probeKokoroWorker(options: KokoroPluginOptions): Promise<v
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-      ...(options.env === undefined ? {} : { env: { ...options.env } }),
+      ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
     });
     const maxBytes = 64 * 1024;
     let output = "";

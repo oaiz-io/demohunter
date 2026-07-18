@@ -11,7 +11,7 @@ import {
   DEFAULT_TTS_CONFIG,
 } from "../../../sdk/src/index.js";
 import type { NarrationProviderPlugin } from "../../../tts-core/src/index.js";
-import { generateCommand, locateBundledKokoroWorker } from "./generate.js";
+import { generateCommand, locateBundledKokoroWorker, resolveKokoroPluginOptions } from "./generate.js";
 
 const tempRoots: string[] = [];
 
@@ -511,6 +511,38 @@ describe("generateCommand", () => {
       loadConfig: async () => loadedConfig,
       log: () => {},
     })).rejects.toThrow('Narration provider descriptor "acme-local" has no installed CLI implementation');
+  });
+
+  test("accepts a minimal self-identifying Kokoro command descriptor", async () => {
+    const options = await resolveKokoroPluginOptions({ runtime: "command", executable: "kokoro" }, undefined, "/tmp/project");
+    expect(options).toEqual({ runtime: "command", executable: "kokoro", args: [] });
+  });
+
+  test("loads an arbitrary authored provider through an injected descriptor loader", async () => {
+    const cwd = await makeTempProject();
+    const customPlugin = makePlugin("acme-local");
+    const loadedConfig = {
+      ...makeLoadedConfig(cwd),
+      config: {
+        ...makeLoadedConfig(cwd).config,
+        providers: { tts: [{ name: "acme-local", options: { endpoint: "local" } }] },
+        tts: { ...DEFAULT_TTS_CONFIG, provider: "acme-local" },
+      },
+    };
+    let resolved = false;
+    await generateCommand(cwd, "demos/sample.tour.ts", {
+      providerDescriptorLoaders: new Map([["acme-local", async (descriptor) => {
+        expect(descriptor.options).toEqual({ endpoint: "local" });
+        return customPlugin;
+      }]]),
+      generateTour: async (input) => {
+        resolved = input.narrationRegistry?.resolve("acme-local") === customPlugin;
+        return { outputDir: "out", videoPath: "out/video.mp4" };
+      },
+      loadConfig: async () => loadedConfig,
+      log: () => {},
+    });
+    expect(resolved).toBe(true);
   });
 });
 

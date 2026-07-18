@@ -22,6 +22,18 @@ type Sidecar = {
   writeId: string;
 };
 
+type RuntimeSidecar = {
+  schema: 1;
+  protocol: string;
+  backendVersion: string;
+  modelSha256: string;
+  voicesSha256: string;
+  verifiedAt: string;
+  writeId: string;
+};
+
+export type KokoroRuntimeIdentity = Pick<RuntimeSidecar, "backendVersion" | "modelSha256" | "voicesSha256">;
+
 export type ResolveKokoroIdentityOptions = {
   cacheDir: string;
   modelPath: string;
@@ -34,6 +46,49 @@ export type ResolveKokoroIdentityOptions = {
 export function kokoroIdentitySidecarPath(options: Pick<ResolveKokoroIdentityOptions, "cacheDir" | "modelPath" | "voicesPath">): string {
   const locator = sha256(`${resolve(options.modelPath)}\0${resolve(options.voicesPath)}`);
   return join(resolve(options.cacheDir), ".kokoro", "identities", `${locator}.json`);
+}
+
+export function kokoroRuntimeIdentitySidecarPath(options: { cacheDir: string; runtimeLocator: string }): string {
+  return join(resolve(options.cacheDir), ".kokoro", "runtime-identities", `${sha256(options.runtimeLocator)}.json`);
+}
+
+export async function resolveKokoroRuntimeIdentity(options: {
+  cacheDir: string;
+  runtimeLocator: string;
+  protocolIdentity: string;
+  expectedBackendVersion?: string;
+  advertised?: KokoroRuntimeIdentity;
+  now?: () => Date;
+}): Promise<KokoroRuntimeIdentity> {
+  const sidecarPath = kokoroRuntimeIdentitySidecarPath(options);
+  if (options.advertised !== undefined) {
+    if (options.expectedBackendVersion !== undefined && options.advertised.backendVersion !== options.expectedBackendVersion) {
+      throw new Error(`Kokoro worker backend version ${JSON.stringify(options.advertised.backendVersion)} does not match required version ${JSON.stringify(options.expectedBackendVersion)}.`);
+    }
+    const record: RuntimeSidecar = {
+      schema: 1,
+      protocol: options.protocolIdentity,
+      backendVersion: options.advertised.backendVersion,
+      modelSha256: options.advertised.modelSha256,
+      voicesSha256: options.advertised.voicesSha256,
+      verifiedAt: (options.now?.() ?? new Date()).toISOString(),
+      writeId: randomUUID(),
+    };
+    await atomicWriteJson(sidecarPath, record);
+    return options.advertised;
+  }
+
+  const sidecar = await readRuntimeSidecar(sidecarPath);
+  if (sidecar === null) throw new Error("Kokoro executable not found and no verified offline runtime identity is available.");
+  if (sidecar.protocol !== options.protocolIdentity) throw new Error("Kokoro offline runtime identity sidecar is incompatible with the protocol version.");
+  if (options.expectedBackendVersion !== undefined && sidecar.backendVersion !== options.expectedBackendVersion) {
+    throw new Error("Kokoro offline runtime identity sidecar is incompatible with the configured backend version.");
+  }
+  return {
+    backendVersion: sidecar.backendVersion,
+    modelSha256: sidecar.modelSha256,
+    voicesSha256: sidecar.voicesSha256,
+  };
 }
 
 export async function resolveKokoroAssetIdentity(options: ResolveKokoroIdentityOptions): Promise<KokoroAssetIdentity> {
@@ -114,7 +169,23 @@ async function readSidecar(path: string): Promise<Sidecar | null> {
   return value;
 }
 
+async function readRuntimeSidecar(path: string): Promise<RuntimeSidecar | null> {
+  const text = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? null : Promise.reject(error));
+  if (text === null) return null;
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { throw new Error("Kokoro offline runtime identity sidecar is corrupt."); }
+  if (!isRuntimeSidecar(value)) throw new Error("Kokoro offline runtime identity sidecar has an unsupported schema or invalid content.");
+  return value;
+}
+
 function isSidecar(value: unknown): value is Sidecar {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return v.schema === 1 && typeof v.backendVersion === "string" && typeof v.protocol === "string"
+    && isDigest(v.modelSha256) && isDigest(v.voicesSha256) && typeof v.verifiedAt === "string" && typeof v.writeId === "string";
+}
+
+function isRuntimeSidecar(value: unknown): value is RuntimeSidecar {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   return v.schema === 1 && typeof v.backendVersion === "string" && typeof v.protocol === "string"
@@ -123,7 +194,7 @@ function isSidecar(value: unknown): value is Sidecar {
 
 function isDigest(value: unknown): value is string { return typeof value === "string" && /^[a-f0-9]{64}$/.test(value); }
 
-async function atomicWriteJson(path: string, value: Sidecar): Promise<void> {
+async function atomicWriteJson(path: string, value: Sidecar | RuntimeSidecar): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);

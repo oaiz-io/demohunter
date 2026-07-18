@@ -48,7 +48,7 @@ Kokoro is selected, but the configured command or Python runtime cannot be resol
 
 ## `model file missing` or `voices file missing`
 
-Set absolute or project-resolvable `modelPath` and `voicesPath` values in the `kokoro(...)` descriptor. DemoHunter contains neither asset. If both are temporarily unavailable, only narration already covered by a previously verified Kokoro identity sidecar and audio cache can resolve offline; a partial or uncached setup fails deliberately.
+For the bundled worker, set absolute or project-resolvable `modelPath` and `voicesPath` values in the `kokoro(...)` descriptor. DemoHunter contains neither asset. A compatible `runtime: "command"` adapter may omit both paths only when its ready message supplies stable model/voices SHA-256 digests and a backend version. If the runtime or both assets are temporarily unavailable, only narration covered by a previously verified local identity sidecar and audio cache can resolve offline; a partial or uncached setup fails deliberately.
 
 ## Kokoro protocol, version, language, or WAV failure
 

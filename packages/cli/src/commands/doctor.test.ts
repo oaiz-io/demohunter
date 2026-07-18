@@ -154,24 +154,25 @@ describe("doctorCommand", () => {
     expect(parsed.checks.some((check) => check.name === "OPENAI_API_KEY")).toBe(false);
   });
 
-  test("reports the exact missing model and voices configuration", async () => {
+  test("accepts model and voices identity from a self-identifying command adapter", async () => {
     const log = mock(() => {});
 
-    await expect(doctorCommand("/tmp/project", {
+    await doctorCommand("/tmp/project", {
       ...passingDoctorDependencies(),
       accessPath: mock(async () => {}),
+      probeKokoroWorker: mock(async () => {}),
       loadConfig: async () => makeKokoroLoadedConfig("/tmp/project", {
         runtime: "command",
         executable: "kokoro",
       }),
       log,
-    })).rejects.toThrow("Doctor found failing checks.");
+    });
 
     const parsed = JSON.parse(String(log.mock.calls[0]?.[0])) as {
       checks: Array<{ name: string; message: string }>;
     };
-    expect(parsed.checks.find((check) => check.name === "kokoro model")?.message).toContain("model file missing");
-    expect(parsed.checks.find((check) => check.name === "kokoro voices")?.message).toContain("voices file missing");
+    expect(parsed.checks.find((check) => check.name === "kokoro model")?.message).toContain("external command protocol");
+    expect(parsed.checks.find((check) => check.name === "kokoro voices")?.message).toContain("external command protocol");
   });
 
   test("uses a bounded no-synthesis protocol probe for a valid Kokoro selection", async () => {
@@ -198,15 +199,15 @@ describe("doctorCommand", () => {
       checks: Array<{ name: string; status: string }>;
     };
     expect(parsed.ok).toBe(true);
-    expect(parsed.checks.find((check) => check.name === "kokoro protocol/version/language/WAV 24k")?.status).toBe("pass");
+    expect(parsed.checks.find((check) => check.name === "kokoro protocol/version/language capability")?.status).toBe("pass");
     expect(probeKokoroWorker).toHaveBeenCalledWith(expect.objectContaining({
       executable: "kokoro",
       args: ["--literal=$(never-executed)"],
       modelPath: "/tmp/project/models/kokoro.onnx",
       voicesPath: "/tmp/project/models/voices.bin",
     }));
-    expect(accessPath).toHaveBeenCalledWith("/tmp/project/models/kokoro.onnx");
-    expect(accessPath).toHaveBeenCalledWith("/tmp/project/models/voices.bin");
+    expect(accessPath).toHaveBeenCalledWith("/tmp/project/models/kokoro.onnx", expect.any(Number));
+    expect(accessPath).toHaveBeenCalledWith("/tmp/project/models/voices.bin", expect.any(Number));
   });
 });
 
@@ -215,6 +216,7 @@ function passingDoctorDependencies() {
     checkCommand: mock(async () => {}),
     fetch: mock(async () => new Response("ok", { status: 200 })) as never,
     getPlaywrightVersion: () => "1.61.0",
+    statPath: mock(async () => ({ isFile: () => true })) as never,
     playwright: {
       chromium: { launch: mock(async () => ({ close: mock(async () => {}) })) } as never,
       firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) } as never,

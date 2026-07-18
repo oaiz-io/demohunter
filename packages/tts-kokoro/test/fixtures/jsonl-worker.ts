@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+
 const mode = process.argv[2] ?? "ok";
 const encoder = new TextEncoder();
 
@@ -14,7 +17,20 @@ function wav(text: string): Uint8Array {
 }
 
 if (mode === "startup-timeout") await new Promise(() => {});
-if (mode === "malformed-startup") process.stdout.write("not-json\n"); else send({ protocol: 1, op: "ready", backendVersion: "fixture-1" });
+if (mode === "require-inherited-env" && !process.env.PATH) process.exit(17);
+const modelSha256 = mode === "assets" || mode === "mutate-assets"
+  ? createHash("sha256").update(readFileSync(process.argv[3]!)).digest("hex")
+  : createHash("sha256").update("model").digest("hex");
+const voicesSha256 = mode === "assets" || mode === "mutate-assets"
+  ? createHash("sha256").update(readFileSync(process.argv[4]!)).digest("hex")
+  : createHash("sha256").update("voices").digest("hex");
+if (mode === "malformed-startup") process.stdout.write("not-json\n"); else send({
+  protocol: 1,
+  op: "ready",
+  backendVersion: "fixture-1",
+  modelSha256,
+  voicesSha256,
+});
 if (mode === "crash") process.exit(3);
 
 for await (const line of console) {
@@ -26,6 +42,7 @@ for await (const line of console) {
   if (mode === "wrong-id") { send({ protocol: 1, id: "wrong", ok: true }); continue; }
   if (mode === "stderr-crash") { process.stderr.write("useful diagnostic"); process.exit(9); }
   await Bun.write(String(request.outputPath), wav(String(request.text)));
+  if (mode === "mutate-assets") writeFileSync(process.argv[3]!, "changed-during-synthesis");
   const response = { protocol: 1, id: request.id, ok: true, path: request.outputPath, format: mode === "wrong-format" ? "mp3" : "wav", sampleRate: mode === "wrong-rate" ? 22050 : 24000 };
   send(response);
   if (mode === "duplicate") send(response);

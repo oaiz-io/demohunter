@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
+import importlib.metadata
 import json
 import os
 import sys
@@ -17,14 +19,16 @@ LANGUAGES = {"en-us", "en-gb", "es", "fr", "hi", "it", "ja", "pt-br", "zh"}
 
 
 class KokoroOnnxBackend:
-    version = "kokoro-onnx"
-
     def __init__(self, model_path: str, voices_path: str) -> None:
         try:
             module = importlib.import_module("kokoro_onnx")
         except ImportError as error:
             raise RuntimeError("kokoro-onnx is not installed; install it separately before using Kokoro") from error
         self._engine = module.Kokoro(model_path, voices_path)
+        try:
+            self.version = importlib.metadata.version("kokoro-onnx")
+        except importlib.metadata.PackageNotFoundError:
+            self.version = "kokoro-onnx:unknown"
 
     def synthesize(self, text: str, voice: str, language: str, speed: float, output_path: str) -> None:
         try:
@@ -61,8 +65,22 @@ def validate_request(value: Any) -> dict[str, Any]:
     return value
 
 
-def run(backend: Any) -> int:
-    emit({"protocol": PROTOCOL, "op": "ready", "backendVersion": str(backend.version)})
+def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as asset:
+        for chunk in iter(lambda: asset.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def run(backend: Any, model_sha256: str, voices_sha256: str) -> int:
+    emit({
+        "protocol": PROTOCOL,
+        "op": "ready",
+        "backendVersion": str(backend.version),
+        "modelSha256": model_sha256,
+        "voicesSha256": voices_sha256,
+    })
     for raw_line in sys.stdin:
         request_id = "invalid"
         try:
@@ -90,11 +108,15 @@ def main() -> int:
         if not os.path.isfile(path):
             parser.error(f"{label} file missing: {path}")
     try:
+        model_sha256 = sha256_file(args.model)
+        voices_sha256 = sha256_file(args.voices)
         if args.backend_module:
             backend = importlib.import_module(args.backend_module).create_backend(args.model, args.voices)
         else:
             backend = KokoroOnnxBackend(args.model, args.voices)
-        return run(backend)
+        if sha256_file(args.model) != model_sha256 or sha256_file(args.voices) != voices_sha256:
+            raise RuntimeError("model or voices file changed while the Kokoro backend was loading")
+        return run(backend, model_sha256, voices_sha256)
     except Exception as error:
         print(f"Kokoro worker startup failed: {error}", file=sys.stderr, flush=True)
         if os.environ.get("DEMOHUNTER_KOKORO_DEBUG") == "1":

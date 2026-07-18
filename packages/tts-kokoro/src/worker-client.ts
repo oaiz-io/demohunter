@@ -7,6 +7,7 @@ import {
   KOKORO_PROTOCOL_VERSION,
   parseReadyMessage,
   parseResponse,
+  type KokoroReadyMessage,
   type KokoroResponse,
   type KokoroSynthesisRequest,
 } from "./protocol.js";
@@ -73,9 +74,18 @@ export class KokoroWorkerClient {
         throw error;
       }
     };
-    const result = this.#tail.then(run, run);
-    this.#tail = result.then(() => undefined, () => undefined);
-    return result;
+    return this.#enqueue(run, signal);
+  }
+
+  discoverIdentity(signal: AbortSignal): Promise<KokoroReadyMessage> {
+    if (this.#closed) return Promise.reject(new Error("Kokoro worker client is closed."));
+    if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    return this.#enqueue(async () => {
+      signal.throwIfAborted();
+      const session = await this.#getSession(signal);
+      if (session.ready === undefined) throw new Error("Kokoro worker session has no verified identity.");
+      return session.ready;
+    }, signal);
   }
 
   async close(): Promise<void> {
@@ -111,6 +121,7 @@ export class KokoroWorkerClient {
       if (this.#options.expectedBackendVersion !== undefined && ready.backendVersion !== this.#options.expectedBackendVersion) {
         throw new Error(`Kokoro worker backend version ${JSON.stringify(ready.backendVersion)} does not match required version ${JSON.stringify(this.#options.expectedBackendVersion)}.`);
       }
+      session.ready = ready;
       return session;
     } catch (error) {
       session.kill();
@@ -127,6 +138,18 @@ export class KokoroWorkerClient {
     if (session !== undefined) await session.waitForExit(this.#options.shutdownTimeoutMs).catch(() => undefined);
     session?.dispose();
   }
+
+  #enqueue<T>(run: () => Promise<T>, signal: AbortSignal): Promise<T> {
+    let rejectAborted: ((reason: unknown) => void) | undefined;
+    const aborted = new Promise<never>((_resolve, reject) => { rejectAborted = reject; });
+    const onAbort = () => rejectAborted?.(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+
+    const queued = this.#tail.then(run, run);
+    this.#tail = queued.then(() => undefined, () => undefined);
+    return Promise.race([queued, aborted]).finally(() => signal.removeEventListener("abort", onAbort));
+  }
 }
 
 class WorkerSession {
@@ -139,6 +162,7 @@ class WorkerSession {
   #fatal?: Error;
   #stderr = "";
   exited = false;
+  ready?: KokoroReadyMessage;
 
   constructor(options: KokoroWorkerClientOptions & { maxLineBytes: number; maxStderrBytes: number }) {
     this.maxLineBytes = options.maxLineBytes;
@@ -147,7 +171,7 @@ class WorkerSession {
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-      ...(options.env === undefined ? {} : { env: { ...options.env } }),
+      ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
     });
     this.child.stdout.on("data", this.#onStdout);
     this.child.stderr.on("data", this.#onStderr);

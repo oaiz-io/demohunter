@@ -9,7 +9,7 @@ DemoHunter only needs `OPENAI_API_KEY` when a generate run requires uncached nar
 
 ## Kokoro Setup
 
-For `kokoro executable not found`, install or correct the configured Python/worker command yourself. For `model file missing` or `voices file missing`, provide both paths in the `kokoro(...)` descriptor. DemoHunter never installs `kokoro-onnx`/`soundfile`, downloads assets, or bundles weights.
+For `kokoro executable not found`, install or correct the configured Python/worker command yourself. The bundled worker requires both `modelPath` and `voicesPath`; a compatible command adapter may omit both only when its ready message reports model/voices SHA-256 digests and backend version. DemoHunter never installs `kokoro-onnx`/`soundfile`, downloads assets, or bundles weights.
 
 Protocol/version, unsupported-language, WAV/24 kHz, crash, timeout, cancellation, corrupt-output, and corrupt-cache errors are deliberate safety boundaries. Run `demohunter doctor`, confirm a DemoHunter-compatible JSONL worker and supported language (`en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, `zh`), then retry. A fully cached offline run needs a previously verified identity sidecar; a cache miss needs local model and voices files.
 

@@ -133,6 +133,8 @@ Run `npx demohunter doctor`. It checks only the selected provider, including the
 
 Exact Kokoro languages are `en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, and `zh`. Kokoro output is always WAV at 24 kHz so ffmpeg can mux it directly.
 
+A separately installed compatible adapter may instead use `kokoro({ runtime: "command", executable: "kokoro" })` with no host asset paths. The adapter must identify its model and voices by SHA-256 and report its backend version in the protocol-v1 ready message. DemoHunter stores only those semantic digests in portable cache metadata.
+
 On the first asset-backed run, DemoHunter hashes model and voices content and writes a local identity sidecar. Cache keys also include backend and protocol versions. A fully cached rerun can resolve offline from the verified sidecar even when assets are temporarily unavailable; a cache miss still requires both files. With files present, a corrupt sidecar is replaced from verified hashes. Executable and asset paths do not enter portable narration metadata.
 
 ## Polish and social outputs

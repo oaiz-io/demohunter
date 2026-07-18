@@ -81,7 +81,7 @@ Inspect `demohunter.config.ts` before editing:
 - Set `record.showActions: false` for polished videos when Playwright action labels or locator text would distract from the product UI.
 - `tts.provider` is provider-neutral. Built-ins are `openai`, `elevenlabs`, and opt-in local `kokoro`; OpenAI remains the default. ElevenLabs receives `tts.language` as `language_code`; OpenAI receives it through voice instructions.
 - ElevenLabs voices are configured by voice ID and optional `voiceSettings`.
-- Kokoro requires `providers.tts: [kokoro(...)]` plus `tts: kokoroTTS(...)`. It supports `en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, and `zh`, and always produces WAV at 24 kHz. Do not download its separately owned runtime, model, or voices.
+- Kokoro requires `providers.tts: [kokoro(...)]` plus `tts: kokoroTTS(...)`. It supports `en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, and `zh`, and always produces WAV at 24 kHz. A custom command adapter may omit asset paths only when its protocol ready message supplies model/voices SHA-256 identities and a backend version. Do not download its separately owned runtime, model, or voices.
 
 Treat config as an input to the tour. Do not duplicate config values inside the tour unless the repo already does that intentionally.
 

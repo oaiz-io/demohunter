@@ -6,6 +6,8 @@ export type KokoroReadyMessage = {
   protocol: 1;
   op: "ready";
   backendVersion: string;
+  modelSha256: string;
+  voicesSha256: string;
 };
 
 export type KokoroSynthesisRequest = {
@@ -58,10 +60,16 @@ export function parseReadyMessage(line: string): KokoroReadyMessage {
     || value.op !== "ready"
     || typeof value.backendVersion !== "string"
     || value.backendVersion.trim() === ""
+    || !isSha256(value.modelSha256)
+    || !isSha256(value.voicesSha256)
   ) {
     throw new Error("Kokoro worker returned an incompatible startup message (protocol v1 required).");
   }
   return value as KokoroReadyMessage;
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 }
 
 export function parseResponse(line: string): KokoroResponse {

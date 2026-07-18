@@ -164,7 +164,7 @@ export default defineConfig({
 });
 ```
 
-The bundled worker is the default and launches `python3` with literal arguments and no shell. A compatible external DemoHunter JSONL adapter can instead use the minimal command shape `kokoro({ runtime: "command", executable: "kokoro" })`; generation and `doctor` will ask for `modelPath` and `voicesPath` unless that adapter contract gains an explicit asset-identity mechanism. Full command configuration keeps paths separate from argv:
+The bundled worker is the default and launches `python3` with literal arguments and no shell. A compatible external DemoHunter JSONL adapter can instead use the minimal command shape `kokoro({ runtime: "command", executable: "kokoro" })`. Its protocol-v1 ready message must report stable model and voices SHA-256 digests plus the backend version, so cache identity remains portable without host asset paths. Full command configuration keeps paths separate from argv:
 
 ```ts
 kokoro({

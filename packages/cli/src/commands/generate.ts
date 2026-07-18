@@ -41,7 +41,13 @@ type GenerateDependencies = {
   createElevenLabsPlugin: () => NarrationProviderPlugin;
   createKokoroPlugin: (options: KokoroPluginOptions) => NarrationProviderPlugin;
   locateBundledWorker: (moduleUrl?: string) => Promise<string>;
+  providerDescriptorLoaders: ReadonlyMap<string, NarrationProviderDescriptorLoader>;
 };
+
+export type NarrationProviderDescriptorLoader = (
+  descriptor: NarrationProviderDescriptor,
+  context: { dependencies: ProviderLoaderDependencies; projectRoot: string },
+) => NarrationProviderPlugin | Promise<NarrationProviderPlugin>;
 
 export type GenerateCommandOptions = {
   dryRun?: boolean;
@@ -62,6 +68,15 @@ const defaultDependencies: GenerateDependencies = {
   createElevenLabsPlugin: createElevenLabsNarrationProviderPlugin,
   createKokoroPlugin: createKokoroNarrationProviderPlugin,
   locateBundledWorker: locateBundledKokoroWorker,
+  providerDescriptorLoaders: new Map([
+    ["kokoro", async (descriptor, context) => context.dependencies.createKokoroPlugin(
+      await resolveKokoroPluginOptions(
+        descriptor.options as KokoroProviderOptions,
+        context.dependencies.locateBundledWorker,
+        context.projectRoot,
+      ),
+    )],
+  ]),
 };
 
 export async function generateCommand(
@@ -148,7 +163,7 @@ export async function generateCommand(
 
 type ProviderLoaderDependencies = Pick<
   GenerateDependencies,
-  "createKokoroPlugin" | "locateBundledWorker"
+  "createKokoroPlugin" | "locateBundledWorker" | "providerDescriptorLoaders"
 >;
 
 export async function registerAuthoredNarrationProviders(
@@ -158,19 +173,13 @@ export async function registerAuthoredNarrationProviders(
   projectRoot = process.cwd(),
 ): Promise<void> {
   for (const descriptor of descriptors) {
-    if (descriptor.name !== "kokoro") {
+    const loader = dependencies.providerDescriptorLoaders.get(descriptor.name);
+    if (loader === undefined) {
       throw new Error(
         `Narration provider descriptor ${JSON.stringify(descriptor.name)} has no installed CLI implementation. Install a CLI plugin that implements it or remove the descriptor.`,
       );
     }
-
-    registry.register(dependencies.createKokoroPlugin(
-      await resolveKokoroPluginOptions(
-        descriptor.options as KokoroProviderOptions,
-        dependencies.locateBundledWorker,
-        projectRoot,
-      ),
-    ));
+    registry.register(await loader(descriptor, { dependencies, projectRoot }));
   }
 }
 
@@ -179,6 +188,17 @@ export async function resolveKokoroPluginOptions(
   locateBundledWorker: (moduleUrl?: string) => Promise<string> = locateBundledKokoroWorker,
   projectRoot = process.cwd(),
 ): Promise<KokoroPluginOptions> {
+  if (options.runtime === "command") {
+    return {
+      ...options,
+      executable: resolveAuthoredCommand(options.executable, projectRoot),
+      ...(options.cwd === undefined ? {} : { cwd: resolveAuthoredFilesystemPath(options.cwd, projectRoot) }),
+      ...(options.modelPath === undefined ? {} : { modelPath: resolveAuthoredFilesystemPath(options.modelPath, projectRoot) }),
+      ...(options.voicesPath === undefined ? {} : { voicesPath: resolveAuthoredFilesystemPath(options.voicesPath, projectRoot) }),
+      args: [...(options.args ?? [])],
+    };
+  }
+
   const modelPath = resolveAuthoredFilesystemPath(
     requireKokoroAssetPath(options.modelPath, "model"),
     projectRoot,
@@ -187,17 +207,6 @@ export async function resolveKokoroPluginOptions(
     requireKokoroAssetPath(options.voicesPath, "voices"),
     projectRoot,
   );
-
-  if (options.runtime === "command") {
-    return {
-      ...options,
-      executable: resolveAuthoredCommand(options.executable, projectRoot),
-      ...(options.cwd === undefined ? {} : { cwd: resolveAuthoredFilesystemPath(options.cwd, projectRoot) }),
-      modelPath,
-      voicesPath,
-      args: [...(options.args ?? [])],
-    };
-  }
 
   const workerPath = options.workerPath === undefined
     ? await locateBundledWorker()
