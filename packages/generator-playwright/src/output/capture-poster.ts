@@ -58,17 +58,19 @@ export async function capturePoster(
   const videoDurationMs = Math.round(durationSeconds * 1_000);
   const captureTimestampMs = Math.max(
     0,
-    Math.min(PORTABLE_POSTER_TIMESTAMP_MS, videoDurationMs > 0 ? videoDurationMs - 1 : 0),
+    Math.min(PORTABLE_POSTER_TIMESTAMP_MS, videoDurationMs > 0 ? videoDurationMs - 100 : 0),
   );
 
   await resolvedDependencies.runCommand(resolvedDependencies.ffmpegCommand, [
     "-y",
-    "-ss",
-    (captureTimestampMs / 1_000).toFixed(3),
     "-i",
     input.videoPath,
+    "-ss",
+    (captureTimestampMs / 1_000).toFixed(3),
     "-frames:v",
     "1",
+    "-pix_fmt",
+    "yuvj420p",
     posterPath,
   ]);
 

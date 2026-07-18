@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 
 import type { DemoHunterRunContext, HighlightStyle, ResolvedDemoHunterConfig } from "@demohunter/sdk";
@@ -17,6 +17,7 @@ import { attachDebugCapture } from "./debug/failure-artifacts.js";
 import type { DebugArtifactResult, DebugCapture, DebugPhase } from "./debug/failure-artifacts.js";
 import { replayTimeline } from "./execute/replay-timeline.js";
 import { prepareOutputDir as prepareOutputDirHelper } from "./output/prepare-output-dir.js";
+import { renderOutputVariants } from "./output/render-output-variants.js";
 import { writeGenerationOutput } from "./output/write-generation-output.js";
 import type { GenerationChapter, WriteGenerationOutputResult } from "./output/write-generation-output.js";
 import { showChapterOverlay } from "./overlays/chapter-overlay.js";
@@ -52,11 +53,14 @@ type GenerateTourDependencies = {
   attachDebugCapture: typeof attachDebugCapture;
   collectTimeline: typeof collectTimeline;
   installRecordingEffects: typeof installRecordingEffects;
+  generateResponsiveVariant: (input: GenerateTourInput) => Promise<GenerateTourResult>;
+  mkdtemp: typeof mkdtemp;
   muxVideo: typeof muxVideo;
   now: () => number;
   playwright: BrowserTypeMap;
   prepareOutputDir: (tourId: string, outputRoot: string) => Promise<string>;
   replayTimeline: typeof replayTimeline;
+  renderOutputVariants: typeof renderOutputVariants;
   showChapterOverlay: typeof showChapterOverlay;
   startScreencast: typeof startScreencast;
   stopScreencast: typeof stopScreencast;
@@ -68,11 +72,14 @@ const defaultDependencies: GenerateTourDependencies = {
   attachDebugCapture,
   collectTimeline,
   installRecordingEffects,
+  generateResponsiveVariant: (input) => generateTour(input),
+  mkdtemp,
   muxVideo,
   now: () => Date.now(),
   playwright,
   prepareOutputDir: (tourId, outputRoot) => prepareOutputDirHelper(tourId, outputRoot),
   replayTimeline,
+  renderOutputVariants,
   showChapterOverlay,
   startScreencast,
   stopScreencast,
@@ -108,6 +115,7 @@ export async function generateTour(
   let lastRuntimeEvent: TourRuntimeEvent | undefined;
   const chapters: GenerationChapter[] = [];
   const recordedNarrations: RecordedNarration[] = [];
+  const responsiveCaptureRoots: string[] = [];
 
   try {
     passOneContext = await browser.newContext({
@@ -283,6 +291,46 @@ export async function generateTour(
       videos,
       outputDir,
     });
+
+    if (config.output.formats.length > 0) {
+      const responsiveSourceDirs: Partial<Record<"standard" | "square" | "mobile", string>> = {};
+      for (const format of config.output.formats) {
+        if (format.preset === "gif" || format.layout !== "responsive") continue;
+        const responsiveRoot = await resolvedDependencies.mkdtemp(
+          path.join(path.dirname(outputDir), `.demohunter-${format.preset}-`),
+        );
+        responsiveCaptureRoots.push(responsiveRoot);
+        const viewport = responsiveViewport(format.preset);
+        report(onProgress, {
+          phase: "collecting-timeline",
+          message: `Capturing responsive ${format.preset} variant at ${viewport.width}x${viewport.height}`,
+        });
+        const responsiveResult = await resolvedDependencies.generateResponsiveVariant({
+          loadedConfig: {
+            ...loadedConfig,
+            config: {
+              ...config,
+              outputDir: responsiveRoot,
+              viewport,
+              output: { formats: [] },
+            },
+          },
+          onProgress,
+          tourFile,
+        });
+        responsiveSourceDirs[format.preset] = responsiveResult.outputDir;
+      }
+
+      report(onProgress, {
+        phase: "writing-artifacts",
+        message: `Rendering ${config.output.formats.length} social output format(s)`,
+      });
+      await resolvedDependencies.renderOutputVariants({
+        formats: config.output.formats,
+        outputDir,
+        responsiveSourceDirs,
+      });
+    }
     report(onProgress, {
       phase: "completed",
       message: `Wrote ${result.videoPath}`,
@@ -299,6 +347,7 @@ export async function generateTour(
       passOneDebug?.dispose();
       passTwoDebug?.dispose();
       await rm(tempScreencastPath, { force: true });
+      await Promise.all(responsiveCaptureRoots.map((root) => rm(root, { recursive: true, force: true })));
     } catch (error) {
       closeError ??= error;
     }
@@ -324,6 +373,17 @@ export async function generateTour(
     if (primaryError === undefined && closeError !== undefined) {
       throw closeError;
     }
+  }
+}
+
+function responsiveViewport(preset: "standard" | "square" | "mobile") {
+  switch (preset) {
+    case "standard":
+      return { width: 1920, height: 1080 };
+    case "square":
+      return { width: 1080, height: 1080 };
+    case "mobile":
+      return { width: 390, height: 844 };
   }
 }
 

@@ -209,3 +209,38 @@ export const DEFAULT_DEMOHUNTER_CONFIG: Omit<ResolvedDemoHunterConfig, "baseURL"
 export function defineConfig<T extends DemoHunterUserConfig>(config: T): T {
   return config;
 }
+
+export function resolveOutputFormatRequests(
+  formats: readonly OutputFormatRequest[],
+): OutputFormatRequest[] {
+  const seen = new Set<OutputPresetName>();
+
+  return formats.map((request) => {
+    if (seen.has(request.preset)) {
+      throw new Error(`output.formats contains duplicate preset: ${request.preset}`);
+    }
+    seen.add(request.preset);
+
+    if (request.durationMs !== undefined && request.preset !== "gif") {
+      throw new Error("output.formats durationMs is valid only for the gif preset");
+    }
+    if (request.preset === "gif") {
+      const durationMs = request.durationMs ?? 15_000;
+      if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 15_000) {
+        throw new Error("GIF durationMs must be a positive number no greater than 15000");
+      }
+      if (request.layout === "responsive") {
+        throw new Error("The gif preset is derived from MP4 and supports only fit layout");
+      }
+      return { preset: "gif", layout: "fit", durationMs };
+    }
+    if (request.preset === "mobile") {
+      if (request.layout === "fit") {
+        throw new Error("The mobile preset requires responsive layout");
+      }
+      return { preset: "mobile", layout: "responsive" };
+    }
+
+    return { preset: request.preset, layout: request.layout ?? "fit" };
+  });
+}

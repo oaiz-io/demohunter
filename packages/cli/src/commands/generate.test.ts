@@ -86,8 +86,8 @@ describe("generateCommand", () => {
     );
 
     expect(generateTour.mock.calls[0]?.[0].loadedConfig.config.output.formats).toEqual([
-      { preset: "square" },
-      { preset: "gif", durationMs: 10_000 },
+      { preset: "square", layout: "fit" },
+      { preset: "gif", layout: "fit", durationMs: 10_000 },
     ]);
     expect(loadedConfig.config.output.formats).toEqual([]);
   });

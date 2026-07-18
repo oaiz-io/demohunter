@@ -8,6 +8,7 @@ export {
   DEFAULT_TTS_CONFIG,
   DEFAULT_VIEWPORT_CONFIG,
   defineConfig,
+  resolveOutputFormatRequests,
 } from "./config.js";
 export type {
   BrowserName,

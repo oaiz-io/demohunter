@@ -62,12 +62,14 @@ describe("capturePoster", () => {
         command: "/custom/bin/ffmpeg",
         args: [
           "-y",
-          "-ss",
-          "1.000",
           "-i",
           fixture.videoPath,
+          "-ss",
+          "1.000",
           "-frames:v",
           "1",
+          "-pix_fmt",
+          "yuvj420p",
           path.join(fixture.outputDir, "poster.jpg"),
         ],
       },
@@ -96,7 +98,7 @@ describe("capturePoster", () => {
     );
 
     expect(result.videoDurationMs).toBe(500);
-    expect(result.captureTimestampMs).toBe(499);
+    expect(result.captureTimestampMs).toBe(400);
   });
 });
 

@@ -256,6 +256,77 @@ describe("generateTour", () => {
     expect(now).toHaveBeenCalledTimes(4);
   });
 
+  test("runs responsive presets through their own two-pass generation before variant rendering", async () => {
+    const page = { goto: mock(async () => {}) };
+    const context = {
+      close: mock(async () => {}),
+      newPage: mock(async () => page),
+    };
+    const browser = {
+      close: mock(async () => {}),
+      newContext: mock(async () => context),
+    };
+    const outputDir = "/tmp/project/.demohunter/billing-overview";
+    const mobileRoot = "/tmp/project/.demohunter-mobile-fixture";
+    const mobileOutputDir = `${mobileRoot}/billing-overview`;
+    const formats = [
+      { preset: "square" as const, layout: "fit" as const },
+      { preset: "mobile" as const, layout: "responsive" as const },
+      { preset: "gif" as const, layout: "fit" as const, durationMs: 8_000 },
+    ];
+    const generateResponsiveVariant = mock(async () => ({
+      captionsSrtPath: `${mobileOutputDir}/captions.srt`,
+      captionsVttPath: `${mobileOutputDir}/captions.vtt`,
+      chaptersPath: `${mobileOutputDir}/chapters.json`,
+      outputDir: mobileOutputDir,
+      videoPath: `${mobileOutputDir}/video.mp4`,
+    }));
+    const renderOutputVariants = mock(async () => {});
+
+    await generateTour({
+      loadedConfig: createLoadedConfig("/tmp/project", { output: { formats } }),
+      tourFile: createTourFile("/tmp/project"),
+    }, {
+      attachDebugCapture: mock(() => createDebugCapture()),
+      collectTimeline: mock(async () => ({ entries: [], narrations: [] })),
+      generateResponsiveVariant,
+      installRecordingEffects: mock(async () => {}),
+      mkdtemp: mock(async () => mobileRoot),
+      muxVideo: mock(async () => ({
+        mp4: { fileName: "video.mp4", format: "mp4", path: "/tmp/video.mp4" },
+      })),
+      playwright: {
+        chromium: { launch: mock(async () => browser) },
+        firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+        webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+      },
+      prepareOutputDir: mock(async () => outputDir),
+      renderOutputVariants,
+      replayTimeline: mock(async ({ onBeforeRun }) => { await onBeforeRun?.(); }),
+      startScreencast: mock(async () => {}),
+      stopScreencast: mock(async () => {}),
+      writeGenerationOutput: mock(async () => ({
+        captionsSrtPath: `${outputDir}/captions.srt`,
+        captionsVttPath: `${outputDir}/captions.vtt`,
+        chaptersPath: `${outputDir}/chapters.json`,
+        outputDir,
+        videoPath: `${outputDir}/video.mp4`,
+      })),
+    });
+
+    expect(generateResponsiveVariant).toHaveBeenCalledTimes(1);
+    expect(generateResponsiveVariant.mock.calls[0]?.[0].loadedConfig.config.viewport).toEqual({
+      width: 390,
+      height: 844,
+    });
+    expect(generateResponsiveVariant.mock.calls[0]?.[0].loadedConfig.config.output).toEqual({ formats: [] });
+    expect(renderOutputVariants).toHaveBeenCalledWith({
+      formats,
+      outputDir,
+      responsiveSourceDirs: { mobile: mobileOutputDir },
+    });
+  });
+
   test("applies highlight visuals after the base highlight, resolving style and duration defaults", async () => {
     const events: string[] = [];
     const baseHighlight = mock(async () => {

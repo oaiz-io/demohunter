@@ -5,6 +5,7 @@ import type { GenerationProgressEvent } from "@demohunter/generator-playwright";
 import {
   DEFAULT_COOKIE_BANNER_CONFIG,
   DEFAULT_CURSOR_CONFIG,
+  resolveOutputFormatRequests,
   type DemoHunterTour,
   type ResolvedDemoHunterConfig,
 } from "@demohunter/sdk";
@@ -120,7 +121,9 @@ export function applyGenerateOverrides(
 
   return {
     ...config,
-    output: options.formats === undefined ? config.output : { formats: options.formats.map((format) => ({ ...format })) },
+    output: options.formats === undefined
+      ? config.output
+      : { formats: resolveOutputFormatRequests(options.formats) },
     record: {
       ...config.record,
       cookieBanners: options.cookieDismiss === undefined
