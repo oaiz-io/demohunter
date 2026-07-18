@@ -118,6 +118,41 @@ describe("runCli", () => {
     );
   });
 
+  test("dispatches repeatable social formats with a GIF duration", async () => {
+    const stubs = buildStubs();
+
+    await runCli([
+      "generate",
+      "demos/sample.tour.ts",
+      "--format", "standard",
+      "--format=square",
+      "--format", "gif",
+      "--duration", "12.5",
+    ], "/tmp/demo", stubs);
+
+    expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", {
+      formats: [
+        { preset: "standard" },
+        { preset: "square" },
+        { preset: "gif", durationMs: 12_500 },
+      ],
+    });
+  });
+
+  test("rejects duplicate formats and GIF durations without GIF output", async () => {
+    await expect(runCli([
+      "generate", "demos/sample.tour.ts", "--format", "square", "--format=square",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow("--format square may only be provided once");
+
+    await expect(runCli([
+      "generate", "demos/sample.tour.ts", "--format", "standard", "--duration", "12",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow("only be used together with --format gif");
+
+    await expect(runCli([
+      "generate", "demos/sample.tour.ts", "--format", "gif", "--duration", "16",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow("up to 15");
+  });
+
   test("dispatches doctor", async () => {
     const stubs = buildStubs();
 

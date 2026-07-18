@@ -29,6 +29,7 @@ export type GenerateCommandOptions = {
   flowOnly?: boolean;
   cookieDismiss?: false | "reject" | "accept" | "hide";
   cursor?: "none" | "highlight" | "smooth" | "ripple";
+  formats?: Array<{ preset: "standard" | "square" | "mobile" | "gif"; layout?: "fit" | "responsive"; durationMs?: number }>;
 };
 
 const defaultDependencies: GenerateDependencies = {
@@ -106,19 +107,20 @@ export async function generateCommand(
 function isGenerateCommandOptions(
   value: GenerateCommandOptions | Partial<GenerateDependencies>,
 ): value is GenerateCommandOptions {
-  return "dryRun" in value || "flowOnly" in value || "cookieDismiss" in value || "cursor" in value;
+  return "dryRun" in value || "flowOnly" in value || "cookieDismiss" in value || "cursor" in value || "formats" in value;
 }
 
 export function applyGenerateOverrides(
   config: ResolvedDemoHunterConfig,
   options: GenerateCommandOptions,
 ): ResolvedDemoHunterConfig {
-  if (options.cookieDismiss === undefined && options.cursor === undefined) {
+  if (options.cookieDismiss === undefined && options.cursor === undefined && options.formats === undefined) {
     return config;
   }
 
   return {
     ...config,
+    output: options.formats === undefined ? config.output : { formats: options.formats.map((format) => ({ ...format })) },
     record: {
       ...config.record,
       cookieBanners: options.cookieDismiss === undefined

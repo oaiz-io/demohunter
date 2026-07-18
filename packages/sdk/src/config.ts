@@ -1,5 +1,18 @@
 export type BrowserName = "chromium" | "firefox" | "webkit";
 export type RecordFormat = "mp4" | "webm";
+export type OutputPresetName = "standard" | "square" | "mobile" | "gif";
+export type OutputLayout = "fit" | "responsive";
+
+export type OutputFormatRequest = {
+  preset: OutputPresetName;
+  layout?: OutputLayout;
+  /** GIF duration in milliseconds. Valid only for the gif preset. */
+  durationMs?: number;
+};
+
+export type OutputConfig = {
+  formats: OutputFormatRequest[];
+};
 export type HighlightStyle = "ring" | "spotlight";
 export type CursorMode = "highlight" | "smooth";
 export type CursorShape = "dot" | "pointer";
@@ -34,7 +47,9 @@ export type ViewportConfig = {
 export type RecordConfig = {
   showActions: boolean;
   showChapters: boolean;
-  format: RecordFormat;
+  container: RecordFormat;
+  /** @deprecated Use container instead. */
+  format?: RecordFormat;
   /** Render a custom DOM cursor in the recording pass. Default: true */
   /** @deprecated Use cursor instead. */
   showCursor?: boolean;
@@ -57,6 +72,7 @@ export type DemoHunterUserRecordConfig = Partial<Omit<RecordConfig, "cookieBanne
 export type GenerateOverrides = {
   cookieDismiss?: false | CookieDismissAction;
   cursor?: false | "highlight" | "smooth" | "ripple";
+  outputFormats?: OutputFormatRequest[];
 };
 
 export type TTSProviderName = "openai" | "elevenlabs";
@@ -102,6 +118,7 @@ export type DemoHunterUserConfig = {
   viewport?: ViewportConfig;
   holdPaddingMs?: number;
   record?: DemoHunterUserRecordConfig;
+  output?: Partial<OutputConfig>;
   tts?: DemoHunterUserTTSConfig;
 };
 
@@ -113,6 +130,7 @@ export type ResolvedDemoHunterConfig = {
   viewport: ViewportConfig;
   holdPaddingMs: number;
   record: RecordConfig;
+  output: OutputConfig;
   tts: TTSConfig;
 };
 
@@ -143,12 +161,17 @@ export const DEFAULT_CURSOR_CONFIG: CursorOptions = {
 export const DEFAULT_RECORD_CONFIG: RecordConfig = {
   showActions: true,
   showChapters: true,
+  container: "mp4",
   format: "mp4",
   showCursor: true,
   showClickRipple: true,
   cursor: DEFAULT_CURSOR_CONFIG,
   highlightStyle: "ring",
   cookieBanners: DEFAULT_COOKIE_BANNER_CONFIG,
+};
+
+export const DEFAULT_OUTPUT_CONFIG: OutputConfig = {
+  formats: [],
 };
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
@@ -179,6 +202,7 @@ export const DEFAULT_DEMOHUNTER_CONFIG: Omit<ResolvedDemoHunterConfig, "baseURL"
   viewport: DEFAULT_VIEWPORT_CONFIG,
   holdPaddingMs: 300,
   record: DEFAULT_RECORD_CONFIG,
+  output: DEFAULT_OUTPUT_CONFIG,
   tts: DEFAULT_TTS_CONFIG,
 };
 

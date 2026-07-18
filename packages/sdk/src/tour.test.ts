@@ -108,10 +108,12 @@ describe("defineTour", () => {
       holdPaddingMs: 300,
       outputDir: ".demohunter",
       record: {
+        container: "mp4" as const,
         format: "mp4" as const,
         showActions: true,
         showChapters: true,
       },
+      output: { formats: [] },
       tts: {
         format: "mp3",
         instructions: "Speak clearly.",
@@ -290,10 +292,12 @@ const legacyRunContext = {
     holdPaddingMs: 300,
     outputDir: ".demohunter",
     record: {
+      container: "mp4",
       format: "mp4",
       showActions: true,
       showChapters: true,
     },
+    output: { formats: [] },
     tts: {
       format: "mp3",
       instructions: "Speak clearly.",

@@ -6,6 +6,7 @@ import {
   DEFAULT_COOKIE_BANNER_CONFIG,
   DEFAULT_CURSOR_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
+  DEFAULT_OUTPUT_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
 } from "@demohunter/sdk";
@@ -41,6 +42,12 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
     record: {
       ...DEFAULT_RECORD_CONFIG,
       ...authoredConfig.record,
+      container: authoredConfig.record?.container
+        ?? authoredConfig.record?.format
+        ?? DEFAULT_RECORD_CONFIG.container,
+      format: authoredConfig.record?.container
+        ?? authoredConfig.record?.format
+        ?? DEFAULT_RECORD_CONFIG.container,
       cookieBanners: {
         ...DEFAULT_COOKIE_BANNER_CONFIG,
         ...authoredConfig.record?.cookieBanners,
@@ -51,6 +58,9 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
       },
       cursor: resolveCursorConfig(authoredConfig.record),
     },
+    output: {
+      formats: resolveOutputFormats(authoredConfig.output?.formats ?? DEFAULT_OUTPUT_CONFIG.formats),
+    },
     tts: resolveTTSConfig(authoredConfig.tts),
   };
 
@@ -59,6 +69,39 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
     configPath,
     config,
   };
+}
+
+function resolveOutputFormats(
+  formats: NonNullable<DemoHunterUserConfig["output"]>["formats"],
+): ResolvedDemoHunterConfig["output"]["formats"] {
+  const resolved = formats ?? [];
+  const seen = new Set<string>();
+
+  return resolved.map((request) => {
+    if (seen.has(request.preset)) {
+      throw new Error(`output.formats contains duplicate preset: ${request.preset}`);
+    }
+    seen.add(request.preset);
+
+    if (request.durationMs !== undefined && request.preset !== "gif") {
+      throw new Error(`output.formats durationMs is valid only for the gif preset`);
+    }
+    if (request.preset === "gif") {
+      const durationMs = request.durationMs ?? 15_000;
+      if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 15_000) {
+        throw new Error("GIF durationMs must be a positive number no greater than 15000");
+      }
+      if (request.layout === "responsive") {
+        throw new Error("The gif preset is derived from MP4 and supports only fit layout");
+      }
+      return { preset: "gif" as const, layout: "fit" as const, durationMs };
+    }
+
+    return {
+      preset: request.preset,
+      layout: request.layout ?? (request.preset === "mobile" ? "responsive" : "fit"),
+    };
+  });
 }
 
 function resolveCursorConfig(

@@ -629,7 +629,8 @@ function createLoadedConfig(
     browser: "chromium" as const,
     viewport: { height: 720, width: 1280 },
     holdPaddingMs: 300,
-    record: { format: "mp4" as const, showActions: true, showChapters: true },
+    record: { container: "mp4" as const, format: "mp4" as const, showActions: true, showChapters: true },
+    output: { formats: [] },
     tts: {
       provider: "openai" as const,
       model: "gpt-4o-mini-tts",

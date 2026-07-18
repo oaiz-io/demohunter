@@ -70,6 +70,28 @@ describe("generateCommand", () => {
     expect(loadedConfig.config.record.cursor).toEqual(DEFAULT_RECORD_CONFIG.cursor);
   });
 
+  test("applies output format overrides without mutating config formats", async () => {
+    const cwd = await makeTempProject();
+    const loadedConfig = makeLoadedConfig(cwd);
+    const generateTour = mock(async () => ({
+      outputDir: path.join(cwd, ".demohunter/sample-smoke"),
+      videoPath: path.join(cwd, ".demohunter/sample-smoke/video.mp4"),
+    }));
+
+    await generateCommand(
+      cwd,
+      "demos/sample.tour.ts",
+      { formats: [{ preset: "square" }, { preset: "gif", durationMs: 10_000 }] },
+      { generateTour, loadConfig: async () => loadedConfig, log: () => {} },
+    );
+
+    expect(generateTour.mock.calls[0]?.[0].loadedConfig.config.output.formats).toEqual([
+      { preset: "square" },
+      { preset: "gif", durationMs: 10_000 },
+    ]);
+    expect(loadedConfig.config.output.formats).toEqual([]);
+  });
+
   test("loads the requested tour file and forwards a valid phase 3 tour to generateTour", async () => {
     const cwd = await makeTempProject();
     const tourPath = path.join(cwd, "demos", "sample.tour.ts");
@@ -343,6 +365,7 @@ function makeLoadedConfig(cwd: string) {
       viewport: DEFAULT_DEMOHUNTER_CONFIG.viewport,
       holdPaddingMs: DEFAULT_DEMOHUNTER_CONFIG.holdPaddingMs,
       record: DEFAULT_RECORD_CONFIG,
+      output: DEFAULT_DEMOHUNTER_CONFIG.output,
       tts: DEFAULT_TTS_CONFIG,
     },
   };

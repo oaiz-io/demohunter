@@ -262,12 +262,12 @@ export async function generateTour(
     passTwoDebug = undefined;
     report(onProgress, {
       phase: "muxing-video",
-      message: `Muxing ${config.record.format} video`,
+      message: `Muxing ${config.record.container} video`,
     });
     const videos = await resolvedDependencies.muxVideo({
       narrations: recordedNarrations,
       outputDir,
-      recordFormat: config.record.format,
+      recordFormat: config.record.container,
       tempScreencastPath,
     });
 

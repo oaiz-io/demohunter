@@ -58,6 +58,7 @@ describe("record defaults", () => {
     expect(DEFAULT_RECORD_CONFIG).toEqual({
       showActions: true,
       showChapters: true,
+      container: "mp4",
       format: "mp4",
       showCursor: true,
       showClickRipple: true,
@@ -81,5 +82,7 @@ describe("record defaults", () => {
       },
     });
     expect(DEFAULT_DEMOHUNTER_CONFIG.record.format).toBe("mp4");
+    expect(DEFAULT_DEMOHUNTER_CONFIG.record.container).toBe("mp4");
+    expect(DEFAULT_DEMOHUNTER_CONFIG.output.formats).toEqual([]);
   });
 });

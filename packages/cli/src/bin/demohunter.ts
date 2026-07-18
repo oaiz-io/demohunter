@@ -54,6 +54,8 @@ generate flags:
   --cookie-dismiss <mode>  Dismiss recognized consent banners: reject, accept, or hide
   --no-cookie-dismiss      Disable cookie-banner automation for this run
   --cursor <preset>        Cursor rendering: none, highlight, smooth, or ripple
+  --format <preset>        Repeatable output: standard, square, mobile, or gif
+  --duration <seconds>     GIF duration in seconds (maximum 15)
 
 add-skill flags:
   --target <name>          Repeatable. One of: claude, codex, both.
@@ -127,6 +129,7 @@ export function parseGenerateArgs(args: readonly string[]): {
 } {
   const options: GenerateCommandOptions = {};
   let tourPath: string | undefined;
+  let gifDurationMs: number | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
@@ -184,6 +187,34 @@ export function parseGenerateArgs(args: readonly string[]): {
       continue;
     }
 
+    if (arg === "--format") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error("--format requires one of: standard, square, mobile, gif");
+      }
+      addOutputFormat(options, value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--format=")) {
+      addOutputFormat(options, arg.slice("--format=".length));
+      continue;
+    }
+
+    if (arg === "--duration" || arg.startsWith("--duration=")) {
+      if (gifDurationMs !== undefined) {
+        throw new Error("--duration may only be provided once per generation.");
+      }
+      const value = arg === "--duration" ? args[index + 1] : arg.slice("--duration=".length);
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error("--duration requires a positive number of seconds up to 15");
+      }
+      gifDurationMs = parseGifDuration(value);
+      if (arg === "--duration") index += 1;
+      continue;
+    }
+
     if (arg.startsWith("-")) {
       throw new Error(`Unknown generate flag: ${arg}`);
     }
@@ -195,7 +226,34 @@ export function parseGenerateArgs(args: readonly string[]): {
     tourPath = arg;
   }
 
+  if (gifDurationMs !== undefined) {
+    const gif = options.formats?.find((format) => format.preset === "gif");
+    if (gif === undefined) {
+      throw new Error("--duration may only be used together with --format gif");
+    }
+    gif.durationMs = gifDurationMs;
+  }
+
   return { options, tourPath };
+}
+
+function addOutputFormat(options: GenerateCommandOptions, value: string): void {
+  if (value !== "standard" && value !== "square" && value !== "mobile" && value !== "gif") {
+    throw new Error(`Invalid --format value: ${value}. Expected standard, square, mobile, or gif.`);
+  }
+  options.formats ??= [];
+  if (options.formats.some((format) => format.preset === value)) {
+    throw new Error(`--format ${value} may only be provided once per generation.`);
+  }
+  options.formats.push({ preset: value });
+}
+
+function parseGifDuration(value: string): number {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 15) {
+    throw new Error("--duration requires a positive number of seconds up to 15");
+  }
+  return Math.round(seconds * 1000);
 }
 
 function parseCursorPreset(value: string): "none" | "highlight" | "smooth" | "ripple" {

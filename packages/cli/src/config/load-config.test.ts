@@ -8,6 +8,7 @@ import {
   DEFAULT_DEMOHUNTER_CONFIG,
   DEFAULT_CURSOR_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
+  DEFAULT_OUTPUT_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
 } from "../../../sdk/src/index.js";
@@ -35,6 +36,7 @@ describe("loadConfig", () => {
       viewport: DEFAULT_DEMOHUNTER_CONFIG.viewport,
       holdPaddingMs: DEFAULT_DEMOHUNTER_CONFIG.holdPaddingMs,
       record: DEFAULT_RECORD_CONFIG,
+      output: DEFAULT_OUTPUT_CONFIG,
       tts: DEFAULT_TTS_CONFIG,
     });
   });
@@ -86,6 +88,7 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: false,
       showChapters: true,
+      container: "mp4",
       format: "mp4",
       showCursor: true,
       showClickRipple: true,
@@ -108,6 +111,7 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: true,
       showChapters: false,
+      container: "mp4",
       format: "mp4",
       showCursor: true,
       showClickRipple: true,
@@ -128,6 +132,7 @@ describe("loadConfig", () => {
     const loaded = await loadConfig(cwd);
 
     expect(loaded.config.record.format).toBe("mp4");
+    expect(loaded.config.record.container).toBe("mp4");
   });
 
   test("resolves an explicit webm record format without generating mp4 by default", async () => {
@@ -146,6 +151,7 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: false,
       showChapters: true,
+      container: "webm",
       format: "webm",
       showCursor: true,
       showClickRipple: true,
@@ -172,6 +178,7 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: true,
       showChapters: true,
+      container: "mp4",
       format: "mp4",
       showCursor: false,
       showClickRipple: false,
@@ -194,6 +201,7 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: true,
       showChapters: true,
+      container: "mp4",
       format: "mp4",
       showCursor: true,
       showClickRipple: true,
@@ -271,6 +279,49 @@ describe("loadConfig", () => {
     await expect(loadConfig(cwd)).rejects.toThrow(
       "record.cursor.pixelsPerMs must be a positive finite number",
     );
+  });
+
+  test("resolves output presets and migrates record.format to record.container", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: { format: "webm" },
+        output: {
+          formats: [
+            { preset: "standard" },
+            { preset: "square" },
+            { preset: "mobile" },
+            { preset: "gif", durationMs: 12000 }
+          ]
+        }
+      };
+    `);
+
+    const loaded = await loadConfig(cwd);
+
+    expect(loaded.config.record.container).toBe("webm");
+    expect(loaded.config.output.formats).toEqual([
+      { preset: "standard", layout: "fit" },
+      { preset: "square", layout: "fit" },
+      { preset: "mobile", layout: "responsive" },
+      { preset: "gif", layout: "fit", durationMs: 12_000 },
+    ]);
+  });
+
+  test("prefers record.container and validates invalid output requests", async () => {
+    const preferred = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: { format: "mp4", container: "webm" } };
+    `);
+    const duplicate = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "square" }, { preset: "square" }] } };
+    `);
+    const tooLong = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "gif", durationMs: 16000 }] } };
+    `);
+
+    expect((await loadConfig(preferred)).config.record.container).toBe("webm");
+    await expect(loadConfig(duplicate)).rejects.toThrow("duplicate preset: square");
+    await expect(loadConfig(tooLong)).rejects.toThrow("no greater than 15000");
   });
 
   test.each([
