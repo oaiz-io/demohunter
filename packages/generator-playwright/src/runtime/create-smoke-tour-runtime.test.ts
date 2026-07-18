@@ -284,6 +284,47 @@ describe("createSmokeTourRuntime", () => {
     ]);
   });
 
+  test("resets deterministic cursor motion after direct main-frame navigation", async () => {
+    const events: TourRuntimeEvent[] = [];
+    const mainFrame = {};
+    let onFrameNavigated: ((frame: object) => void) | undefined;
+    const page = {
+      mainFrame: () => mainFrame,
+      on: (event: string, listener: (frame: object) => void) => {
+        if (event === "framenavigated") onFrameNavigated = listener;
+        return page;
+      },
+      waitForTimeout: mock(async () => {}),
+    };
+    const first = {
+      boundingBox: mock(async () => ({ x: 0, y: 0, width: 100, height: 100 })),
+      click: mock(async () => {}),
+      scrollIntoViewIfNeeded: mock(async () => {}),
+      waitFor: mock(async () => {}),
+    };
+    const second = {
+      boundingBox: mock(async () => ({ x: 560, y: 0, width: 100, height: 100 })),
+      click: mock(async () => {}),
+      scrollIntoViewIfNeeded: mock(async () => {}),
+      waitFor: mock(async () => {}),
+    };
+    const runtime = createSmokeTourRuntime({
+      config: createConfig(),
+      onEvent: (event) => events.push(event),
+      outputDir: "/tmp/demohunter-output",
+      page: page as never,
+    });
+
+    await runtime.click(first as never);
+    onFrameNavigated?.(mainFrame);
+    await runtime.click(second as never);
+
+    expect(events.filter((event) => event.kind === "click")).toEqual([
+      { kind: "click", durationMs: 0 },
+      { kind: "click", durationMs: 0 },
+    ]);
+  });
+
   test("types text incrementally inside narrateWhile with deterministic sleep events", async () => {
     const events: unknown[] = [];
     const waitForTimeout = mock(async () => {});

@@ -65,6 +65,18 @@ export function createSmokeTourRuntime(args: {
   let currentChapter: string | undefined;
   let explicitCursorPosition: { x: number; y: number } | undefined;
 
+  // Existing tours may navigate through page.goto(), reload(), goBack(), or
+  // goForward() instead of the DemoHunter helper. Main-frame navigation
+  // recreates the injected effects runtime, so keep the Node-side motion state
+  // aligned regardless of which navigation API the author uses.
+  if (typeof args.page.on === "function" && typeof args.page.mainFrame === "function") {
+    args.page.on("framenavigated", (frame) => {
+      if (frame === args.page.mainFrame()) {
+        explicitCursorPosition = undefined;
+      }
+    });
+  }
+
   const emit = (event: TourRuntimeEvent): void => {
     args.onEvent?.(event);
   };
