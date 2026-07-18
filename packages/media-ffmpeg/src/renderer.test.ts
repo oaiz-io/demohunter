@@ -43,6 +43,54 @@ describe("buildFFmpegArgs", () => {
   });
 });
 
+describe("createFFmpegMediaRenderer", () => {
+  test("rejects conflicting or unsafe plans before invoking ffmpeg", async () => {
+    const invocations: string[][] = [];
+    const renderer = createFFmpegMediaRenderer({
+      runCommand: async (_command, args) => {
+        invocations.push(args);
+      },
+    });
+    const gifPlan = {
+      inputVideoPath: "/tmp/input.mp4",
+      outputPath: "/tmp/output.gif",
+      container: "gif" as const,
+      video: [{ kind: "gif" as const, durationMs: 1_000 }],
+      audio: [],
+    };
+
+    await expect(renderer.render({
+      ...gifPlan,
+      container: "mp4",
+    })).rejects.toThrow("gif video transforms require the gif container");
+    await expect(renderer.render({
+      ...gifPlan,
+      video: [{ kind: "gif", durationMs: 15_001 }],
+    })).rejects.toThrow("no greater than 15000");
+    await expect(renderer.render({
+      ...gifPlan,
+      video: [{ kind: "gif", durationMs: 1_000, fps: 0 }],
+    })).rejects.toThrow("GIF fps must be a positive finite number");
+    await expect(renderer.render({
+      ...gifPlan,
+      video: [{ kind: "gif", durationMs: 1_000, maxColors: 257 }],
+    })).rejects.toThrow("GIF maxColors must be an integer between 2 and 256");
+    await expect(renderer.render({
+      ...gifPlan,
+      audio: [{ kind: "narration", clips: [] }],
+    })).rejects.toThrow("cannot combine scaling or audio transforms");
+    await expect(renderer.render({
+      inputVideoPath: "/tmp/input.mp4",
+      outputPath: "/tmp/output.mp4",
+      container: "mp4",
+      video: [],
+      audio: [{ kind: "narration", clips: [{ inputPath: "/tmp/narration.mp3", startMs: Number.NaN }] }],
+    })).rejects.toThrow("Narration clip startMs must be a non-negative finite number");
+
+    expect(invocations).toEqual([]);
+  });
+});
+
 describe("FFmpegMediaRenderer integration", () => {
   test("renders and probes square MP4 and GIF derivatives", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "demohunter-media-ffmpeg-"));

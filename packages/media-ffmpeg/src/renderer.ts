@@ -165,9 +165,33 @@ function audioCodecArgs(plan: MediaRenderPlan): string[] {
 }
 
 function validateRenderPlan(plan: MediaRenderPlan): void {
-  if (plan.container === "gif" && !plan.video.some((transform) => transform.kind === "gif")) {
-    throw new Error("GIF render plans require a gif video transform");
+  if (plan.inputVideoPath.trim().length === 0 || plan.outputPath.trim().length === 0) {
+    throw new Error("Media render plans require non-empty input and output paths");
   }
+
+  const gifTransforms = plan.video.filter((transform) => transform.kind === "gif");
+  const scalePadTransforms = plan.video.filter((transform) => transform.kind === "scale-pad");
+
+  if (gifTransforms.length > 1 || scalePadTransforms.length > 1) {
+    throw new Error("Media render plans allow at most one transform of each kind");
+  }
+  if (plan.audio.length > 1) {
+    throw new Error("Media render plans allow at most one narration transform");
+  }
+  if (plan.container === "gif") {
+    if (gifTransforms.length !== 1) {
+      throw new Error("GIF render plans require exactly one gif video transform");
+    }
+    if (plan.video.length !== 1 || plan.audio.length !== 0) {
+      throw new Error("GIF render plans cannot combine scaling or audio transforms");
+    }
+    if (plan.videoCodec !== undefined || (plan.audioCodec !== undefined && plan.audioCodec !== "none")) {
+      throw new Error("GIF render plans do not accept video or audio codecs");
+    }
+  } else if (gifTransforms.length > 0) {
+    throw new Error("gif video transforms require the gif container");
+  }
+
   for (const transform of plan.video) {
     if (transform.kind === "scale-pad") {
       if (!Number.isInteger(transform.width) || !Number.isInteger(transform.height)
@@ -175,8 +199,34 @@ function validateRenderPlan(plan: MediaRenderPlan): void {
         || transform.width % 2 !== 0 || transform.height % 2 !== 0) {
         throw new Error("scale-pad dimensions must be positive even integers");
       }
-    } else if (!Number.isFinite(transform.durationMs) || transform.durationMs <= 0) {
-      throw new Error("GIF durationMs must be a positive finite number");
+      continue;
+    }
+
+    if (!Number.isFinite(transform.durationMs) || transform.durationMs <= 0 || transform.durationMs > 15_000) {
+      throw new Error("GIF durationMs must be a positive finite number no greater than 15000");
+    }
+    if (transform.fps !== undefined && (!Number.isFinite(transform.fps) || transform.fps <= 0)) {
+      throw new Error("GIF fps must be a positive finite number");
+    }
+    if (transform.width !== undefined && (!Number.isInteger(transform.width) || transform.width <= 0)) {
+      throw new Error("GIF width must be a positive integer");
+    }
+    if (
+      transform.maxColors !== undefined
+      && (!Number.isInteger(transform.maxColors) || transform.maxColors < 2 || transform.maxColors > 256)
+    ) {
+      throw new Error("GIF maxColors must be an integer between 2 and 256");
+    }
+  }
+
+  for (const transform of plan.audio) {
+    for (const clip of transform.clips) {
+      if (clip.inputPath.trim().length === 0) {
+        throw new Error("Narration clips require a non-empty input path");
+      }
+      if (!Number.isFinite(clip.startMs) || clip.startMs < 0) {
+        throw new Error("Narration clip startMs must be a non-negative finite number");
+      }
     }
   }
 }
