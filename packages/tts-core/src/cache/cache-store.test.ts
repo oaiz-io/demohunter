@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -222,6 +222,159 @@ describe("resolveNarrationFromCache", () => {
       assert.equal(regenerated.source, "provider");
       assert.equal(provider.callCount, 2);
       assert.equal(regenerated.entry.durationMs, 880);
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("recovers from hostile metadata without deleting an out-of-cache target", async () => {
+    const fixture = await createFixture();
+    const victimPath = join(fixture.tempRoot, "must-survive.txt");
+    const victimContents = "do not delete\n";
+    const key = createNarrationCacheKey(fixture.request);
+    const metadataPath = join(fixture.cacheDir, `${key}.json`);
+    const provider = createProvider([new Uint8Array([8, 8, 8])]);
+
+    try {
+      await mkdir(fixture.cacheDir, { recursive: true });
+      await writeFile(victimPath, victimContents, "utf8");
+      await writeFile(metadataPath, JSON.stringify({
+        key,
+        version: NARRATION_CACHE_SCHEMA_VERSION,
+        createdAt: "2026-04-11T09:15:00.000Z",
+        request: fixture.request,
+        output: {
+          format: fixture.request.format,
+          audioPath: "../../../must-survive.txt",
+          byteSize: victimContents.length,
+          durationMs: 100,
+          sha256: createHash("sha256").update(victimContents).digest("hex"),
+        },
+      }), "utf8");
+
+      const result = await resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider: provider.provider,
+        measureDurationMs: async () => 300,
+      });
+
+      assert.equal(result.source, "provider");
+      assert.equal(provider.callCount, 1);
+      assert.equal(await readFile(victimPath, "utf8"), victimContents);
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("single-flights concurrent misses for the same cache key", async () => {
+    const fixture = await createFixture();
+    const synthesisStarted = createDeferred();
+    const finishSynthesis = createDeferred();
+    let synthesisCalls = 0;
+    const provider: NarrationProvider = {
+      async synthesize(request) {
+        synthesisCalls += 1;
+        synthesisStarted.resolve();
+        await finishSynthesis.promise;
+        return createBytesResult(request, new Uint8Array([4, 3, 2, 1]));
+      },
+    };
+
+    try {
+      const first = resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider,
+        measureDurationMs: async () => 400,
+      });
+      await synthesisStarted.promise;
+      const second = resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider,
+        measureDurationMs: async () => {
+          throw new Error("the queued request must consume the winner's cache entry");
+        },
+      });
+
+      finishSynthesis.resolve();
+      const [firstResult, secondResult] = await Promise.all([first, second]);
+
+      assert.equal(synthesisCalls, 1);
+      assert.equal(firstResult.source, "provider");
+      assert.equal(secondResult.source, "cache");
+      assert.equal(secondResult.entry.audioPath, firstResult.entry.audioPath);
+      assert.deepEqual(await readFile(firstResult.entry.audioPath), Buffer.from([4, 3, 2, 1]));
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("cancels a same-key waiter without disrupting the active cache fill", async () => {
+    const fixture = await createFixture();
+    const measurementStarted = createDeferred();
+    const finishMeasurement = createDeferred();
+    const queuedController = new AbortController();
+    const queuedReason = new Error("queued narration cancelled");
+    const provider = createProvider([new Uint8Array([5, 6, 7])]);
+
+    try {
+      const active = resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider: provider.provider,
+        measureDurationMs: async () => {
+          measurementStarted.resolve();
+          await finishMeasurement.promise;
+          return 300;
+        },
+      });
+      await measurementStarted.promise;
+      const queued = resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider: provider.provider,
+        signal: queuedController.signal,
+        measureDurationMs: async () => 300,
+      });
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+      queuedController.abort(queuedReason);
+
+      await assert.rejects(queued, (error: unknown) => error === queuedReason);
+      finishMeasurement.resolve();
+      assert.equal((await active).source, "provider");
+      assert.equal(provider.callCount, 1);
+    } finally {
+      finishMeasurement.resolve();
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("aborts during custom duration measurement and removes partial cache artifacts", async () => {
+    const fixture = await createFixture();
+    const controller = new AbortController();
+    const cancellation = new Error("cancel during measurement");
+    const measurementStarted = createDeferred();
+
+    try {
+      const pending = resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider: createProvider([new Uint8Array([1, 3, 5])]).provider,
+        signal: controller.signal,
+        measureDurationMs: async () => {
+          measurementStarted.resolve();
+          return await new Promise<number>(() => undefined);
+        },
+      });
+      await measurementStarted.promise;
+      controller.abort(cancellation);
+
+      await assert.rejects(pending, (error: unknown) => error === cancellation);
+      const key = createNarrationCacheKey(fixture.request);
+      await assert.rejects(readFile(join(fixture.cacheDir, `${key}.json`)), /ENOENT/);
+      await assert.rejects(readFile(join(fixture.cacheDir, `${key}.${fixture.request.format}`)), /ENOENT/);
     } finally {
       await rm(fixture.tempRoot, { recursive: true, force: true });
     }
@@ -647,4 +800,16 @@ function createMetadata(request: NarrationRequest) {
     language: request.language,
     providerOptions: request.providerOptions,
   };
+}
+
+function createDeferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolvePromise!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    resolvePromise = resolve;
+  });
+
+  return { promise, resolve: resolvePromise };
 }

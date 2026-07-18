@@ -68,6 +68,7 @@ export type ResolveNarrationFromCacheOptions = {
 
 export type MeasureNarrationAudioDurationOptions = {
   ffprobeCommand?: string;
+  signal?: AbortSignal;
 };
 
 export type InspectNarrationCacheMetadataFileOptions = {
@@ -89,6 +90,20 @@ export type NarrationCacheInspection =
       version: number | null;
       issue: string;
     };
+
+type CacheKeyLockWaiter = {
+  signal: AbortSignal;
+  resolve: (release: () => void) => void;
+  reject: (error: unknown) => void;
+  onAbort: () => void;
+};
+
+type CacheKeyLockState = {
+  held: boolean;
+  waiters: CacheKeyLockWaiter[];
+};
+
+const cacheKeyLocks = new Map<string, CacheKeyLockState>();
 
 export async function resolveNarrationFromCache(
   options: ResolveNarrationFromCacheOptions,
@@ -112,62 +127,131 @@ export async function resolveNarrationFromCache(
   });
 
   signal.throwIfAborted();
-  const cached = await readNarrationCacheEntry({
-    cacheDir,
-    key,
-    metadataPath: paths.metadataPath,
-    currentVersion: version,
-  });
-
-  if (cached?.status === "ready") {
-    signal.throwIfAborted();
-    return {
-      source: "cache",
-      entry: cached.entry,
-    };
-  }
-
-  if (cached !== null) {
-    await removeCacheArtifacts(cached.metadataPath, cached.audioPath);
-  }
-
-  signal.throwIfAborted();
-  const synthesized = isNarrationProviderPlugin(options.provider)
-    ? await options.provider.synthesize(request, context)
-    : await options.provider.synthesize(request);
-  let entry: NarrationCacheEntry | undefined;
-  let failure: { error: unknown } | undefined;
-
+  const releaseCacheKey = await acquireCacheKeyLock(`${cacheDir}\0${key}`, signal);
   try {
     signal.throwIfAborted();
-    assertSynthesisMatchesRequest(synthesized, request);
-
-    entry = await persistNarrationCacheEntry({
+    const cached = await readNarrationCacheEntry({
       cacheDir,
       key,
-      request,
-      version,
-      synthesized,
-      measureDurationMs: options.measureDurationMs ?? measureNarrationAudioDuration,
-      now: options.now ?? (() => new Date()),
+      metadataPath: paths.metadataPath,
+      currentVersion: version,
     });
-  } catch (error) {
-    failure = { error };
+
+    if (cached?.status === "ready") {
+      signal.throwIfAborted();
+      return {
+        source: "cache",
+        entry: cached.entry,
+      };
+    }
+
+    if (cached !== null) {
+      await removeCacheArtifacts(cacheDir, cached.metadataPath, cached.audioPath);
+    }
+
+    signal.throwIfAborted();
+    const synthesized = isNarrationProviderPlugin(options.provider)
+      ? await options.provider.synthesize(request, context)
+      : await options.provider.synthesize(request);
+    let entry: NarrationCacheEntry | undefined;
+    let failure: { error: unknown } | undefined;
+
+    try {
+      signal.throwIfAborted();
+      assertSynthesisMatchesRequest(synthesized, request);
+
+      entry = await persistNarrationCacheEntry({
+        cacheDir,
+        key,
+        request,
+        version,
+        synthesized,
+        signal,
+        measureDurationMs: options.measureDurationMs,
+        now: options.now ?? (() => new Date()),
+      });
+    } catch (error) {
+      failure = { error };
+    }
+
+    await finalizeSynthesisOutput(synthesized, failure);
+
+    if (failure !== undefined) {
+      throw failure.error;
+    }
+
+    if (entry === undefined) {
+      throw new Error("Narration cache persistence completed without an entry.");
+    }
+
+    signal.throwIfAborted();
+    return {
+      source: "provider",
+      entry,
+    };
+  } finally {
+    releaseCacheKey();
   }
+}
 
-  await finalizeSynthesisOutput(synthesized, failure);
+function acquireCacheKeyLock(key: string, signal: AbortSignal): Promise<() => void> {
+  signal.throwIfAborted();
+  const state = cacheKeyLocks.get(key) ?? { held: false, waiters: [] };
+  cacheKeyLocks.set(key, state);
 
-  if (failure !== undefined) {
-    throw failure.error;
-  }
+  return new Promise((resolveLock, reject) => {
+    const waiter: CacheKeyLockWaiter = {
+      signal,
+      resolve: resolveLock,
+      reject,
+      onAbort: () => {
+        const index = state.waiters.indexOf(waiter);
 
-  if (entry === undefined) {
-    throw new Error("Narration cache persistence completed without an entry.");
-  }
+        if (index !== -1) {
+          state.waiters.splice(index, 1);
+          signal.removeEventListener("abort", waiter.onAbort);
+          reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+        }
+      },
+    };
 
-  return {
-    source: "provider",
-    entry,
+    if (!state.held) {
+      state.held = true;
+      resolveLock(createCacheKeyRelease(key, state));
+      return;
+    }
+
+    state.waiters.push(waiter);
+    signal.addEventListener("abort", waiter.onAbort, { once: true });
+
+    if (signal.aborted) {
+      waiter.onAbort();
+    }
+  });
+}
+
+function createCacheKeyRelease(key: string, state: CacheKeyLockState): () => void {
+  let released = false;
+
+  return () => {
+    if (released) return;
+    released = true;
+
+    while (state.waiters.length > 0) {
+      const waiter = state.waiters.shift()!;
+      waiter.signal.removeEventListener("abort", waiter.onAbort);
+
+      if (waiter.signal.aborted) {
+        waiter.reject(waiter.signal.reason ?? new DOMException("Aborted", "AbortError"));
+        continue;
+      }
+
+      waiter.resolve(createCacheKeyRelease(key, state));
+      return;
+    }
+
+    state.held = false;
+    if (cacheKeyLocks.get(key) === state) cacheKeyLocks.delete(key);
   };
 }
 
@@ -184,7 +268,7 @@ export async function measureNarrationAudioDuration(
     "-of",
     "json",
     audioPath,
-  ]);
+  ], options.signal);
   const parsed = JSON.parse(stdout) as { format?: { duration?: string } };
   const durationSeconds = Number(parsed.format?.duration);
 
@@ -251,7 +335,7 @@ export async function inspectNarrationCacheMetadataFile(
       status: "obsolete",
       key: parsed.key,
       metadataPath,
-      audioPath: resolveCacheArtifactPath(cacheDir, parsed.output.audioPath),
+      audioPath: resolveCacheArtifactPathForRemoval(cacheDir, parsed.output.audioPath),
       version: parsed.version,
       issue: `Cache entry uses version ${parsed.version} instead of ${currentVersion}.`,
     };
@@ -262,7 +346,7 @@ export async function inspectNarrationCacheMetadataFile(
       status: "invalid",
       key: parsed.key,
       metadataPath,
-      audioPath: resolveCacheArtifactPath(cacheDir, parsed.output.audioPath),
+      audioPath: resolveCacheArtifactPathForRemoval(cacheDir, parsed.output.audioPath),
       version: parsed.version,
       issue: "Metadata format does not match the cached request format.",
     };
@@ -277,7 +361,7 @@ export async function inspectNarrationCacheMetadataFile(
       status: "invalid",
       key: parsed.key,
       metadataPath,
-      audioPath: resolveCacheArtifactPath(cacheDir, parsed.output.audioPath),
+      audioPath: resolveCacheArtifactPathForRemoval(cacheDir, parsed.output.audioPath),
       version: parsed.version,
       issue: "Metadata key does not match the canonical narration identity.",
     };
@@ -290,7 +374,7 @@ export async function inspectNarrationCacheMetadataFile(
       status: "invalid",
       key: parsed.key,
       metadataPath,
-      audioPath: resolveCacheArtifactPath(cacheDir, parsed.output.audioPath),
+      audioPath: resolveCacheArtifactPathForRemoval(cacheDir, parsed.output.audioPath),
       version: parsed.version,
       issue: "Metadata audio path does not match the local cache naming convention.",
     };
@@ -379,7 +463,8 @@ type PersistNarrationCacheEntryOptions = {
   request: NarrationRequest;
   version: number;
   synthesized: NarrationSynthesisResult;
-  measureDurationMs: (audioPath: string) => Promise<number>;
+  signal: AbortSignal;
+  measureDurationMs?: (audioPath: string) => Promise<number>;
   now: () => Date;
 };
 
@@ -392,18 +477,25 @@ async function persistNarrationCacheEntry(
     format: options.request.format,
   });
 
-  await removeCacheArtifacts(paths.metadataPath, paths.audioPath);
+  options.signal.throwIfAborted();
+  await removeCacheArtifacts(options.cacheDir, paths.metadataPath, paths.audioPath);
 
   try {
-    await writeAudioArtifact(paths.audioPath, options.synthesized);
+    options.signal.throwIfAborted();
+    await writeAudioArtifact(paths.audioPath, options.synthesized, options.signal);
+    options.signal.throwIfAborted();
 
-    const durationMs = await options.measureDurationMs(paths.audioPath);
+    const durationMs = options.measureDurationMs === undefined
+      ? await measureNarrationAudioDuration(paths.audioPath, { signal: options.signal })
+      : await waitForAbortable(options.measureDurationMs(paths.audioPath), options.signal);
+    options.signal.throwIfAborted();
 
     if (!Number.isFinite(durationMs) || durationMs < 0) {
       throw new Error(`Narration duration must be a non-negative finite value: ${durationMs}`);
     }
 
     const audioBytes = await readFile(paths.audioPath);
+    options.signal.throwIfAborted();
     const metadata: NarrationCacheMetadata = {
       key: options.key,
       version: options.version,
@@ -419,6 +511,7 @@ async function persistNarrationCacheEntry(
     };
 
     await writeJsonAtomically(paths.metadataPath, metadata);
+    options.signal.throwIfAborted();
 
     return toNarrationCacheEntry({
       metadata,
@@ -426,7 +519,7 @@ async function persistNarrationCacheEntry(
       audioPath: paths.audioPath,
     });
   } catch (error) {
-    await removeCacheArtifacts(paths.metadataPath, paths.audioPath);
+    await removeCacheArtifacts(options.cacheDir, paths.metadataPath, paths.audioPath);
     throw error;
   }
 }
@@ -434,10 +527,12 @@ async function persistNarrationCacheEntry(
 async function writeAudioArtifact(
   audioPath: string,
   synthesized: NarrationSynthesisResult,
+  signal: AbortSignal,
 ): Promise<void> {
   const temporaryPath = createTemporaryPath(audioPath);
 
   try {
+    signal.throwIfAborted();
     if (synthesized.output.kind === "bytes") {
       if (synthesized.output.bytes.byteLength === 0) {
         throw new Error("Narration providers must return non-empty audio bytes.");
@@ -454,6 +549,7 @@ async function writeAudioArtifact(
       }
     }
 
+    signal.throwIfAborted();
     await rename(temporaryPath, audioPath);
   } catch (error) {
     await rm(temporaryPath, { force: true });
@@ -507,10 +603,14 @@ function getNarrationCachePaths(options: {
   metadataPath: string;
   audioPath: string;
 } {
-  return {
-    metadataPath: join(options.cacheDir, `${options.key}${NARRATION_CACHE_METADATA_EXTENSION}`),
-    audioPath: join(options.cacheDir, `${options.key}.${options.format}`),
-  };
+  const metadataPath = join(options.cacheDir, `${options.key}${NARRATION_CACHE_METADATA_EXTENSION}`);
+  const audioPath = join(options.cacheDir, `${options.key}.${options.format}`);
+
+  if (!isDirectCacheArtifact(options.cacheDir, metadataPath) || !isDirectCacheArtifact(options.cacheDir, audioPath)) {
+    throw new Error(`Narration output format ${JSON.stringify(options.format)} cannot be used as a cache file extension.`);
+  }
+
+  return { metadataPath, audioPath };
 }
 
 function resolveCacheDir(cacheDir: string): string {
@@ -523,6 +623,12 @@ function resolveCacheDir(cacheDir: string): string {
 
 function resolveCacheArtifactPath(cacheDir: string, relativeArtifactPath: string): string {
   return resolve(cacheDir, relativeArtifactPath);
+}
+
+function resolveCacheArtifactPathForRemoval(cacheDir: string, relativeArtifactPath: string): string | null {
+  const artifactPath = resolveCacheArtifactPath(cacheDir, relativeArtifactPath);
+
+  return isDirectCacheArtifact(cacheDir, artifactPath) ? artifactPath : null;
 }
 
 function toNarrationCacheEntry(options: {
@@ -614,10 +720,18 @@ function hashBytes(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function removeCacheArtifacts(metadataPath: string, audioPath: string | null): Promise<void> {
+async function removeCacheArtifacts(
+  cacheDir: string,
+  metadataPath: string,
+  audioPath: string | null,
+): Promise<void> {
+  if (!isDirectCacheArtifact(cacheDir, metadataPath)) {
+    throw new Error("Refusing to remove narration cache metadata outside the cache root.");
+  }
+
   await rm(metadataPath, { force: true });
 
-  if (audioPath !== null) {
+  if (audioPath !== null && isDirectCacheArtifact(cacheDir, audioPath)) {
     await rm(audioPath, { force: true });
   }
 }
@@ -676,6 +790,15 @@ function isWithinDirectory(directory: string, target: string): boolean {
   return target.startsWith(prefix);
 }
 
+function isDirectCacheArtifact(cacheDir: string, target: string): boolean {
+  const root = resolve(cacheDir);
+  const artifact = resolve(target);
+
+  return artifact !== root
+    && isWithinDirectory(root, artifact)
+    && resolve(root, basename(artifact)) === artifact;
+}
+
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
   return (
     typeof error === "object"
@@ -685,10 +808,41 @@ function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
   );
 }
 
-async function runCommand(command: string, args: string[]): Promise<string> {
+async function waitForAbortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+
+  return await new Promise<T>((resolvePromise, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolvePromise(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+
+    if (signal.aborted) onAbort();
+  });
+}
+
+async function runCommand(command: string, args: string[], signal?: AbortSignal): Promise<string> {
   return await new Promise((resolvePromise, reject) => {
-    execFile(command, args, { encoding: "utf8" }, (error, stdout, stderr) => {
+    execFile(command, args, { encoding: "utf8", signal }, (error, stdout, stderr) => {
       if (error) {
+        if (signal?.aborted) {
+          reject(signal.reason ?? error);
+          return;
+        }
+
         const detail = stderr.trim() || error.message;
 
         reject(new Error(`Failed to measure narration audio with ${command}: ${detail}`));
