@@ -255,6 +255,7 @@ async function createVariant(
         srt: await descriptor(path.join(input.directory, "captions.srt"), "text/plain"),
         vtt: await descriptor(path.join(input.directory, "captions.vtt"), "text/vtt"),
       },
+      chapters: await descriptor(path.join(input.directory, "chapters.json"), "application/json"),
       audio: await Promise.all(input.manifest.artifacts.audio.map(async (audio) => ({
         ...(await descriptor(path.join(input.directory, "audio", path.basename(audio.path)), audio.mediaType)),
         cacheKey: audio.cacheKey,

@@ -192,6 +192,10 @@ function createValidV2Manifest() {
         srt: createDescriptor("captions.srt", "text/plain"),
         vtt: createDescriptor("captions.vtt", "text/vtt"),
       },
+      chapters: createDescriptor(
+        id === "standard" ? "chapters.json" : "variants/square/chapters.json",
+        "application/json",
+      ),
       audio: [sharedAudio],
     },
   });

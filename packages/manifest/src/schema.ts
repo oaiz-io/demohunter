@@ -146,6 +146,7 @@ export const portableOutputVariantV2Schema = z.object({
       srt: flexibleArtifactDescriptorSchema,
       vtt: flexibleArtifactDescriptorSchema,
     }).strict(),
+    chapters: flexibleArtifactDescriptorSchema,
     audio: z.array(portableAudioArtifactV2Schema),
   }).strict(),
   features: z.object({

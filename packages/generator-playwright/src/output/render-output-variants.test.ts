@@ -44,6 +44,11 @@ describe("renderOutputVariants", () => {
       { id: "mobile", width: 1080, height: 1920 },
     ]);
     expect(parsed.variants[0]?.artifacts.gif?.path).toBe("variants/gif/video.gif");
+    expect(parsed.variants[0]?.artifacts.chapters.path).toBe("chapters.json");
+    expect(parsed.variants[2]?.artifacts.chapters.path).toBe("variants/mobile/chapters.json");
+    expect(parsed.variants[2]?.artifacts.chapters.checksum.byteSize).toBe(
+      (await readFile(path.join(outputDir, "variants/mobile/chapters.json"))).byteLength,
+    );
     expect(await probeMedia(path.join(outputDir, "video.mp4"))).toMatchObject({
       width: 1920,
       height: 1080,
