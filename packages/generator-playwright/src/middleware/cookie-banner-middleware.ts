@@ -177,7 +177,7 @@ async function scanFrames(
 
         const actionSelectors = action === "reject" ? rule.rejectSelectors : rule.acceptSelectors;
         const clickedSelector = await clickFirstVisible(
-          frame,
+          container,
           [...(actionSelectors ?? []), ...(rule.dismissSelectors ?? [])],
           suppressActivity,
         );
@@ -220,12 +220,15 @@ async function scanAdditionalSelectors(
 }
 
 async function clickFirstVisible(
-  frame: Frame,
+  container: Locator,
   selectors: readonly string[],
   suppressActivity?: <T>(action: () => Promise<T>) => Promise<T>,
 ): Promise<string | undefined> {
   for (const selector of selectors) {
-    const locator = frame.locator(selector).first();
+    // Some vendor rules necessarily use generic selectors. Resolve them only
+    // beneath the recognized container so consent automation cannot activate
+    // an unrelated application control elsewhere in the frame.
+    const locator = container.locator(selector).first();
 
     if (!(await isVisible(locator))) {
       continue;

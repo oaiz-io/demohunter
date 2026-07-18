@@ -83,6 +83,23 @@ describe("cookie banner middleware", () => {
     expect(await page.locator("#unrelated").getAttribute("data-clicked")).toBeNull();
   });
 
+  test("does not use a generic vendor action selector outside its matched container", async () => {
+    await page.setContent(`
+      <div class="qc-cmp2-container">Consent banner without an action</div>
+      <button id="application-secondary" mode="secondary" onclick="this.dataset.clicked='yes'">
+        Cancel application change
+      </button>
+    `);
+
+    const result = await dismissCookieBanner(page, {
+      ...config("reject"),
+      timeoutMs: 0,
+    });
+
+    expect(result).toBeUndefined();
+    expect(await page.locator("#application-secondary").getAttribute("data-clicked")).toBeNull();
+  });
+
   test("hide removes only the matched vendor container and backdrop", async () => {
     await page.setContent(`
       <div class="onetrust-pc-dark-filter"></div>
