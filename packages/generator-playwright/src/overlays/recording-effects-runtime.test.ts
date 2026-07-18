@@ -310,6 +310,49 @@ describe("installRecordingEffectsRuntime", () => {
     expect(cursor?.style.top).toBe("100px");
   });
 
+  test("clamps direct and animated cursor targets within the viewport inset", async () => {
+    const dom = createFakeDom();
+    withFakeDom(dom);
+    installRecordingEffectsRuntime({ showCursor: true, showClickRipple: true });
+    const api = (dom.window as unknown as {
+      __demohunterEffects: { moveCursorTo: (x: number, y: number, duration?: number) => Promise<void> };
+    }).__demohunterEffects;
+
+    await api.moveCursorTo(-100, 2_000);
+    const cursor = dom.document.getElementById("demohunter-cursor");
+    expect(cursor?.style.left).toBe("10px");
+    expect(cursor?.style.top).toBe("1070px");
+
+    const motion = api.moveCursorTo(2_000, -100, 200);
+    dom.runAnimationFrame(200);
+    await motion;
+
+    expect(cursor?.style.left).toBe("1910px");
+    expect(cursor?.style.top).toBe("10px");
+  });
+
+  test("cancels an in-flight cursor animation before retargeting", async () => {
+    const dom = createFakeDom();
+    withFakeDom(dom);
+    installRecordingEffectsRuntime({ showCursor: true, showClickRipple: true });
+    const api = (dom.window as unknown as {
+      __demohunterEffects: { moveCursorTo: (x: number, y: number, duration?: number) => Promise<void> };
+    }).__demohunterEffects;
+
+    await api.moveCursorTo(100, 100);
+    const firstMotion = api.moveCursorTo(500, 100, 400);
+    dom.runAnimationFrame(100);
+    const secondMotion = api.moveCursorTo(200, 300, 200);
+
+    await firstMotion;
+    dom.runAnimationFrame(300);
+    await secondMotion;
+
+    const cursor = dom.document.getElementById("demohunter-cursor");
+    expect(cursor?.style.left).toBe("200px");
+    expect(cursor?.style.top).toBe("300px");
+  });
+
   test("does not spawn a ripple when click ripple is disabled", () => {
     const dom = createFakeDom();
     withFakeDom(dom);
