@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import path from "node:path";
 
 import type { DemoHunterRunContext, HighlightStyle, ResolvedDemoHunterConfig } from "@demohunter/sdk";
@@ -54,11 +54,13 @@ type GenerateTourDependencies = {
   collectTimeline: typeof collectTimeline;
   installRecordingEffects: typeof installRecordingEffects;
   generateResponsiveVariant: (input: GenerateTourInput) => Promise<GenerateTourResult>;
+  mkdir: typeof mkdir;
   mkdtemp: typeof mkdtemp;
   muxVideo: typeof muxVideo;
   now: () => number;
   playwright: BrowserTypeMap;
   prepareOutputDir: (tourId: string, outputRoot: string) => Promise<string>;
+  rename: typeof rename;
   replayTimeline: typeof replayTimeline;
   renderOutputVariants: typeof renderOutputVariants;
   showChapterOverlay: typeof showChapterOverlay;
@@ -73,11 +75,13 @@ const defaultDependencies: GenerateTourDependencies = {
   collectTimeline,
   installRecordingEffects,
   generateResponsiveVariant: (input) => generateTour(input),
+  mkdir,
   mkdtemp,
   muxVideo,
   now: () => Date.now(),
   playwright,
   prepareOutputDir: (tourId, outputRoot) => prepareOutputDirHelper(tourId, outputRoot),
+  rename,
   replayTimeline,
   renderOutputVariants,
   showChapterOverlay,
@@ -116,8 +120,18 @@ export async function generateTour(
   const chapters: GenerationChapter[] = [];
   const recordedNarrations: RecordedNarration[] = [];
   const responsiveCaptureRoots: string[] = [];
+  let outputStagingRoot: string | undefined;
+  let artifactOutputDir = outputDir;
 
   try {
+    if (config.output.formats.length > 0) {
+      outputStagingRoot = await resolvedDependencies.mkdtemp(
+        path.join(path.dirname(outputDir), ".demohunter-output-"),
+      );
+      artifactOutputDir = path.join(outputStagingRoot, "output");
+      await resolvedDependencies.mkdir(artifactOutputDir, { recursive: true });
+    }
+
     passOneContext = await browser.newContext({
       baseURL: config.baseURL,
       viewport: config.viewport,
@@ -274,7 +288,7 @@ export async function generateTour(
     });
     const videos = await resolvedDependencies.muxVideo({
       narrations: recordedNarrations,
-      outputDir,
+      outputDir: artifactOutputDir,
       recordFormat: config.record.container,
       tempScreencastPath,
     });
@@ -283,13 +297,13 @@ export async function generateTour(
       phase: "writing-artifacts",
       message: `Writing artifacts for ${tourFile.tour.id}`,
     });
-    const result = await resolvedDependencies.writeGenerationOutput({
+    const workingResult = await resolvedDependencies.writeGenerationOutput({
       tourId: tourFile.tour.id,
       tourTitle: tourFile.tour.title,
       chapters,
       recordedNarrations,
       videos,
-      outputDir,
+      outputDir: artifactOutputDir,
     });
 
     if (config.output.formats.length > 0) {
@@ -327,10 +341,21 @@ export async function generateTour(
       });
       await resolvedDependencies.renderOutputVariants({
         formats: config.output.formats,
-        outputDir,
+        outputDir: artifactOutputDir,
         responsiveSourceDirs,
       });
     }
+
+    let result = workingResult;
+    if (outputStagingRoot !== undefined) {
+      await publishStagedOutput({
+        outputDir,
+        stagedOutputDir: artifactOutputDir,
+        stagingRoot: outputStagingRoot,
+      }, resolvedDependencies);
+      result = rebaseGenerationResult(workingResult, outputDir);
+    }
+
     report(onProgress, {
       phase: "completed",
       message: `Wrote ${result.videoPath}`,
@@ -347,7 +372,12 @@ export async function generateTour(
       passOneDebug?.dispose();
       passTwoDebug?.dispose();
       await rm(tempScreencastPath, { force: true });
-      await Promise.all(responsiveCaptureRoots.map((root) => rm(root, { recursive: true, force: true })));
+      await Promise.all([
+        ...responsiveCaptureRoots.map((root) => rm(root, { recursive: true, force: true })),
+        ...(outputStagingRoot === undefined
+          ? []
+          : [rm(outputStagingRoot, { recursive: true, force: true })]),
+      ]);
     } catch (error) {
       closeError ??= error;
     }
@@ -374,6 +404,35 @@ export async function generateTour(
       throw closeError;
     }
   }
+}
+
+async function publishStagedOutput(
+  input: { outputDir: string; stagedOutputDir: string; stagingRoot: string },
+  dependencies: Pick<GenerateTourDependencies, "rename">,
+): Promise<void> {
+  const backupDir = path.join(input.stagingRoot, "previous-output");
+  await dependencies.rename(input.outputDir, backupDir);
+
+  try {
+    await dependencies.rename(input.stagedOutputDir, input.outputDir);
+  } catch (error) {
+    await dependencies.rename(backupDir, input.outputDir);
+    throw error;
+  }
+}
+
+function rebaseGenerationResult(
+  result: WriteGenerationOutputResult,
+  outputDir: string,
+): WriteGenerationOutputResult {
+  return {
+    ...result,
+    captionsSrtPath: path.join(outputDir, "captions.srt"),
+    captionsVttPath: path.join(outputDir, "captions.vtt"),
+    chaptersPath: path.join(outputDir, "chapters.json"),
+    outputDir,
+    videoPath: path.join(outputDir, "video.mp4"),
+  };
 }
 
 function responsiveViewport(preset: "standard" | "square" | "mobile") {

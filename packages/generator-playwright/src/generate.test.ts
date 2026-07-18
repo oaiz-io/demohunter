@@ -267,6 +267,8 @@ describe("generateTour", () => {
       newContext: mock(async () => context),
     };
     const outputDir = "/tmp/project/.demohunter/billing-overview";
+    const outputStagingRoot = "/tmp/project/.demohunter-output-fixture";
+    const stagedOutputDir = `${outputStagingRoot}/output`;
     const mobileRoot = "/tmp/project/.demohunter-mobile-fixture";
     const mobileOutputDir = `${mobileRoot}/billing-overview`;
     const formats = [
@@ -282,6 +284,7 @@ describe("generateTour", () => {
       videoPath: `${mobileOutputDir}/video.mp4`,
     }));
     const renderOutputVariants = mock(async () => {});
+    const rename = mock(async () => {});
 
     await generateTour({
       loadedConfig: createLoadedConfig("/tmp/project", { output: { formats } }),
@@ -291,7 +294,10 @@ describe("generateTour", () => {
       collectTimeline: mock(async () => ({ entries: [], narrations: [] })),
       generateResponsiveVariant,
       installRecordingEffects: mock(async () => {}),
-      mkdtemp: mock(async () => mobileRoot),
+      mkdir: mock(async () => undefined),
+      mkdtemp: mock(async (prefix) => prefix.includes(".demohunter-output-")
+        ? outputStagingRoot
+        : mobileRoot),
       muxVideo: mock(async () => ({
         mp4: { fileName: "video.mp4", format: "mp4", path: "/tmp/video.mp4" },
       })),
@@ -301,16 +307,17 @@ describe("generateTour", () => {
         webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
       },
       prepareOutputDir: mock(async () => outputDir),
+      rename,
       renderOutputVariants,
       replayTimeline: mock(async ({ onBeforeRun }) => { await onBeforeRun?.(); }),
       startScreencast: mock(async () => {}),
       stopScreencast: mock(async () => {}),
       writeGenerationOutput: mock(async () => ({
-        captionsSrtPath: `${outputDir}/captions.srt`,
-        captionsVttPath: `${outputDir}/captions.vtt`,
-        chaptersPath: `${outputDir}/chapters.json`,
-        outputDir,
-        videoPath: `${outputDir}/video.mp4`,
+        captionsSrtPath: `${stagedOutputDir}/captions.srt`,
+        captionsVttPath: `${stagedOutputDir}/captions.vtt`,
+        chaptersPath: `${stagedOutputDir}/chapters.json`,
+        outputDir: stagedOutputDir,
+        videoPath: `${stagedOutputDir}/video.mp4`,
       })),
     });
 
@@ -322,9 +329,73 @@ describe("generateTour", () => {
     expect(generateResponsiveVariant.mock.calls[0]?.[0].loadedConfig.config.output).toEqual({ formats: [] });
     expect(renderOutputVariants).toHaveBeenCalledWith({
       formats,
-      outputDir,
+      outputDir: stagedOutputDir,
       responsiveSourceDirs: { mobile: mobileOutputDir },
     });
+    expect(rename.mock.calls).toEqual([
+      [outputDir, `${outputStagingRoot}/previous-output`],
+      [stagedOutputDir, outputDir],
+    ]);
+  });
+
+  test("does not publish staged baseline artifacts when variant rendering fails", async () => {
+    const page = { goto: mock(async () => {}) };
+    const context = {
+      close: mock(async () => {}),
+      newPage: mock(async () => page),
+    };
+    const browser = {
+      close: mock(async () => {}),
+      newContext: mock(async () => context),
+    };
+    const outputDir = "/tmp/project/.demohunter/billing-overview";
+    const stagingRoot = "/tmp/project/.demohunter-output-failure";
+    const stagedOutputDir = `${stagingRoot}/output`;
+    const rename = mock(async () => {});
+    const muxVideo = mock(async () => ({
+      mp4: { fileName: "video.mp4" as const, format: "mp4" as const, path: `${stagedOutputDir}/video.mp4` },
+    }));
+    const writeGenerationOutput = mock(async () => ({
+      captionsSrtPath: `${stagedOutputDir}/captions.srt`,
+      captionsVttPath: `${stagedOutputDir}/captions.vtt`,
+      chaptersPath: `${stagedOutputDir}/chapters.json`,
+      outputDir: stagedOutputDir,
+      videoPath: `${stagedOutputDir}/video.mp4`,
+    }));
+
+    await expect(generateTour({
+      loadedConfig: createLoadedConfig("/tmp/project", {
+        output: { formats: [{ preset: "square", layout: "fit" }] },
+      }),
+      tourFile: createTourFile("/tmp/project"),
+    }, {
+      attachDebugCapture: mock(() => createDebugCapture()),
+      collectTimeline: mock(async () => ({ entries: [], narrations: [] })),
+      installRecordingEffects: mock(async () => {}),
+      mkdir: mock(async () => undefined),
+      mkdtemp: mock(async () => stagingRoot),
+      muxVideo,
+      playwright: {
+        chromium: { launch: mock(async () => browser) },
+        firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+        webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+      },
+      prepareOutputDir: mock(async () => outputDir),
+      rename,
+      renderOutputVariants: mock(async () => {
+        throw new Error("synthetic variant failure");
+      }),
+      replayTimeline: mock(async ({ onBeforeRun }) => { await onBeforeRun?.(); }),
+      startScreencast: mock(async () => {}),
+      stopScreencast: mock(async () => {}),
+      writeGenerationOutput,
+    })).rejects.toThrow("synthetic variant failure");
+
+    expect(muxVideo).toHaveBeenCalledWith(expect.objectContaining({ outputDir: stagedOutputDir }));
+    expect(writeGenerationOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ outputDir: stagedOutputDir }),
+    );
+    expect(rename).not.toHaveBeenCalled();
   });
 
   test("applies highlight visuals after the base highlight, resolving style and duration defaults", async () => {
