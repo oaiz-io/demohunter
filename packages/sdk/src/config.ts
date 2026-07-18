@@ -44,12 +44,9 @@ export type ViewportConfig = {
   height: number;
 };
 
-export type RecordConfig = {
+type RecordBehaviorConfig = {
   showActions: boolean;
   showChapters: boolean;
-  container: RecordFormat;
-  /** @deprecated Use container instead. */
-  format?: RecordFormat;
   /** Render a custom DOM cursor in the recording pass. Default: true */
   /** @deprecated Use cursor instead. */
   showCursor?: boolean;
@@ -64,7 +61,25 @@ export type RecordConfig = {
   cookieBanners?: CookieBannerConfig;
 };
 
-export type DemoHunterUserRecordConfig = Partial<Omit<RecordConfig, "cookieBanners" | "cursor">> & {
+/**
+ * Record settings accepted by authored configurations. During the container-name
+ * migration, either the preferred `container` field or legacy `format` field is
+ * required when constructing this complete type directly.
+ */
+export type RecordConfig = RecordBehaviorConfig &
+  (
+    | { container: RecordFormat; /** @deprecated Use container instead. */ format?: RecordFormat }
+    | { container?: RecordFormat; /** @deprecated Use container instead. */ format: RecordFormat }
+  );
+
+/** Fully normalized recording settings exposed to tour runtimes. */
+export type ResolvedRecordConfig = RecordBehaviorConfig & {
+  container: RecordFormat;
+  /** @deprecated Mirrors container for compatibility. */
+  format: RecordFormat;
+};
+
+export type DemoHunterUserRecordConfig = Partial<Omit<ResolvedRecordConfig, "cookieBanners" | "cursor">> & {
   cookieBanners?: Partial<CookieBannerConfig>;
   cursor?: false | Partial<CursorOptions>;
 };
@@ -129,7 +144,7 @@ export type ResolvedDemoHunterConfig = {
   browser: BrowserName;
   viewport: ViewportConfig;
   holdPaddingMs: number;
-  record: RecordConfig;
+  record: ResolvedRecordConfig;
   output: OutputConfig;
   tts: TTSConfig;
 };
@@ -158,7 +173,7 @@ export const DEFAULT_CURSOR_CONFIG: CursorOptions = {
   ripple: true,
 };
 
-export const DEFAULT_RECORD_CONFIG: RecordConfig = {
+export const DEFAULT_RECORD_CONFIG: ResolvedRecordConfig = {
   showActions: true,
   showChapters: true,
   container: "mp4",

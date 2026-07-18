@@ -32,6 +32,7 @@ export type {
   DemoHunterUserConfig,
   RecordConfig,
   RecordFormat,
+  ResolvedRecordConfig,
   ResolvedDemoHunterConfig,
   TTSConfig,
   TTSProviderName,
