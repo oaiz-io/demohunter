@@ -31,6 +31,11 @@ const flexibleArtifactDescriptorSchema = portableArtifactDescriptorSchema.extend
   path: portableRelativePathSchema,
 }).strict();
 
+const portableAudioPathSchema = portableRelativePathSchema.refine(
+  (value) => value.startsWith("audio/") && value.length > "audio/".length,
+  "Audio artifact paths must stay under audio/.",
+);
+
 const timelineChapterSchema = z
   .object({
     title: z.string().min(1),
@@ -62,7 +67,7 @@ const literalArtifactDescriptor = (artifactPath: string) =>
 
 const audioArtifactDescriptorSchema = portableArtifactDescriptorSchema
   .extend({
-    path: z.string().regex(/^audio\/.+/),
+    path: portableAudioPathSchema,
     cacheKey: z.string().min(1),
     durationMs: z.int().nonnegative(),
   })

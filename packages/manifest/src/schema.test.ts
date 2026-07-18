@@ -96,6 +96,21 @@ describe("portableOutputManifestSchema", () => {
         },
       }),
     ).toThrow();
+
+    expect(() =>
+      parsePortableOutputManifest({
+        ...createValidManifest(),
+        artifacts: {
+          ...createValidManifest().artifacts,
+          audio: [
+            {
+              ...createValidManifest().artifacts.audio[0],
+              path: "audio/../outside.mp3",
+            },
+          ],
+        },
+      }),
+    ).toThrow("safe output-root-relative");
   });
 
   test("exports the schema through the source and dist package boundary", async () => {
