@@ -1,7 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { DemoHunterTour, ResolvedDemoHunterConfig } from "@demohunter/sdk";
+import {
+  DEFAULT_COOKIE_BANNER_CONFIG,
+  type CookieBannerConfig,
+  type DemoHunterTour,
+  type ResolvedDemoHunterConfig,
+} from "@demohunter/sdk";
 import * as playwright from "playwright";
 import type { BrowserType, Page } from "playwright";
 
@@ -9,6 +14,10 @@ import { attachDebugCapture } from "./debug/failure-artifacts.js";
 import type { DebugCapture } from "./debug/failure-artifacts.js";
 import type { GenerationProgressEvent, GenerationProgressReporter, TourRuntimeEvent } from "./execute/generator-types.js";
 import { createSmokeLifecycleContext, createSmokeTourRuntime } from "./runtime/create-smoke-tour-runtime.js";
+import {
+  createCookieBannerMiddleware,
+  type CookieBannerMiddleware,
+} from "./middleware/cookie-banner-middleware.js";
 
 export type SmokeGenerateInput = {
   loadedConfig: {
@@ -39,6 +48,7 @@ type SmokeGenerateDependencies = {
   now: () => Date;
   playwright: BrowserTypeMap;
   writeFile: typeof writeFile;
+  createCookieBannerMiddleware: (config: CookieBannerConfig) => CookieBannerMiddleware;
 };
 
 const TOUR_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -49,6 +59,7 @@ const defaultDependencies: SmokeGenerateDependencies = {
   now: () => new Date(),
   playwright,
   writeFile,
+  createCookieBannerMiddleware: (config) => createCookieBannerMiddleware({ config }),
 };
 
 export async function smokeGenerate(
@@ -82,12 +93,21 @@ export async function smokeGenerate(
       viewport: config.viewport,
     });
     const page = await context.newPage();
+    const cookieMiddleware = resolvedDependencies.createCookieBannerMiddleware(
+      config.record.cookieBanners ?? DEFAULT_COOKIE_BANNER_CONFIG,
+    );
+    let middlewareArmed = false;
     const outputDir = path.join(config.outputDir, tourFile.tour.id);
     debugCapture = resolvedDependencies.attachDebugCapture({
       outputDir,
       page,
     });
     const runtime = createSmokeTourRuntime({
+      afterNavigation: async () => {
+        if (middlewareArmed) {
+          await cookieMiddleware.afterNavigation(page);
+        }
+      },
       config,
       onEvent: (event) => {
         lastRuntimeEvent = event;
@@ -105,6 +125,8 @@ export async function smokeGenerate(
         message: `Validating ${tourFile.tour.id}`,
       });
       await Promise.resolve(tourFile.tour.setup?.(lifecycleContext));
+      middlewareArmed = true;
+      await cookieMiddleware.afterSetup(page);
       await Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext));
       await Promise.resolve(tourFile.tour.run(runtime));
     } catch (error) {

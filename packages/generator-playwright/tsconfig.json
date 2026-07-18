@@ -14,5 +14,13 @@
   ],
   "exclude": [
     "src/**/*.test.ts"
+  ],
+  "references": [
+    { "path": "../sdk" },
+    { "path": "../manifest" },
+    { "path": "../media-ffmpeg" },
+    { "path": "../tts-core" },
+    { "path": "../tts-elevenlabs" },
+    { "path": "../tts-openai" }
   ]
 }

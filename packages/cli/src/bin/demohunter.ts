@@ -51,6 +51,11 @@ Commands:
 generate flags:
   --dry-run                Validate the browser flow without narration or video
   --flow-only              Alias for --dry-run
+  --cookie-dismiss <mode>  Dismiss recognized consent banners: reject, accept, or hide
+  --no-cookie-dismiss      Disable cookie-banner automation for this run
+  --cursor <preset>        Cursor rendering: none, highlight, smooth, or ripple
+  --format <preset>        Repeatable output: standard, square, mobile, or gif
+  --duration <seconds>     GIF duration in seconds (0.001 to 15)
 
 add-skill flags:
   --target <name>          Repeatable. One of: claude, codex, both.
@@ -118,14 +123,16 @@ export async function runCli(
   }
 }
 
-function parseGenerateArgs(args: readonly string[]): {
+export function parseGenerateArgs(args: readonly string[]): {
   options: GenerateCommandOptions;
   tourPath?: string;
 } {
   const options: GenerateCommandOptions = {};
   let tourPath: string | undefined;
+  let gifDurationMs: number | undefined;
 
-  for (const arg of args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
     if (arg === "--dry-run") {
       options.dryRun = true;
       continue;
@@ -133,6 +140,78 @@ function parseGenerateArgs(args: readonly string[]): {
 
     if (arg === "--flow-only") {
       options.flowOnly = true;
+      continue;
+    }
+
+    if (arg === "--no-cookie-dismiss") {
+      assertCookieDismissNotSet(options);
+      options.cookieDismiss = false;
+      continue;
+    }
+
+    if (arg === "--cookie-dismiss") {
+      assertCookieDismissNotSet(options);
+      const value = args[index + 1];
+
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error("--cookie-dismiss requires one of: reject, accept, hide");
+      }
+
+      options.cookieDismiss = parseCookieDismissAction(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--cookie-dismiss=")) {
+      assertCookieDismissNotSet(options);
+      options.cookieDismiss = parseCookieDismissAction(arg.slice("--cookie-dismiss=".length));
+      continue;
+    }
+
+    if (arg === "--cursor") {
+      assertCursorNotSet(options);
+      const value = args[index + 1];
+
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error("--cursor requires one of: none, highlight, smooth, ripple");
+      }
+
+      options.cursor = parseCursorPreset(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--cursor=")) {
+      assertCursorNotSet(options);
+      options.cursor = parseCursorPreset(arg.slice("--cursor=".length));
+      continue;
+    }
+
+    if (arg === "--format") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error("--format requires one of: standard, square, mobile, gif");
+      }
+      addOutputFormat(options, value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--format=")) {
+      addOutputFormat(options, arg.slice("--format=".length));
+      continue;
+    }
+
+    if (arg === "--duration" || arg.startsWith("--duration=")) {
+      if (gifDurationMs !== undefined) {
+        throw new Error("--duration may only be provided once per generation.");
+      }
+      const value = arg === "--duration" ? args[index + 1] : arg.slice("--duration=".length);
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error("--duration requires a number of seconds from 0.001 to 15");
+      }
+      gifDurationMs = parseGifDuration(value);
+      if (arg === "--duration") index += 1;
       continue;
     }
 
@@ -147,7 +226,62 @@ function parseGenerateArgs(args: readonly string[]): {
     tourPath = arg;
   }
 
+  if (gifDurationMs !== undefined) {
+    const gif = options.formats?.find((format) => format.preset === "gif");
+    if (gif === undefined) {
+      throw new Error("--duration may only be used together with --format gif");
+    }
+    gif.durationMs = gifDurationMs;
+  }
+
   return { options, tourPath };
+}
+
+function addOutputFormat(options: GenerateCommandOptions, value: string): void {
+  if (value !== "standard" && value !== "square" && value !== "mobile" && value !== "gif") {
+    throw new Error(`Invalid --format value: ${value}. Expected standard, square, mobile, or gif.`);
+  }
+  options.formats ??= [];
+  if (options.formats.some((format) => format.preset === value)) {
+    throw new Error(`--format ${value} may only be provided once per generation.`);
+  }
+  options.formats.push({ preset: value });
+}
+
+function parseGifDuration(value: string): number {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0.001 || seconds > 15) {
+    throw new Error("--duration requires a number of seconds from 0.001 to 15");
+  }
+  return Math.round(seconds * 1000);
+}
+
+function parseCursorPreset(value: string): "none" | "highlight" | "smooth" | "ripple" {
+  if (value === "none" || value === "highlight" || value === "smooth" || value === "ripple") {
+    return value;
+  }
+
+  throw new Error(`Invalid --cursor value: ${value}. Expected none, highlight, smooth, or ripple.`);
+}
+
+function assertCursorNotSet(options: GenerateCommandOptions): void {
+  if (options.cursor !== undefined) {
+    throw new Error("--cursor may only be provided once per generation.");
+  }
+}
+
+function parseCookieDismissAction(value: string): "reject" | "accept" | "hide" {
+  if (value === "reject" || value === "accept" || value === "hide") {
+    return value;
+  }
+
+  throw new Error(`Invalid --cookie-dismiss value: ${value}. Expected reject, accept, or hide.`);
+}
+
+function assertCookieDismissNotSet(options: GenerateCommandOptions): void {
+  if (options.cookieDismiss !== undefined) {
+    throw new Error("Use only one of --cookie-dismiss or --no-cookie-dismiss per generation.");
+  }
 }
 
 function isCacheAction(action: string | undefined): action is "list" | "prune" | "clear" {

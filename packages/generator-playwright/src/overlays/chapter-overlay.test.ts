@@ -12,6 +12,7 @@ type OverlayEvaluate = (
 ) => void;
 
 class FakeElement {
+  public attributes: Record<string, string> = {};
   public children: FakeElement[] = [];
   public dataset: Record<string, string> = {};
   public id = "";
@@ -23,6 +24,10 @@ class FakeElement {
     child.parentNode = this;
     this.children.push(child);
     return child;
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes[name] = value;
   }
 }
 
@@ -78,6 +83,7 @@ describe("showChapterOverlay", () => {
       expect(overlay?.textContent).toBe("Billing");
       expect(overlay?.style.opacity).toBe("1");
       expect(overlay?.style.position).toBe("fixed");
+      expect(overlay?.attributes["data-demohunter-overlay"]).toBe("");
       expect(state.scheduled).toHaveLength(1);
     });
 

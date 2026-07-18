@@ -2,7 +2,14 @@ import path from "node:path";
 
 import { generateTour, smokeGenerate } from "@demohunter/generator-playwright";
 import type { GenerationProgressEvent } from "@demohunter/generator-playwright";
-import type { DemoHunterTour } from "@demohunter/sdk";
+import {
+  DEFAULT_COOKIE_BANNER_CONFIG,
+  DEFAULT_CURSOR_CONFIG,
+  resolveOutputFormatRequests,
+  type DemoHunterTour,
+  type GenerateOverrides,
+  type ResolvedDemoHunterConfig,
+} from "@demohunter/sdk";
 
 import { loadConfig } from "../config/load-config.js";
 import { loadAuthoredModule } from "../utils/load-authored-module.js";
@@ -22,6 +29,9 @@ type GenerateDependencies = {
 export type GenerateCommandOptions = {
   dryRun?: boolean;
   flowOnly?: boolean;
+  cookieDismiss?: false | "reject" | "accept" | "hide";
+  cursor?: "none" | "highlight" | "smooth" | "ripple";
+  formats?: Array<{ preset: "standard" | "square" | "mobile" | "gif"; layout?: "fit" | "responsive"; durationMs?: number }>;
 };
 
 const defaultDependencies: GenerateDependencies = {
@@ -52,6 +62,10 @@ export async function generateCommand(
   try {
     resolvedDependencies.log(formatProgress({ phase: "loading-config", message: "Loading demohunter.config.ts" }));
     loadedConfig = await resolvedDependencies.loadConfig(cwd);
+    loadedConfig = {
+      ...loadedConfig,
+      config: applyGenerateOverrides(loadedConfig.config, toGenerateOverrides(options)),
+    };
     resolvedDependencies.log(formatProgress({ phase: "loading-tour", message: `Loading ${tourPath}` }));
     const tourModule = await resolvedDependencies.importModule(resolvedTourPath);
     const tourFile = {
@@ -95,7 +109,65 @@ export async function generateCommand(
 function isGenerateCommandOptions(
   value: GenerateCommandOptions | Partial<GenerateDependencies>,
 ): value is GenerateCommandOptions {
-  return "dryRun" in value || "flowOnly" in value;
+  return "dryRun" in value || "flowOnly" in value || "cookieDismiss" in value || "cursor" in value || "formats" in value;
+}
+
+export function applyGenerateOverrides(
+  config: ResolvedDemoHunterConfig,
+  overrides: GenerateOverrides,
+): ResolvedDemoHunterConfig {
+  if (
+    overrides.cookieDismiss === undefined
+    && overrides.cursor === undefined
+    && overrides.outputFormats === undefined
+  ) {
+    return config;
+  }
+
+  return {
+    ...config,
+    output: overrides.outputFormats === undefined
+      ? config.output
+      : { formats: resolveOutputFormatRequests(overrides.outputFormats) },
+    record: {
+      ...config.record,
+      cookieBanners: overrides.cookieDismiss === undefined
+        ? config.record.cookieBanners
+        : {
+            ...DEFAULT_COOKIE_BANNER_CONFIG,
+            ...config.record.cookieBanners,
+            enabled: overrides.cookieDismiss !== false,
+            ...(overrides.cookieDismiss === false ? {} : { action: overrides.cookieDismiss }),
+          },
+      cursor: overrides.cursor === undefined
+        ? config.record.cursor
+        : resolveCursorOverride(overrides.cursor),
+    },
+  };
+}
+
+function toGenerateOverrides(options: GenerateCommandOptions): GenerateOverrides {
+  return {
+    ...(options.cookieDismiss === undefined ? {} : { cookieDismiss: options.cookieDismiss }),
+    ...(options.cursor === undefined
+      ? {}
+      : { cursor: options.cursor === "none" ? false : options.cursor }),
+    ...(options.formats === undefined ? {} : { outputFormats: options.formats }),
+  };
+}
+
+function resolveCursorOverride(
+  preset: NonNullable<GenerateOverrides["cursor"]>,
+): ResolvedDemoHunterConfig["record"]["cursor"] {
+  if (preset === false) {
+    return false;
+  }
+
+  return {
+    ...DEFAULT_CURSOR_CONFIG,
+    mode: preset === "highlight" ? "highlight" : "smooth",
+    ripple: preset === "ripple",
+  };
 }
 
 function formatProgress(event: GenerationProgressEvent): string {

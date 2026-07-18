@@ -55,6 +55,12 @@ export type TypeTextOptions = {
   timeoutMs?: number;
 };
 
+export type DemoHunterClickOptions = {
+  position?: { x: number; y: number };
+  motion?: "smooth" | "instant";
+  timeoutMs?: number;
+};
+
 export type DemoHunterLifecycleContext = {
   config: ResolvedDemoHunterConfig;
   goto: DemoHunterGoto;
@@ -71,6 +77,11 @@ export type DemoHunterTypeText = (
   target: Locator,
   text: string,
   options?: TypeTextOptions,
+) => Promise<void>;
+
+export type DemoHunterClick = (
+  target: Locator,
+  options?: DemoHunterClickOptions,
 ) => Promise<void>;
 
 export type DemoHunterNarrationTimeline = {
@@ -118,6 +129,7 @@ export type DemoHunterRunContext<
   highlight: DemoHunterHighlight;
   snapshot: DemoHunterSnapshot;
   assertVisible: DemoHunterAssertVisible;
+  click: DemoHunterClick;
 };
 
 export type DemoHunterAuthorRunContext = DemoHunterRunContext<DemoHunterNarrateWhileTimeline>;

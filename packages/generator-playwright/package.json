@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@demohunter/manifest": "workspace:*",
+    "@demohunter/media-ffmpeg": "workspace:*",
     "@demohunter/sdk": "workspace:*",
     "@demohunter/tts-core": "workspace:*",
     "@demohunter/tts-elevenlabs": "workspace:*",

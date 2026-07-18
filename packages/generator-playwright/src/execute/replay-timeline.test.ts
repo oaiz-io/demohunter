@@ -40,9 +40,18 @@ describe("replayTimeline", () => {
       contexts.push(context as object);
       expect((context as Record<string, unknown>).marker).toBe("shared");
     });
+    const cookieMiddleware = {
+      afterSetup: mock(async () => {
+        calls.push("cookie:after-setup");
+      }),
+      afterNavigation: mock(async () => {
+        calls.push("cookie:after-navigation");
+      }),
+    };
 
     await replayTimeline({
       loadedConfig: createLoadedConfig("/tmp/workspace"),
+      cookieMiddleware,
       onBeforeRun: () => {
         calls.push("before-run");
       },
@@ -63,7 +72,15 @@ describe("replayTimeline", () => {
 
     expect(page.goto).toHaveBeenCalledWith("http://localhost:3000/");
     expect(page.waitForTimeout).toHaveBeenCalledWith(1500);
-    expect(calls).toEqual(["setup:true", "beforeRecord:true", "before-run", "run:true", "step", "teardown:true"]);
+    expect(calls).toEqual([
+      "setup:true",
+      "cookie:after-setup",
+      "beforeRecord:true",
+      "before-run",
+      "run:true",
+      "step",
+      "teardown:true",
+    ]);
     expect(contexts).toHaveLength(4);
     expect(contexts[0]).toBe(contexts[1]);
     expect(contexts[0]).not.toBe(contexts[2]);

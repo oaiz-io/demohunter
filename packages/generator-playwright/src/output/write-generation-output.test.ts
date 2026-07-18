@@ -147,9 +147,14 @@ describe("writeGenerationOutput", () => {
     expect((await readdir(fixture.outputDir)).includes("audio")).toBe(false);
   });
 
-  test("removes the stale alternate video artifact on rerun", async () => {
+  test("removes stale alternate video and variant artifacts on rerun", async () => {
     const fixture = await makeFixture();
     await writeFile(path.join(fixture.outputDir, "video.webm"), "stale webm bytes");
+    await mkdir(path.join(fixture.outputDir, "variants", "square"), { recursive: true });
+    await writeFile(
+      path.join(fixture.outputDir, "variants", "square", "video.mp4"),
+      "stale variant bytes",
+    );
 
     await writeGenerationOutput({
       tourId: "billing-overview",

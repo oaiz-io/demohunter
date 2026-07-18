@@ -62,12 +62,14 @@ describe("capturePoster", () => {
         command: "/custom/bin/ffmpeg",
         args: [
           "-y",
-          "-ss",
-          "1.000",
           "-i",
           fixture.videoPath,
+          "-ss",
+          "1.000",
           "-frames:v",
           "1",
+          "-pix_fmt",
+          "yuvj420p",
           path.join(fixture.outputDir, "poster.jpg"),
         ],
       },
@@ -96,7 +98,29 @@ describe("capturePoster", () => {
     );
 
     expect(result.videoDurationMs).toBe(500);
-    expect(result.captureTimestampMs).toBe(499);
+    expect(result.captureTimestampMs).toBe(400);
+  });
+
+  test("rejects zero-duration video before attempting poster or GIF generation", async () => {
+    const fixture = await makeFixture();
+    const commands: string[] = [];
+
+    await expect(capturePoster(
+      {
+        outputDir: fixture.outputDir,
+        videoPath: fixture.videoPath,
+      },
+      {
+        runCommand: async (command) => {
+          commands.push(command);
+          return JSON.stringify({ format: { duration: "0" } });
+        },
+      },
+    )).rejects.toThrow(
+      `Final video must have a positive duration before poster or GIF generation: ${fixture.videoPath}.`,
+    );
+
+    expect(commands).toEqual(["ffprobe"]);
   });
 });
 

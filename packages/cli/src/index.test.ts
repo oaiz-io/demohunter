@@ -48,6 +48,13 @@ describe("demohunter package entrypoint", () => {
     expect(declarations).toContain("highlightStyle?: HighlightStyle");
     expect(declarations).toContain('style?: "ring" | "spotlight"');
     expect(declarations).toContain("durationMs?: number");
+    expect(declarations).toContain("OutputFormatRequest");
+    expect(declarations).toContain("OutputConfig");
+    expect(declarations).toContain("GenerateOverrides");
+    expect(declarations).toContain("DEFAULT_OUTPUT_CONFIG");
+    expect(declarations).toContain("container: RecordFormat");
+    expect(declarations).toContain("output: OutputConfig");
+    expect(declarations).not.toContain('@demohunter/sdk');
 
     await typecheckConsumerTour();
   }, entrypointContractTimeoutMs);
@@ -67,7 +74,9 @@ async function typecheckConsumerTour(): Promise<void> {
   type DemoHunterNarrateWhile,
   type DemoHunterNarrationTimeline,
   type DemoHunterRunContext,
+  type GenerateOverrides,
   type HighlightOptions,
+  type OutputFormatRequest,
   type RecordConfig,
   type TypeTextOptions,
 } from "demohunter";
@@ -87,6 +96,16 @@ const recordConfig: RecordConfig = {
   highlightStyle: "spotlight",
 };
 
+const outputFormat: OutputFormatRequest = {
+  preset: "square",
+};
+
+const generateOverrides: GenerateOverrides = {
+  cookieDismiss: false,
+  cursor: false,
+  outputFormats: [outputFormat],
+};
+
 const highlightOptions: HighlightOptions = {
   style: "ring",
   durationMs: 1600,
@@ -96,6 +115,9 @@ const highlightOptions: HighlightOptions = {
 export const config = defineConfig({
   baseURL: "http://localhost:3000",
   record: recordConfig,
+  output: {
+    formats: [outputFormat],
+  },
 });
 
 export default defineTour({
@@ -125,12 +147,16 @@ const legacyRunContext = {
     holdPaddingMs: 300,
     outputDir: ".demohunter",
     record: {
+      container: "mp4",
       format: "mp4",
       showActions: true,
       showChapters: true,
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "ring",
+    },
+    output: {
+      formats: [],
     },
     tts: {
       format: "mp3",
@@ -156,9 +182,11 @@ const legacyRunContext = {
   highlight: async () => undefined,
   snapshot: async () => undefined,
   assertVisible: async () => undefined,
+  click: async () => undefined,
 } satisfies DemoHunterRunContext;
 
 void legacyRunContext;
+void generateOverrides;
 `,
     );
     await writeFile(

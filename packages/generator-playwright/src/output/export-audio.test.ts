@@ -14,6 +14,9 @@ afterEach(async () => {
 describe("exportAudio", () => {
   test("copies unique narration audio files into audio/ while preserving extensions", async () => {
     const fixture = await makeFixture();
+    await mkdir(path.join(fixture.outputDir, "audio", "stale"), { recursive: true });
+    await writeFile(path.join(fixture.outputDir, "audio", "obsolete.mp3"), "obsolete bytes");
+    await writeFile(path.join(fixture.outputDir, "audio", "stale", "nested.wav"), "stale bytes");
 
     const exported = await exportAudio(fixture.outputDir, [
       {
@@ -67,10 +70,46 @@ describe("exportAudio", () => {
 
   test("does not create placeholder audio output when narrations are empty", async () => {
     const fixture = await makeFixture();
+    await mkdir(path.join(fixture.outputDir, "audio"), { recursive: true });
+    await writeFile(path.join(fixture.outputDir, "audio", "obsolete.mp3"), "obsolete bytes");
 
     const exported = await exportAudio(fixture.outputDir, []);
 
     expect(exported).toEqual([]);
+    await expect(readdir(path.join(fixture.outputDir, "audio"))).rejects.toThrow();
+  });
+
+  test("rejects colliding portable file names before mutating audio output", async () => {
+    const fixture = await makeFixture();
+    const secondSourceDir = path.join(path.dirname(fixture.mp3Path), "other");
+    const collidingPath = path.join(secondSourceDir, "BILLING.mp3");
+    await mkdir(secondSourceDir, { recursive: true });
+    await writeFile(collidingPath, "different mp3 bytes");
+
+    const exportPromise = exportAudio(fixture.outputDir, [
+      {
+        audioPath: fixture.mp3Path,
+        cacheKey: "billing-a",
+        chapterTitle: "Billing A",
+        durationMs: 1_200,
+        endMs: 1_200,
+        startMs: 0,
+        text: "Explain billing A",
+      },
+      {
+        audioPath: collidingPath,
+        cacheKey: "billing-b",
+        chapterTitle: "Billing B",
+        durationMs: 900,
+        endMs: 2_100,
+        startMs: 1_200,
+        text: "Explain billing B",
+      },
+    ]);
+
+    await expect(exportPromise).rejects.toThrow(
+      'both map to "audio/BILLING.mp3". Ensure cached narration files have unique names.',
+    );
     await expect(readdir(path.join(fixture.outputDir, "audio"))).rejects.toThrow();
   });
 });

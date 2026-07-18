@@ -62,9 +62,18 @@ describe("collectTimeline", () => {
       contexts.push(context as object);
       expect((context as Record<string, unknown>).marker).toBe("shared");
     });
+    const cookieMiddleware = {
+      afterSetup: mock(async () => {
+        calls.push("cookie:after-setup");
+      }),
+      afterNavigation: mock(async () => {
+        calls.push("cookie:after-navigation");
+      }),
+    };
 
     const timeline = await collectTimeline({
       loadedConfig: createLoadedConfig("/tmp/workspace"),
+      cookieMiddleware,
       onBeforeRun: () => {
         calls.push("before-run");
       },
@@ -90,7 +99,15 @@ describe("collectTimeline", () => {
       text: "Explain the invoice screen",
       voice: "marin",
     }, undefined);
-    expect(calls).toEqual(["setup:true", "beforeRecord:true", "before-run", "run:true", "step", "teardown:true"]);
+    expect(calls).toEqual([
+      "setup:true",
+      "cookie:after-setup",
+      "beforeRecord:true",
+      "before-run",
+      "run:true",
+      "step",
+      "teardown:true",
+    ]);
     expect(contexts).toHaveLength(4);
     expect(contexts[0]).toBe(contexts[1]);
     expect(contexts[0]).not.toBe(contexts[2]);

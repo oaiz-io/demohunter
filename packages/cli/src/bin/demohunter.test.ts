@@ -50,6 +50,113 @@ describe("runCli", () => {
     expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", { flowOnly: true });
   });
 
+  test("dispatches generate with cookie dismissal overrides", async () => {
+    const stubs = buildStubs();
+
+    await runCli([
+      "generate",
+      "demos/sample.tour.ts",
+      "--cookie-dismiss=reject",
+    ], "/tmp/demo", stubs);
+
+    expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", {
+      cookieDismiss: "reject",
+    });
+  });
+
+  test("supports disabling cookie dismissal for one run", async () => {
+    const stubs = buildStubs();
+
+    await runCli([
+      "generate",
+      "--no-cookie-dismiss",
+      "demos/sample.tour.ts",
+    ], "/tmp/demo", stubs);
+
+    expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", {
+      cookieDismiss: false,
+    });
+  });
+
+  test("rejects conflicting cookie dismissal flags", async () => {
+    await expect(runCli([
+      "generate",
+      "demos/sample.tour.ts",
+      "--cookie-dismiss",
+      "accept",
+      "--no-cookie-dismiss",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow(
+      "Use only one of --cookie-dismiss or --no-cookie-dismiss",
+    );
+  });
+
+  test.each(["none", "highlight", "smooth", "ripple"] as const)(
+    "dispatches the %s cursor preset",
+    async (cursor) => {
+      const stubs = buildStubs();
+
+      await runCli([
+        "generate",
+        "demos/sample.tour.ts",
+        `--cursor=${cursor}`,
+      ], "/tmp/demo", stubs);
+
+      expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", {
+        cursor,
+      });
+    },
+  );
+
+  test("rejects invalid cursor presets", async () => {
+    await expect(runCli([
+      "generate",
+      "demos/sample.tour.ts",
+      "--cursor",
+      "teleport",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow(
+      "Invalid --cursor value: teleport",
+    );
+  });
+
+  test("dispatches repeatable social formats with a GIF duration", async () => {
+    const stubs = buildStubs();
+
+    await runCli([
+      "generate",
+      "demos/sample.tour.ts",
+      "--format", "standard",
+      "--format=square",
+      "--format", "gif",
+      "--duration", "12.5",
+    ], "/tmp/demo", stubs);
+
+    expect(stubs.generateCommand).toHaveBeenCalledWith("/tmp/demo", "demos/sample.tour.ts", {
+      formats: [
+        { preset: "standard" },
+        { preset: "square" },
+        { preset: "gif", durationMs: 12_500 },
+      ],
+    });
+  });
+
+  test("rejects duplicate formats and GIF durations without GIF output", async () => {
+    await expect(runCli([
+      "generate", "demos/sample.tour.ts", "--format", "square", "--format=square",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow("--format square may only be provided once");
+
+    await expect(runCli([
+      "generate", "demos/sample.tour.ts", "--format", "standard", "--duration", "12",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow("only be used together with --format gif");
+
+    await expect(runCli([
+      "generate", "demos/sample.tour.ts", "--format", "gif", "--duration", "16",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow("0.001 to 15");
+
+    await expect(runCli([
+      "generate", "demos/sample.tour.ts", "--format", "gif", "--duration", "0.0004",
+    ], "/tmp/demo", buildStubs())).rejects.toThrow("0.001 to 15");
+  });
+
   test("dispatches doctor", async () => {
     const stubs = buildStubs();
 

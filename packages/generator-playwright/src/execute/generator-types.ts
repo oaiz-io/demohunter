@@ -1,5 +1,6 @@
 import type {
   AssertVisibleOptions,
+  DemoHunterClickOptions,
   HighlightOptions,
   NarrateOptions,
   SnapshotOptions,
@@ -18,6 +19,7 @@ export const TOUR_RUNTIME_EVENT_KINDS = [
   "highlight",
   "snapshot",
   "assert-visible",
+  "click",
 ] as const;
 
 export type TourRuntimeEvent =
@@ -64,7 +66,12 @@ export type TourRuntimeEvent =
   | ({
       kind: "assert-visible";
       chapterTitle?: string;
-    } & AssertVisibleOptions);
+    } & AssertVisibleOptions)
+  | ({
+      kind: "click";
+      chapterTitle?: string;
+      durationMs: number;
+    } & DemoHunterClickOptions);
 
 export type NarrationRuntimeEvent = Extract<TourRuntimeEvent, { kind: "narrate" }>;
 export type NonNarrationRuntimeEvent = Exclude<TourRuntimeEvent, { kind: "narrate" }>;

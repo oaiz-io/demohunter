@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import path from "node:path";
 
 import type { DemoHunterRunContext, HighlightStyle, ResolvedDemoHunterConfig } from "@demohunter/sdk";
@@ -17,6 +17,7 @@ import { attachDebugCapture } from "./debug/failure-artifacts.js";
 import type { DebugArtifactResult, DebugCapture, DebugPhase } from "./debug/failure-artifacts.js";
 import { replayTimeline } from "./execute/replay-timeline.js";
 import { prepareOutputDir as prepareOutputDirHelper } from "./output/prepare-output-dir.js";
+import { renderOutputVariants } from "./output/render-output-variants.js";
 import { writeGenerationOutput } from "./output/write-generation-output.js";
 import type { GenerationChapter, WriteGenerationOutputResult } from "./output/write-generation-output.js";
 import { showChapterOverlay } from "./overlays/chapter-overlay.js";
@@ -52,11 +53,16 @@ type GenerateTourDependencies = {
   attachDebugCapture: typeof attachDebugCapture;
   collectTimeline: typeof collectTimeline;
   installRecordingEffects: typeof installRecordingEffects;
+  generateResponsiveVariant: (input: GenerateTourInput) => Promise<GenerateTourResult>;
+  mkdir: typeof mkdir;
+  mkdtemp: typeof mkdtemp;
   muxVideo: typeof muxVideo;
   now: () => number;
   playwright: BrowserTypeMap;
   prepareOutputDir: (tourId: string, outputRoot: string) => Promise<string>;
+  rename: typeof rename;
   replayTimeline: typeof replayTimeline;
+  renderOutputVariants: typeof renderOutputVariants;
   showChapterOverlay: typeof showChapterOverlay;
   startScreencast: typeof startScreencast;
   stopScreencast: typeof stopScreencast;
@@ -68,11 +74,16 @@ const defaultDependencies: GenerateTourDependencies = {
   attachDebugCapture,
   collectTimeline,
   installRecordingEffects,
+  generateResponsiveVariant: (input) => generateTour(input),
+  mkdir,
+  mkdtemp,
   muxVideo,
   now: () => Date.now(),
   playwright,
   prepareOutputDir: (tourId, outputRoot) => prepareOutputDirHelper(tourId, outputRoot),
+  rename,
   replayTimeline,
+  renderOutputVariants,
   showChapterOverlay,
   startScreencast,
   stopScreencast,
@@ -108,8 +119,19 @@ export async function generateTour(
   let lastRuntimeEvent: TourRuntimeEvent | undefined;
   const chapters: GenerationChapter[] = [];
   const recordedNarrations: RecordedNarration[] = [];
+  const responsiveCaptureRoots: string[] = [];
+  let outputStagingRoot: string | undefined;
+  let artifactOutputDir = outputDir;
 
   try {
+    if (config.output.formats.length > 0) {
+      outputStagingRoot = await resolvedDependencies.mkdtemp(
+        path.join(path.dirname(outputDir), ".demohunter-output-"),
+      );
+      artifactOutputDir = path.join(outputStagingRoot, "output");
+      await resolvedDependencies.mkdir(artifactOutputDir, { recursive: true });
+    }
+
     passOneContext = await browser.newContext({
       baseURL: config.baseURL,
       viewport: config.viewport,
@@ -154,10 +176,17 @@ export async function generateTour(
       viewport: config.viewport,
     });
 
-    const showCursor = config.record.showCursor ?? true;
-    const showClickRipple = config.record.showClickRipple ?? true;
+    const showCursor = config.record.cursor === false
+      ? false
+      : (config.record.cursor === undefined ? (config.record.showCursor ?? true) : true);
+    const showClickRipple = config.record.cursor === false
+      ? false
+      : (typeof config.record.cursor === "object"
+          ? config.record.cursor.ripple
+          : (config.record.showClickRipple ?? true));
 
     await resolvedDependencies.installRecordingEffects(passTwoContext, {
+      cursor: config.record.cursor,
       showCursor,
       showClickRipple,
     });
@@ -257,12 +286,12 @@ export async function generateTour(
     passTwoDebug = undefined;
     report(onProgress, {
       phase: "muxing-video",
-      message: `Muxing ${config.record.format} video`,
+      message: `Muxing ${config.record.container} video`,
     });
     const videos = await resolvedDependencies.muxVideo({
       narrations: recordedNarrations,
-      outputDir,
-      recordFormat: config.record.format,
+      outputDir: artifactOutputDir,
+      recordFormat: config.record.container,
       tempScreencastPath,
     });
 
@@ -270,14 +299,65 @@ export async function generateTour(
       phase: "writing-artifacts",
       message: `Writing artifacts for ${tourFile.tour.id}`,
     });
-    const result = await resolvedDependencies.writeGenerationOutput({
+    const workingResult = await resolvedDependencies.writeGenerationOutput({
       tourId: tourFile.tour.id,
       tourTitle: tourFile.tour.title,
       chapters,
       recordedNarrations,
       videos,
-      outputDir,
+      outputDir: artifactOutputDir,
     });
+
+    if (config.output.formats.length > 0) {
+      const responsiveSourceDirs: Partial<Record<"standard" | "square" | "mobile", string>> = {};
+      for (const format of config.output.formats) {
+        if (format.preset === "gif" || format.layout !== "responsive") continue;
+        const responsiveRoot = await resolvedDependencies.mkdtemp(
+          path.join(path.dirname(outputDir), `.demohunter-${format.preset}-`),
+        );
+        responsiveCaptureRoots.push(responsiveRoot);
+        const viewport = responsiveViewport(format.preset);
+        report(onProgress, {
+          phase: "collecting-timeline",
+          message: `Capturing responsive ${format.preset} variant at ${viewport.width}x${viewport.height}`,
+        });
+        const responsiveResult = await resolvedDependencies.generateResponsiveVariant({
+          loadedConfig: {
+            ...loadedConfig,
+            config: {
+              ...config,
+              outputDir: responsiveRoot,
+              viewport,
+              output: { formats: [] },
+            },
+          },
+          onProgress,
+          tourFile,
+        });
+        responsiveSourceDirs[format.preset] = responsiveResult.outputDir;
+      }
+
+      report(onProgress, {
+        phase: "writing-artifacts",
+        message: `Rendering ${config.output.formats.length} social output format(s)`,
+      });
+      await resolvedDependencies.renderOutputVariants({
+        formats: config.output.formats,
+        outputDir: artifactOutputDir,
+        responsiveSourceDirs,
+      });
+    }
+
+    let result = workingResult;
+    if (outputStagingRoot !== undefined) {
+      await publishStagedOutput({
+        outputDir,
+        stagedOutputDir: artifactOutputDir,
+        stagingRoot: outputStagingRoot,
+      }, resolvedDependencies);
+      result = rebaseGenerationResult(workingResult, outputDir);
+    }
+
     report(onProgress, {
       phase: "completed",
       message: `Wrote ${result.videoPath}`,
@@ -294,6 +374,12 @@ export async function generateTour(
       passOneDebug?.dispose();
       passTwoDebug?.dispose();
       await rm(tempScreencastPath, { force: true });
+      await Promise.all([
+        ...responsiveCaptureRoots.map((root) => rm(root, { recursive: true, force: true })),
+        ...(outputStagingRoot === undefined
+          ? []
+          : [rm(outputStagingRoot, { recursive: true, force: true })]),
+      ]);
     } catch (error) {
       closeError ??= error;
     }
@@ -319,6 +405,46 @@ export async function generateTour(
     if (primaryError === undefined && closeError !== undefined) {
       throw closeError;
     }
+  }
+}
+
+async function publishStagedOutput(
+  input: { outputDir: string; stagedOutputDir: string; stagingRoot: string },
+  dependencies: Pick<GenerateTourDependencies, "rename">,
+): Promise<void> {
+  const backupDir = path.join(input.stagingRoot, "previous-output");
+  await dependencies.rename(input.outputDir, backupDir);
+
+  try {
+    await dependencies.rename(input.stagedOutputDir, input.outputDir);
+  } catch (error) {
+    await dependencies.rename(backupDir, input.outputDir);
+    throw error;
+  }
+}
+
+function rebaseGenerationResult(
+  result: WriteGenerationOutputResult,
+  outputDir: string,
+): WriteGenerationOutputResult {
+  return {
+    ...result,
+    captionsSrtPath: path.join(outputDir, "captions.srt"),
+    captionsVttPath: path.join(outputDir, "captions.vtt"),
+    chaptersPath: path.join(outputDir, "chapters.json"),
+    outputDir,
+    videoPath: path.join(outputDir, "video.mp4"),
+  };
+}
+
+function responsiveViewport(preset: "standard" | "square" | "mobile") {
+  switch (preset) {
+    case "standard":
+      return { width: 1920, height: 1080 };
+    case "square":
+      return { width: 1080, height: 1080 };
+    case "mobile":
+      return { width: 390, height: 844 };
   }
 }
 

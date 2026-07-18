@@ -1,10 +1,16 @@
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import type { DemoHunterNarrateWhileTimeline } from "@demohunter/sdk";
+import { DEFAULT_COOKIE_BANNER_CONFIG, type DemoHunterNarrateWhileTimeline } from "@demohunter/sdk";
 import type { Page } from "playwright";
 
 import type { SmokeGenerateInput, SmokeTourModule } from "../smoke-generate.js";
+import {
+  createCookieBannerMiddleware,
+  createRecordingEffectsSuppressor,
+  type CookieBannerMiddleware,
+} from "../middleware/cookie-banner-middleware.js";
+import { createDeterministicRecordingClickHandler } from "../overlays/recording-effects-control.js";
 import { createSmokeLifecycleContext, createSmokeTourRuntime } from "../runtime/create-smoke-tour-runtime.js";
 import type { SmokeRuntime } from "../runtime/create-smoke-tour-runtime.js";
 import { resolveTypeTextAction } from "../runtime/type-text.js";
@@ -20,6 +26,7 @@ export type ReplayTimelineInput = {
   tourFile: SmokeTourModule;
   now?: () => number;
   waitForTimeout?: (durationMs: number) => Promise<void>;
+  cookieMiddleware?: CookieBannerMiddleware;
 };
 
 type ReplayTimelineErrorCause = {
@@ -49,13 +56,23 @@ export async function replayTimeline({
   tourFile,
   now = () => Date.now(),
   waitForTimeout,
+  cookieMiddleware = createCookieBannerMiddleware({
+    config: loadedConfig.config.record.cookieBanners ?? DEFAULT_COOKIE_BANNER_CONFIG,
+    suppressActivity: createRecordingEffectsSuppressor(page, loadedConfig.config.record),
+  }),
 }: ReplayTimelineInput): Promise<void> {
   const { config } = loadedConfig;
   const outputDir = path.join(config.outputDir, tourFile.tour.id);
   const replayWait = waitForTimeout ?? ((durationMs: number) => page.waitForTimeout(durationMs));
   let nextExpectedIndex = 0;
   let pendingNarrationWaitMs: number | undefined;
+  let middlewareArmed = false;
   const runtime = createReplayRuntime({
+    afterNavigation: async () => {
+      if (middlewareArmed) {
+        await cookieMiddleware.afterNavigation(page);
+      }
+    },
     config,
     outputDir,
     now,
@@ -80,6 +97,8 @@ export async function replayTimeline({
 
   try {
     await Promise.resolve(tourFile.tour.setup?.(lifecycleContext));
+    middlewareArmed = true;
+    await cookieMiddleware.afterSetup(page);
     await Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext));
     await Promise.resolve(onBeforeRun?.());
     await Promise.resolve(tourFile.tour.run(runtime));
@@ -107,6 +126,7 @@ export async function replayTimeline({
 }
 
 function createReplayRuntime(args: {
+  afterNavigation?: () => Promise<void>;
   config: ReplayTimelineInput["loadedConfig"]["config"];
   onMatchedEvent?: (event: TourRuntimeEvent, index: number) => void;
   onRuntimeEvent?: (event: TourRuntimeEvent) => void;
@@ -120,7 +140,17 @@ function createReplayRuntime(args: {
   updatePendingNarrationWait: (durationMs: number | undefined) => void;
 }): SmokeRuntime {
   const runtime = createSmokeTourRuntime({
+    afterNavigation: args.afterNavigation,
+    animateCursorTo: async (x, y, durationMs) => {
+      await args.page.evaluate(
+        async ({ cursorX, cursorY, motionDurationMs }) => {
+          await window.__demohunterEffects?.moveCursorTo(cursorX, cursorY, motionDurationMs);
+        },
+        { cursorX: x, cursorY: y, motionDurationMs: durationMs },
+      );
+    },
     config: args.config,
+    performClick: createDeterministicRecordingClickHandler(args.page, args.config.record),
     onEvent: (actualEvent) => {
       args.onRuntimeEvent?.(actualEvent);
       const expectedEntry = args.timeline.entries[args.getReplayPosition()];
@@ -299,6 +329,8 @@ function describeEvent(event: TourRuntimeEvent): string {
       return `narration "${event.text}" in chapter "${chapter}"`;
     case "narration-sleep":
       return `narration sleep ${event.durationMs}ms in chapter "${chapter}"`;
+    case "click":
+      return `click after ${event.durationMs}ms cursor motion in chapter "${chapter}"`;
     default:
       return `${event.kind} event in chapter "${chapter}"`;
   }

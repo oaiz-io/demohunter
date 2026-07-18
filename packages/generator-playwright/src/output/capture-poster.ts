@@ -50,25 +50,29 @@ export async function capturePoster(
     };
   };
   const durationSeconds = Number(parsed.format?.duration);
+  const videoDurationMs = Math.round(durationSeconds * 1_000);
 
-  if (!Number.isFinite(durationSeconds) || durationSeconds < 0) {
-    throw new Error(`Unable to probe final video duration for ${input.videoPath}.`);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || videoDurationMs <= 0) {
+    throw new Error(
+      `Final video must have a positive duration before poster or GIF generation: ${input.videoPath}.`,
+    );
   }
 
-  const videoDurationMs = Math.round(durationSeconds * 1_000);
   const captureTimestampMs = Math.max(
     0,
-    Math.min(PORTABLE_POSTER_TIMESTAMP_MS, videoDurationMs > 0 ? videoDurationMs - 1 : 0),
+    Math.min(PORTABLE_POSTER_TIMESTAMP_MS, videoDurationMs - 100),
   );
 
   await resolvedDependencies.runCommand(resolvedDependencies.ffmpegCommand, [
     "-y",
-    "-ss",
-    (captureTimestampMs / 1_000).toFixed(3),
     "-i",
     input.videoPath,
+    "-ss",
+    (captureTimestampMs / 1_000).toFixed(3),
     "-frames:v",
     "1",
+    "-pix_fmt",
+    "yuvj420p",
     posterPath,
   ]);
 

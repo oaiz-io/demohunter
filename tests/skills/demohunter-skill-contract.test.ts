@@ -78,6 +78,16 @@ describe("demohunter skill bundle", () => {
         await expect(access(path.resolve(path.dirname(markdownPath), linkPath))).resolves.toBeNull();
       }
     }
+
+    const authoringReference = await readFile(
+      path.join(skillRoot, "references", "authoring.md"),
+      "utf8",
+    );
+    expect(authoringReference).toContain(
+      '`click(..., { position?, motion?: "smooth" | "instant", timeoutMs? })`',
+    );
+    expect(authoringReference).not.toContain("clickCount?");
+    expect(authoringReference).not.toContain("force?");
   });
 });
 

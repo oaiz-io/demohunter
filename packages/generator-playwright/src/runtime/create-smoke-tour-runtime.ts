@@ -1,3 +1,4 @@
+import { DEFAULT_CURSOR_CONFIG } from "@demohunter/sdk";
 import type {
   AssertVisibleOptions,
   ChapterOptions,
@@ -30,6 +31,7 @@ const LIFECYCLE_BLOCKED_HELPERS = new Set<PropertyKey>([
   "highlight",
   "snapshot",
   "assertVisible",
+  "click",
 ]);
 
 export function createSmokeLifecycleContext(runtime: SmokeRuntime): DemoHunterLifecycleContext {
@@ -55,10 +57,30 @@ export function createSmokeTourRuntime(args: {
   config: ResolvedDemoHunterConfig;
   page: Page;
   outputDir: string;
+  afterNavigation?: () => Promise<void>;
+  animateCursorTo?: (x: number, y: number, durationMs: number) => Promise<void>;
+  performClick?: (
+    target: Locator,
+    options: Parameters<Locator["click"]>[0],
+    destination: { x: number; y: number },
+  ) => Promise<void>;
   onEvent?: (event: SmokeTourRuntimeEvent) => void;
   waitForTimeout?: (durationMs: number) => Promise<void>;
 }): SmokeRuntime {
   let currentChapter: string | undefined;
+  let explicitCursorPosition: { x: number; y: number } | undefined;
+
+  // Existing tours may navigate through page.goto(), reload(), goBack(), or
+  // goForward() instead of the DemoHunter helper. Main-frame navigation
+  // recreates the injected effects runtime, so keep the Node-side motion state
+  // aligned regardless of which navigation API the author uses.
+  if (typeof args.page.on === "function" && typeof args.page.mainFrame === "function") {
+    args.page.on("framenavigated", (frame) => {
+      if (frame === args.page.mainFrame()) {
+        explicitCursorPosition = undefined;
+      }
+    });
+  }
 
   const emit = (event: TourRuntimeEvent): void => {
     args.onEvent?.(event);
@@ -82,8 +104,13 @@ export function createSmokeTourRuntime(args: {
   };
   const goto: DemoHunterRunContext["goto"] = async (url, options) => {
     const resolvedUrl = new URL(url, args.config.baseURL).href;
-
-    return args.page.goto(resolvedUrl, options);
+    const response = await args.page.goto(resolvedUrl, options);
+    // A document navigation recreates the browser-side effects runtime, so its
+    // cursor has no prior position. Reset the collection-side position too or
+    // Pass 1 will wait for motion that Pass 2 can only render as an instant jump.
+    explicitCursorPosition = undefined;
+    await args.afterNavigation?.();
+    return response;
   };
 
   const runtime: SmokeRuntime = {
@@ -194,6 +221,92 @@ export function createSmokeTourRuntime(args: {
         kind: "assert-visible",
         timeoutMs: options?.timeoutMs,
       });
+    },
+    async click(target, options): Promise<void> {
+      await target.waitFor({ state: "visible" });
+      await target.scrollIntoViewIfNeeded();
+      const box = await target.boundingBox();
+
+      if (box === null) {
+        throw new Error("DemoHunter click target detached before its cursor destination could be measured.");
+      }
+
+      let destination = options?.position === undefined
+        ? { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+        : { x: box.x + options.position.x, y: box.y + options.position.y };
+      const cursor = args.config.record.cursor;
+      const cursorConfig = cursor === false
+        || (cursor === undefined && args.config.record.showCursor === false)
+        ? false
+        : {
+            ...DEFAULT_CURSOR_CONFIG,
+            ...(cursor ?? {}),
+            ripple: cursor?.ripple ?? args.config.record.showClickRipple ?? DEFAULT_CURSOR_CONFIG.ripple,
+          };
+      const shouldAnimate = cursorConfig !== false
+        && cursorConfig.mode === "smooth"
+        && options?.motion !== "instant"
+        && explicitCursorPosition !== undefined;
+      const distance = explicitCursorPosition === undefined
+        ? 0
+        : Math.hypot(
+            destination.x - explicitCursorPosition.x,
+            destination.y - explicitCursorPosition.y,
+          );
+      const durationMs = shouldAnimate
+        ? Math.round(Math.min(
+            cursorConfig.maxDurationMs,
+            Math.max(cursorConfig.minDurationMs, distance / cursorConfig.pixelsPerMs),
+          ))
+        : 0;
+
+      emit({
+        chapterTitle: currentChapter,
+        durationMs,
+        kind: "click",
+        ...(options?.motion === undefined ? {} : { motion: options.motion }),
+        ...(options?.position === undefined ? {} : { position: { ...options.position } }),
+        ...(options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      });
+
+      if (args.animateCursorTo !== undefined) {
+        await args.animateCursorTo(destination.x, destination.y, durationMs);
+      } else if (durationMs > 0) {
+        await (args.waitForTimeout ?? ((ms: number) => args.page.waitForTimeout(ms)))(durationMs);
+      }
+
+      const settledBox = await target.boundingBox();
+      if (settledBox === null) {
+        throw new Error("DemoHunter click target detached after cursor motion completed.");
+      }
+      const settledDestination = options?.position === undefined
+        ? {
+            x: settledBox.x + settledBox.width / 2,
+            y: settledBox.y + settledBox.height / 2,
+          }
+        : {
+            x: settledBox.x + options.position.x,
+            y: settledBox.y + options.position.y,
+          };
+
+      if (
+        args.animateCursorTo !== undefined
+        && (settledDestination.x !== destination.x || settledDestination.y !== destination.y)
+      ) {
+        await args.animateCursorTo(settledDestination.x, settledDestination.y, 0);
+      }
+      destination = settledDestination;
+      explicitCursorPosition = destination;
+      const clickOptions = {
+        ...(options?.position === undefined ? {} : { position: options.position }),
+        ...(options?.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
+      };
+
+      if (args.performClick === undefined) {
+        await target.click(clickOptions);
+      } else {
+        await args.performClick(target, clickOptions, destination);
+      }
     },
   };
 

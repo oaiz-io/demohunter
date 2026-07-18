@@ -58,11 +58,31 @@ describe("record defaults", () => {
     expect(DEFAULT_RECORD_CONFIG).toEqual({
       showActions: true,
       showChapters: true,
+      container: "mp4",
       format: "mp4",
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "ring",
+      cookieBanners: {
+        enabled: false,
+        action: "reject",
+        timeoutMs: 750,
+        additionalSelectors: [],
+      },
+      cursor: {
+        mode: "smooth",
+        shape: "pointer",
+        color: "#3b82f6",
+        sizePx: 20,
+        minDurationMs: 400,
+        maxDurationMs: 1200,
+        pixelsPerMs: 1.4,
+        arcHeightPx: 56,
+        ripple: true,
+      },
     });
     expect(DEFAULT_DEMOHUNTER_CONFIG.record.format).toBe("mp4");
+    expect(DEFAULT_DEMOHUNTER_CONFIG.record.container).toBe("mp4");
+    expect(DEFAULT_DEMOHUNTER_CONFIG.output.formats).toEqual([]);
   });
 });

@@ -6,7 +6,9 @@ import { pathToFileURL } from "node:url";
 
 import {
   DEFAULT_DEMOHUNTER_CONFIG,
+  DEFAULT_CURSOR_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
+  DEFAULT_OUTPUT_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
 } from "../../../sdk/src/index.js";
@@ -34,6 +36,7 @@ describe("loadConfig", () => {
       viewport: DEFAULT_DEMOHUNTER_CONFIG.viewport,
       holdPaddingMs: DEFAULT_DEMOHUNTER_CONFIG.holdPaddingMs,
       record: DEFAULT_RECORD_CONFIG,
+      output: DEFAULT_OUTPUT_CONFIG,
       tts: DEFAULT_TTS_CONFIG,
     });
   });
@@ -85,10 +88,13 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: false,
       showChapters: true,
+      container: "mp4",
       format: "mp4",
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "ring",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: DEFAULT_CURSOR_CONFIG,
     });
   });
 
@@ -105,10 +111,13 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: true,
       showChapters: false,
+      container: "mp4",
       format: "mp4",
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "ring",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: DEFAULT_CURSOR_CONFIG,
     });
   });
 
@@ -123,6 +132,7 @@ describe("loadConfig", () => {
     const loaded = await loadConfig(cwd);
 
     expect(loaded.config.record.format).toBe("mp4");
+    expect(loaded.config.record.container).toBe("mp4");
   });
 
   test("resolves an explicit webm record format without generating mp4 by default", async () => {
@@ -141,10 +151,13 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: false,
       showChapters: true,
+      container: "webm",
       format: "webm",
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "ring",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: DEFAULT_CURSOR_CONFIG,
     });
   });
 
@@ -165,10 +178,13 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: true,
       showChapters: true,
+      container: "mp4",
       format: "mp4",
       showCursor: false,
       showClickRipple: false,
       highlightStyle: "spotlight",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: undefined,
     });
   });
 
@@ -185,11 +201,199 @@ describe("loadConfig", () => {
     expect(loaded.config.record).toEqual({
       showActions: true,
       showChapters: true,
+      container: "mp4",
       format: "mp4",
       showCursor: true,
       showClickRipple: true,
       highlightStyle: "spotlight",
+      cookieBanners: DEFAULT_RECORD_CONFIG.cookieBanners,
+      cursor: DEFAULT_CURSOR_CONFIG,
     });
+  });
+
+  test("deep-merges cookie banner settings while preserving safe defaults", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: {
+          cookieBanners: {
+            enabled: true,
+            action: "accept",
+            additionalSelectors: ["[data-cookie-close]"]
+          }
+        }
+      };
+    `);
+
+    const loaded = await loadConfig(cwd);
+
+    expect(loaded.config.record.cookieBanners).toEqual({
+      enabled: true,
+      action: "accept",
+      timeoutMs: 750,
+      additionalSelectors: ["[data-cookie-close]"],
+    });
+  });
+
+  test.each([
+    [
+      "action",
+      '{ enabled: true, action: "deny" }',
+      "Invalid record.cookieBanners.action: deny. Expected reject, accept, or hide.",
+    ],
+    [
+      "timeout",
+      "{ enabled: true, timeoutMs: -1 }",
+      "record.cookieBanners.timeoutMs must be a non-negative finite number",
+    ],
+    [
+      "selectors",
+      '{ enabled: true, additionalSelectors: ["  "] }',
+      "record.cookieBanners.additionalSelectors must contain only non-empty strings",
+    ],
+  ])("rejects invalid cookie banner %s configuration", async (_label, cookieBanners, message) => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: { cookieBanners: ${cookieBanners} }
+      };
+    `);
+
+    await expect(loadConfig(cwd)).rejects.toThrow(message);
+  });
+
+  test("deep-merges explicit cursor settings", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: { cursor: { color: "#ef4444", shape: "dot", ripple: false } }
+      };
+    `);
+
+    const loaded = await loadConfig(cwd);
+
+    expect(loaded.config.record.cursor).toEqual({
+      ...DEFAULT_CURSOR_CONFIG,
+      color: "#ef4444",
+      shape: "dot",
+      ripple: false,
+    });
+  });
+
+  test("maps legacy cursor booleans into the new cursor config", async () => {
+    const hiddenCwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: { showCursor: false } };
+    `);
+    const noRippleCwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: { showClickRipple: false } };
+    `);
+
+    const hidden = await loadConfig(hiddenCwd);
+    expect(hidden.config.record.cursor).toBeUndefined();
+    expect(hidden.config.record.showCursor).toBe(false);
+    expect(hidden.config.record.showClickRipple).toBe(true);
+    expect((await loadConfig(noRippleCwd)).config.record.cursor).toEqual({
+      ...DEFAULT_CURSOR_CONFIG,
+      ripple: false,
+    });
+  });
+
+  test("rejects unsafe cursor timing configuration", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: { cursor: { pixelsPerMs: 0 } }
+      };
+    `);
+
+    await expect(loadConfig(cwd)).rejects.toThrow(
+      "record.cursor.pixelsPerMs must be a positive finite number",
+    );
+  });
+
+  test.each([
+    ["container", '{ container: "avi" }', "record.container must be either mp4 or webm"],
+    ["highlight style", '{ highlightStyle: "glow" }', "record.highlightStyle must be either ring or spotlight"],
+    ["cursor shape", '{ cursor: { shape: "crosshair" } }', "record.cursor.shape must be either dot or pointer"],
+    ["cursor ripple", '{ cursor: { ripple: "yes" } }', "record.cursor.ripple must be a boolean"],
+    ["cursor object", '{ cursor: "smooth" }', "record.cursor must be false or an object"],
+  ])("rejects invalid authored record %s", async (_label, record, message) => {
+    const cwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: ${record} };
+    `);
+
+    await expect(loadConfig(cwd)).rejects.toThrow(message);
+  });
+
+  test("rejects non-object record and output blocks", async () => {
+    const invalidRecord = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: "mp4" };
+    `);
+    const invalidOutput = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: "gif" };
+    `);
+
+    await expect(loadConfig(invalidRecord)).rejects.toThrow("record must be an object");
+    await expect(loadConfig(invalidOutput)).rejects.toThrow("output must be an object");
+  });
+
+  test("resolves output presets and migrates record.format to record.container", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        record: { format: "webm" },
+        output: {
+          formats: [
+            { preset: "standard" },
+            { preset: "square" },
+            { preset: "mobile" },
+            { preset: "gif", durationMs: 12000 }
+          ]
+        }
+      };
+    `);
+
+    const loaded = await loadConfig(cwd);
+
+    expect(loaded.config.record.container).toBe("webm");
+    expect(loaded.config.output.formats).toEqual([
+      { preset: "standard", layout: "fit" },
+      { preset: "square", layout: "fit" },
+      { preset: "mobile", layout: "responsive" },
+      { preset: "gif", layout: "fit", durationMs: 12_000 },
+    ]);
+  });
+
+  test("prefers record.container and validates invalid output requests", async () => {
+    const preferred = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", record: { format: "mp4", container: "webm" } };
+    `);
+    const duplicate = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "square" }, { preset: "square" }] } };
+    `);
+    const tooLong = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "gif", durationMs: 16000 }] } };
+    `);
+    const fractionalDuration = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "gif", durationMs: 0.5 }] } };
+    `);
+    const unknownPreset = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "story" }] } };
+    `);
+    const unknownLayout = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", output: { formats: [{ preset: "square", layout: "crop" }] } };
+    `);
+
+    expect((await loadConfig(preferred)).config.record.container).toBe("webm");
+    await expect(loadConfig(duplicate)).rejects.toThrow("duplicate preset: square");
+    await expect(loadConfig(tooLong)).rejects.toThrow("no greater than 15000");
+    await expect(loadConfig(fractionalDuration)).rejects.toThrow("must be a positive integer");
+    await expect(loadConfig(unknownPreset)).rejects.toThrow(
+      "Invalid output preset: story. Expected standard, square, mobile, or gif.",
+    );
+    await expect(loadConfig(unknownLayout)).rejects.toThrow(
+      "Invalid output layout for square: crop. Expected fit or responsive.",
+    );
   });
 
   test.each([

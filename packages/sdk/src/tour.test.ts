@@ -108,10 +108,12 @@ describe("defineTour", () => {
       holdPaddingMs: 300,
       outputDir: ".demohunter",
       record: {
+        container: "mp4" as const,
         format: "mp4" as const,
         showActions: true,
         showChapters: true,
       },
+      output: { formats: [] },
       tts: {
         format: "mp3",
         instructions: "Speak clearly.",
@@ -211,6 +213,7 @@ describe("defineTour", () => {
       highlight: async () => undefined,
       snapshot: async () => undefined,
       assertVisible: async () => undefined,
+      click: async () => undefined,
     };
     expectType<DemoHunterRunContext>(legacyRunContext);
 
@@ -232,6 +235,7 @@ describe("defineTour", () => {
       highlight: async () => undefined,
       snapshot: async () => undefined,
       assertVisible: async () => undefined,
+      click: async () => undefined,
     });
 
     await setup({ config, goto, page });
@@ -288,10 +292,12 @@ const legacyRunContext = {
     holdPaddingMs: 300,
     outputDir: ".demohunter",
     record: {
+      container: "mp4",
       format: "mp4",
       showActions: true,
       showChapters: true,
     },
+    output: { formats: [] },
     tts: {
       format: "mp3",
       instructions: "Speak clearly.",
@@ -316,6 +322,7 @@ const legacyRunContext = {
   highlight: async () => undefined,
   snapshot: async () => undefined,
   assertVisible: async () => undefined,
+  click: async () => undefined,
 } satisfies DemoHunterRunContext;
 
 void legacyRunContext;
