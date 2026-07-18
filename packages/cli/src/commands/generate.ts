@@ -7,6 +7,7 @@ import {
   DEFAULT_CURSOR_CONFIG,
   resolveOutputFormatRequests,
   type DemoHunterTour,
+  type GenerateOverrides,
   type ResolvedDemoHunterConfig,
 } from "@demohunter/sdk";
 
@@ -63,7 +64,7 @@ export async function generateCommand(
     loadedConfig = await resolvedDependencies.loadConfig(cwd);
     loadedConfig = {
       ...loadedConfig,
-      config: applyGenerateOverrides(loadedConfig.config, options),
+      config: applyGenerateOverrides(loadedConfig.config, toGenerateOverrides(options)),
     };
     resolvedDependencies.log(formatProgress({ phase: "loading-tour", message: `Loading ${tourPath}` }));
     const tourModule = await resolvedDependencies.importModule(resolvedTourPath);
@@ -113,38 +114,52 @@ function isGenerateCommandOptions(
 
 export function applyGenerateOverrides(
   config: ResolvedDemoHunterConfig,
-  options: GenerateCommandOptions,
+  overrides: GenerateOverrides,
 ): ResolvedDemoHunterConfig {
-  if (options.cookieDismiss === undefined && options.cursor === undefined && options.formats === undefined) {
+  if (
+    overrides.cookieDismiss === undefined
+    && overrides.cursor === undefined
+    && overrides.outputFormats === undefined
+  ) {
     return config;
   }
 
   return {
     ...config,
-    output: options.formats === undefined
+    output: overrides.outputFormats === undefined
       ? config.output
-      : { formats: resolveOutputFormatRequests(options.formats) },
+      : { formats: resolveOutputFormatRequests(overrides.outputFormats) },
     record: {
       ...config.record,
-      cookieBanners: options.cookieDismiss === undefined
+      cookieBanners: overrides.cookieDismiss === undefined
         ? config.record.cookieBanners
         : {
             ...DEFAULT_COOKIE_BANNER_CONFIG,
             ...config.record.cookieBanners,
-            enabled: options.cookieDismiss !== false,
-            ...(options.cookieDismiss === false ? {} : { action: options.cookieDismiss }),
+            enabled: overrides.cookieDismiss !== false,
+            ...(overrides.cookieDismiss === false ? {} : { action: overrides.cookieDismiss }),
           },
-      cursor: options.cursor === undefined
+      cursor: overrides.cursor === undefined
         ? config.record.cursor
-        : resolveCursorOverride(options.cursor),
+        : resolveCursorOverride(overrides.cursor),
     },
   };
 }
 
+function toGenerateOverrides(options: GenerateCommandOptions): GenerateOverrides {
+  return {
+    ...(options.cookieDismiss === undefined ? {} : { cookieDismiss: options.cookieDismiss }),
+    ...(options.cursor === undefined
+      ? {}
+      : { cursor: options.cursor === "none" ? false : options.cursor }),
+    ...(options.formats === undefined ? {} : { outputFormats: options.formats }),
+  };
+}
+
 function resolveCursorOverride(
-  preset: NonNullable<GenerateCommandOptions["cursor"]>,
+  preset: NonNullable<GenerateOverrides["cursor"]>,
 ): ResolvedDemoHunterConfig["record"]["cursor"] {
-  if (preset === "none") {
+  if (preset === false) {
     return false;
   }
 

@@ -67,6 +67,15 @@ describe("generateCommand", () => {
       arcHeightPx: 56,
       ripple: false,
     });
+
+    await generateCommand(
+      cwd,
+      "demos/sample.tour.ts",
+      { cursor: "none" },
+      { generateTour, loadConfig: async () => loadedConfig, log: () => {} },
+    );
+
+    expect(generateTour.mock.calls[1]?.[0].loadedConfig.config.record.cursor).toBe(false);
     expect(loadedConfig.config.record.cursor).toEqual(DEFAULT_RECORD_CONFIG.cursor);
   });
 

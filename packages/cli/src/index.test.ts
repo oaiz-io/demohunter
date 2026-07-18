@@ -50,6 +50,7 @@ describe("demohunter package entrypoint", () => {
     expect(declarations).toContain("durationMs?: number");
     expect(declarations).toContain("OutputFormatRequest");
     expect(declarations).toContain("OutputConfig");
+    expect(declarations).toContain("GenerateOverrides");
     expect(declarations).toContain("DEFAULT_OUTPUT_CONFIG");
     expect(declarations).toContain("container: RecordFormat");
     expect(declarations).toContain("output: OutputConfig");
@@ -73,6 +74,7 @@ async function typecheckConsumerTour(): Promise<void> {
   type DemoHunterNarrateWhile,
   type DemoHunterNarrationTimeline,
   type DemoHunterRunContext,
+  type GenerateOverrides,
   type HighlightOptions,
   type OutputFormatRequest,
   type RecordConfig,
@@ -96,6 +98,12 @@ const recordConfig: RecordConfig = {
 
 const outputFormat: OutputFormatRequest = {
   preset: "square",
+};
+
+const generateOverrides: GenerateOverrides = {
+  cookieDismiss: false,
+  cursor: false,
+  outputFormats: [outputFormat],
 };
 
 const highlightOptions: HighlightOptions = {
@@ -178,6 +186,7 @@ const legacyRunContext = {
 } satisfies DemoHunterRunContext;
 
 void legacyRunContext;
+void generateOverrides;
 `,
     );
     await writeFile(
