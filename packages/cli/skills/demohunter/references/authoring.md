@@ -51,7 +51,7 @@ Useful option details:
 - `highlight(..., { name?, paddingPx?, style?, durationMs? })`
 - `snapshot(..., { name? })`
 - `assertVisible(..., { timeoutMs? })`
-- `click(..., { button?, clickCount?, force?, modifiers?, position?, timeout? })`
+- `click(..., { position?, motion?: "smooth" | "instant", timeoutMs? })`
 
 ## Editing Rules
 
