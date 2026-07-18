@@ -8,9 +8,11 @@ import { promisify } from "node:util";
 
 import * as playwright from "playwright";
 import {
+  hashKokoroAssetFile,
   KOKORO_LANGUAGES,
   parseReadyMessage,
   type KokoroPluginOptions,
+  type KokoroReadyMessage,
 } from "@demohunter/tts-kokoro";
 import type { KokoroProviderDescriptor, ResolvedDemoHunterConfig } from "@demohunter/sdk";
 
@@ -72,6 +74,7 @@ type DoctorDependencies = {
   statPath: typeof stat;
   resolveKokoroOptions: typeof resolveKokoroPluginOptions;
   probeKokoroWorker: typeof probeKokoroWorker;
+  hashKokoroAsset: typeof hashKokoroAssetFile;
 };
 
 const defaultDependencies: DoctorDependencies = {
@@ -87,6 +90,7 @@ const defaultDependencies: DoctorDependencies = {
   statPath: stat,
   resolveKokoroOptions: resolveKokoroPluginOptions,
   probeKokoroWorker,
+  hashKokoroAsset: hashKokoroAssetFile,
 };
 
 export async function doctorCommand(
@@ -304,9 +308,20 @@ async function addKokoroChecks(
       if (normalizedLanguage === undefined || !KOKORO_LANGUAGES.includes(normalizedLanguage as never)) {
         throw new Error(`Kokoro language ${JSON.stringify(config.tts.language)} is unsupported. Supported values: ${KOKORO_LANGUAGES.join(", ")}.`);
       }
-      await dependencies.probeKokoroWorker(options);
+      const ready = await dependencies.probeKokoroWorker(options);
+      if (modelPath !== undefined && voicesPath !== undefined) {
+        const [modelSha256, voicesSha256] = await Promise.all([
+          dependencies.hashKokoroAsset(modelPath),
+          dependencies.hashKokoroAsset(voicesPath),
+        ]);
+        if (ready.modelSha256 !== modelSha256 || ready.voicesSha256 !== voicesSha256) {
+          throw new Error("Kokoro worker identity does not match the configured model and voices files.");
+        }
+      }
       return {
-        message: "Kokoro protocol/version/asset identity handshake passed; selected language is configured for WAV at 24,000 Hz",
+        message: modelPath === undefined
+          ? "Kokoro protocol/version handshake passed with the command's self-reported asset identity; selected language is configured for WAV at 24,000 Hz"
+          : "Kokoro protocol/version handshake and configured asset digest comparison passed; selected language is configured for WAV at 24,000 Hz",
       };
     });
   } else {
@@ -318,7 +333,7 @@ async function addKokoroChecks(
   }
 }
 
-export async function probeKokoroWorker(options: KokoroPluginOptions): Promise<void> {
+export async function probeKokoroWorker(options: KokoroPluginOptions): Promise<KokoroReadyMessage> {
   const stdout = await new Promise<string>((resolve, reject) => {
     const child = spawn(options.executable, [...(options.args ?? [])], {
       shell: false,
@@ -367,6 +382,7 @@ export async function probeKokoroWorker(options: KokoroPluginOptions): Promise<v
       `Kokoro worker backend version ${JSON.stringify(ready.backendVersion)} does not match required version ${JSON.stringify(expectedVersion)}.`,
     );
   }
+  return ready;
 }
 
 async function runCheck<T>(

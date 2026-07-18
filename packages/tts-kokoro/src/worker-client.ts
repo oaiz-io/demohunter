@@ -27,6 +27,16 @@ export type KokoroWorkerClientOptions = {
 
 export type KokoroSynthesizeInput = Omit<KokoroSynthesisRequest, "protocol" | "id" | "op">;
 
+/** A worker could not become ready, so a previously verified identity may be used for cache lookup only. */
+export class KokoroWorkerUnavailableError extends Error {
+  override readonly name = "KokoroWorkerUnavailableError";
+}
+
+/** The worker answered, but its protocol or identity is unsafe to trust. */
+export class KokoroWorkerIdentityError extends Error {
+  override readonly name = "KokoroWorkerIdentityError";
+}
+
 type Waiter = { resolve(line: string): void; reject(error: unknown): void };
 
 export class KokoroWorkerClient {
@@ -117,9 +127,17 @@ export class KokoroWorkerClient {
     this.#session = session;
     try {
       const line = await session.nextLine(this.#options.startupTimeoutMs, "startup", signal);
-      const ready = parseReadyMessage(line);
+      let ready: KokoroReadyMessage;
+      try {
+        ready = parseReadyMessage(line);
+      } catch (error) {
+        throw new KokoroWorkerIdentityError(
+          error instanceof Error ? error.message : "Kokoro worker returned an invalid startup identity.",
+          { cause: error },
+        );
+      }
       if (this.#options.expectedBackendVersion !== undefined && ready.backendVersion !== this.#options.expectedBackendVersion) {
-        throw new Error(`Kokoro worker backend version ${JSON.stringify(ready.backendVersion)} does not match required version ${JSON.stringify(this.#options.expectedBackendVersion)}.`);
+        throw new KokoroWorkerIdentityError(`Kokoro worker backend version ${JSON.stringify(ready.backendVersion)} does not match required version ${JSON.stringify(this.#options.expectedBackendVersion)}.`);
       }
       session.ready = ready;
       return session;
@@ -127,7 +145,11 @@ export class KokoroWorkerClient {
       session.kill();
       session.dispose();
       if (this.#session === session) this.#session = undefined;
-      throw error;
+      if (error instanceof KokoroWorkerIdentityError || isAbortError(error)) throw error;
+      throw new KokoroWorkerUnavailableError(
+        error instanceof Error ? error.message : "Kokoro worker was unavailable during startup.",
+        { cause: error },
+      );
     }
   }
 
@@ -150,6 +172,10 @@ export class KokoroWorkerClient {
     this.#tail = queued.then(() => undefined, () => undefined);
     return Promise.race([queued, aborted]).finally(() => signal.removeEventListener("abort", onAbort));
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 class WorkerSession {

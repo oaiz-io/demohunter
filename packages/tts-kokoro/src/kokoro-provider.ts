@@ -13,7 +13,7 @@ import {
 } from "./identity-sidecar.js";
 import { KOKORO_PROTOCOL_IDENTITY } from "./protocol.js";
 import { sealWaveFile } from "./wave.js";
-import { KokoroWorkerClient } from "./worker-client.js";
+import { KokoroWorkerClient, KokoroWorkerUnavailableError } from "./worker-client.js";
 
 export const KOKORO_LANGUAGES = ["en-us", "en-gb", "es", "fr", "hi", "it", "ja", "pt-br", "zh"] as const;
 export type KokoroLanguage = typeof KOKORO_LANGUAGES[number];
@@ -85,7 +85,7 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
           advertised: ready,
         });
       } catch (error) {
-        if (!isExecutableNotFound(error)) throw error;
+        if (!(error instanceof KokoroWorkerUnavailableError)) throw error;
         runtimeIdentity = await resolveKokoroRuntimeIdentity({
           cacheDir: context.cacheDir,
           runtimeLocator,
@@ -101,6 +101,7 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
           voicesPath,
           backendVersion: runtimeIdentity.backendVersion,
           protocolIdentity: KOKORO_PROTOCOL_IDENTITY,
+          signal: context.signal,
         });
         if (identity.modelSha256 !== runtimeIdentity.modelSha256 || identity.voicesSha256 !== runtimeIdentity.voicesSha256) {
           await client.close().catch(() => undefined);
@@ -119,6 +120,7 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
             voicesPath,
             backendVersion: runtimeIdentity.backendVersion,
             protocolIdentity: KOKORO_PROTOCOL_IDENTITY,
+            signal: context.signal,
           });
           if (identity.modelSha256 !== runtimeIdentity.modelSha256 || identity.voicesSha256 !== runtimeIdentity.voicesSha256) {
             throw new Error("Kokoro worker identity does not match the configured model and voices files.");
@@ -163,6 +165,7 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
       const identity = identities.get(key);
       if (identity === undefined) throw new Error("Kokoro request was not prepared by this provider instance.");
       const run = async () => {
+        context.signal.throwIfAborted();
         if (activeIdentityKey !== key) {
           await client.close().catch(() => undefined);
           client = new KokoroWorkerClient(clientOptions);
@@ -175,7 +178,7 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
           throw new Error("Kokoro worker identity changed after narration preparation; retry to refresh the cache identity.");
         }
         if (identity.modelPath !== undefined && identity.voicesPath !== undefined) {
-          await verifyKokoroAssets({ cacheDir: context.cacheDir, modelPath: identity.modelPath, voicesPath: identity.voicesPath, backendVersion: identity.backendVersion, protocolIdentity: KOKORO_PROTOCOL_IDENTITY }, identity);
+          await verifyKokoroAssets({ cacheDir: context.cacheDir, modelPath: identity.modelPath, voicesPath: identity.voicesPath, backendVersion: identity.backendVersion, protocolIdentity: KOKORO_PROTOCOL_IDENTITY, signal: context.signal }, identity);
         }
         context.signal.throwIfAborted();
         const stagingParent = join(resolve(context.cacheDir), ".kokoro", "staging");
@@ -198,9 +201,9 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
           if (response.format !== "wav" || response.sampleRate !== 24000) throw new Error("Kokoro worker must report WAV at 24,000 Hz.");
           context.signal.throwIfAborted();
           if (identity.modelPath !== undefined && identity.voicesPath !== undefined) {
-            await verifyKokoroAssets({ cacheDir: context.cacheDir, modelPath: identity.modelPath, voicesPath: identity.voicesPath, backendVersion: identity.backendVersion, protocolIdentity: KOKORO_PROTOCOL_IDENTITY }, identity);
+            await verifyKokoroAssets({ cacheDir: context.cacheDir, modelPath: identity.modelPath, voicesPath: identity.voicesPath, backendVersion: identity.backendVersion, protocolIdentity: KOKORO_PROTOCOL_IDENTITY, signal: context.signal }, identity);
           }
-          await sealWaveFile(outputPath, sealedPath);
+          await sealWaveFile(outputPath, sealedPath, { signal: context.signal });
           context.signal.throwIfAborted();
           returned = true;
           let finalized = false;
@@ -223,7 +226,7 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
       };
       const result = synthesisTail.then(run, run);
       synthesisTail = result.then(() => undefined, () => undefined);
-      return result;
+      return waitForAbortable(result, context.signal);
     },
     close: async () => {
       await synthesisTail;
@@ -253,10 +256,6 @@ function optionalRuntimeString(value: unknown, name: string): string | undefined
   return value;
 }
 
-function isExecutableNotFound(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("Kokoro executable not found");
-}
-
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -283,4 +282,21 @@ function identityKey(identity: Record<string, string>): string {
 function metadataFor(request: NarrationRequest) {
   const { provider, model, voice, format, sampleRate, language, providerOptions } = request;
   return { provider, model, voice, format, sampleRate, ...(language === undefined ? {} : { language }), ...(providerOptions === undefined ? {} : { providerOptions }) };
+}
+
+function waitForAbortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolvePromise, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => { cleanup(); resolvePromise(value); },
+      (error) => { cleanup(); reject(error); },
+    );
+    if (signal.aborted) onAbort();
+  });
 }

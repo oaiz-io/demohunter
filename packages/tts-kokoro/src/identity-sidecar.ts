@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { open, mkdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { open, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 export const KOKORO_IDENTITY_SIDECAR_SCHEMA = 1;
+export const DEFAULT_MAX_KOKORO_ASSET_BYTES = 4 * 1024 * 1024 * 1024;
 
 export type KokoroAssetIdentity = {
   modelSha256: string;
@@ -40,6 +42,8 @@ export type ResolveKokoroIdentityOptions = {
   voicesPath: string;
   backendVersion: string;
   protocolIdentity: string;
+  signal?: AbortSignal;
+  maxAssetBytes?: number;
   now?: () => Date;
 };
 
@@ -92,20 +96,21 @@ export async function resolveKokoroRuntimeIdentity(options: {
 }
 
 export async function resolveKokoroAssetIdentity(options: ResolveKokoroIdentityOptions): Promise<KokoroAssetIdentity> {
-  const model = await regularFileState(options.modelPath);
-  const voices = await regularFileState(options.voicesPath);
+  const [modelSha256, voicesSha256] = await Promise.all([
+    hashKokoroAssetIfPresent(options.modelPath, options),
+    hashKokoroAssetIfPresent(options.voicesPath, options),
+  ]);
   const sidecarPath = kokoroIdentitySidecarPath(options);
   const common = {
     backendVersionSha256: sha256(options.backendVersion),
     protocolSha256: sha256(options.protocolIdentity),
   };
 
-  if ((model === null) !== (voices === null)) {
+  if ((modelSha256 === null) !== (voicesSha256 === null)) {
     throw new Error("Kokoro model and voices assets must either both exist or both be unavailable; partial assets are ambiguous.");
   }
 
-  if (model !== null && voices !== null) {
-    const [modelSha256, voicesSha256] = await Promise.all([hashFile(options.modelPath), hashFile(options.voicesPath)]);
+  if (modelSha256 !== null && voicesSha256 !== null) {
     const record: Sidecar = {
       schema: 1,
       backendVersion: options.backendVersion,
@@ -130,7 +135,11 @@ export async function resolveKokoroAssetIdentity(options: ResolveKokoroIdentityO
 }
 
 export async function verifyKokoroAssets(options: ResolveKokoroIdentityOptions, identity: KokoroAssetIdentity): Promise<void> {
-  const [modelSha256, voicesSha256] = await Promise.all([hashFile(options.modelPath), hashFile(options.voicesPath)]).catch((error: unknown) => {
+  const [modelSha256, voicesSha256] = await Promise.all([
+    hashKokoroAssetFile(options.modelPath, options),
+    hashKokoroAssetFile(options.voicesPath, options),
+  ]).catch((error: unknown) => {
+    if (isAbortError(error)) throw error;
     throw new Error("Kokoro model or voices file is missing; synthesis requires both local assets.", { cause: error });
   });
   if (modelSha256 !== identity.modelSha256 || voicesSha256 !== identity.voicesSha256) {
@@ -138,22 +147,72 @@ export async function verifyKokoroAssets(options: ResolveKokoroIdentityOptions, 
   }
 }
 
-async function regularFileState(path: string): Promise<true | null> {
-  const value = await stat(path).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? null : Promise.reject(error));
-  if (value === null) return null;
-  if (!value.isFile()) throw new Error(`Kokoro asset is not a regular file: ${resolve(path)}`);
-  return true;
+async function hashKokoroAssetIfPresent(
+  path: string,
+  options: Pick<ResolveKokoroIdentityOptions, "signal" | "maxAssetBytes">,
+): Promise<string | null> {
+  const state = await lstat(path).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? null : Promise.reject(error));
+  if (state === null) return null;
+  return hashKokoroAssetFile(path, options);
 }
 
-async function hashFile(path: string): Promise<string> {
-  const handle = await open(path, "r");
+export async function hashKokoroAssetFile(
+  path: string,
+  options: { signal?: AbortSignal; maxAssetBytes?: number } = {},
+): Promise<string> {
+  const maxAssetBytes = options.maxAssetBytes ?? DEFAULT_MAX_KOKORO_ASSET_BYTES;
+  if (!Number.isSafeInteger(maxAssetBytes) || maxAssetBytes <= 0) {
+    throw new Error("Kokoro maximum asset size must be a positive safe integer.");
+  }
+  options.signal?.throwIfAborted();
+  const before = await lstat(path);
+  if (!before.isFile()) throw new Error(`Kokoro asset is not a regular file: ${resolve(path)}`);
+  const noFollow = (constants as Record<string, number>).O_NOFOLLOW ?? 0;
+  const nonBlock = (constants as Record<string, number>).O_NONBLOCK ?? 0;
+  const handle = await open(path, constants.O_RDONLY | noFollow | nonBlock).catch((error: unknown) => {
+    throw new Error(`Unable to safely open Kokoro asset: ${resolve(path)}`, { cause: error });
+  });
   try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || before.dev !== opened.dev || before.ino !== opened.ino) {
+      throw new Error(`Kokoro asset identity changed while opening it: ${resolve(path)}`);
+    }
+    if (opened.size <= 0 || opened.size > maxAssetBytes) {
+      throw new Error(`Kokoro asset is empty or exceeds the ${maxAssetBytes}-byte safety limit: ${resolve(path)}`);
+    }
     const hash = createHash("sha256");
-    for await (const chunk of handle.createReadStream({ autoClose: false })) hash.update(chunk);
+    const chunk = Buffer.allocUnsafe(Math.min(1024 * 1024, opened.size));
+    let position = 0;
+    while (position < opened.size) {
+      options.signal?.throwIfAborted();
+      const length = Math.min(chunk.length, opened.size - position);
+      const { bytesRead } = await handle.read(chunk, 0, length, position);
+      if (bytesRead === 0) throw new Error(`Kokoro asset changed or was truncated while hashing: ${resolve(path)}`);
+      hash.update(chunk.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    options.signal?.throwIfAborted();
+    const after = await handle.stat();
+    if (!sameStableFile(opened, after)) {
+      throw new Error(`Kokoro asset changed while hashing: ${resolve(path)}`);
+    }
     return hash.digest("hex");
   } finally {
     await handle.close();
   }
+}
+
+function sameStableFile(left: Stats, right: Stats): boolean {
+  return left.isFile() && right.isFile()
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function sha256(value: string): string {

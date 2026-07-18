@@ -160,7 +160,7 @@ describe("doctorCommand", () => {
     await doctorCommand("/tmp/project", {
       ...passingDoctorDependencies(),
       accessPath: mock(async () => {}),
-      probeKokoroWorker: mock(async () => {}),
+      probeKokoroWorker: mock(async () => readyIdentity()),
       loadConfig: async () => makeKokoroLoadedConfig("/tmp/project", {
         runtime: "command",
         executable: "kokoro",
@@ -177,7 +177,7 @@ describe("doctorCommand", () => {
 
   test("uses a bounded no-synthesis protocol probe for a valid Kokoro selection", async () => {
     const log = mock(() => {});
-    const probeKokoroWorker = mock(async () => {});
+    const probeKokoroWorker = mock(async () => readyIdentity());
     const accessPath = mock(async () => {});
 
     await doctorCommand("/tmp/project", {
@@ -209,6 +209,29 @@ describe("doctorCommand", () => {
     expect(accessPath).toHaveBeenCalledWith("/tmp/project/models/kokoro.onnx", expect.any(Number));
     expect(accessPath).toHaveBeenCalledWith("/tmp/project/models/voices.bin", expect.any(Number));
   });
+
+  test("fails when the worker advertises different assets than the configured files", async () => {
+    const log = mock(() => {});
+    await expect(doctorCommand("/tmp/project", {
+      ...passingDoctorDependencies(),
+      accessPath: mock(async () => {}),
+      loadConfig: async () => makeKokoroLoadedConfig("/tmp/project", {
+        runtime: "command",
+        executable: "kokoro",
+        modelPath: "models/kokoro.onnx",
+        voicesPath: "models/voices.bin",
+      }),
+      log,
+      probeKokoroWorker: mock(async () => ({ ...readyIdentity(), modelSha256: "f".repeat(64) })),
+    })).rejects.toThrow("Doctor found failing checks.");
+
+    const parsed = JSON.parse(String(log.mock.calls[0]?.[0])) as {
+      checks: Array<{ name: string; status: string; message: string }>;
+    };
+    const handshake = parsed.checks.find((check) => check.name === "kokoro protocol/version/language capability");
+    expect(handshake?.status).toBe("fail");
+    expect(handshake?.message).toContain("does not match the configured model and voices files");
+  });
 });
 
 function passingDoctorDependencies() {
@@ -216,12 +239,23 @@ function passingDoctorDependencies() {
     checkCommand: mock(async () => {}),
     fetch: mock(async () => new Response("ok", { status: 200 })) as never,
     getPlaywrightVersion: () => "1.61.0",
+    hashKokoroAsset: mock(async (assetPath: string) => assetPath.includes("voices") ? "b".repeat(64) : "a".repeat(64)),
     statPath: mock(async () => ({ isFile: () => true })) as never,
     playwright: {
       chromium: { launch: mock(async () => ({ close: mock(async () => {}) })) } as never,
       firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) } as never,
       webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) } as never,
     },
+  };
+}
+
+function readyIdentity() {
+  return {
+    protocol: 1 as const,
+    op: "ready" as const,
+    backendVersion: "fixture-1",
+    modelSha256: "a".repeat(64),
+    voicesSha256: "b".repeat(64),
   };
 }
 
