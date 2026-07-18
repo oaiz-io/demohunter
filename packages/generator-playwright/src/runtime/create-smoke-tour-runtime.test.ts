@@ -245,6 +245,44 @@ describe("createSmokeTourRuntime", () => {
     expect(second.click).toHaveBeenCalledWith({ timeout: 2000 });
   });
 
+  test("settles the cursor at a target that moves during animation", async () => {
+    const animateCursorTo = mock(async () => {});
+    const performClick = mock(async () => {});
+    const first = {
+      boundingBox: mock(async () => ({ x: 0, y: 0, width: 100, height: 100 })),
+      click: mock(async () => {}),
+      scrollIntoViewIfNeeded: mock(async () => {}),
+      waitFor: mock(async () => {}),
+    };
+    let secondMeasurement = 0;
+    const second = {
+      boundingBox: mock(async () => {
+        secondMeasurement += 1;
+        return secondMeasurement === 1
+          ? { x: 560, y: 0, width: 100, height: 100 }
+          : { x: 660, y: 40, width: 100, height: 100 };
+      }),
+      click: mock(async () => {}),
+      scrollIntoViewIfNeeded: mock(async () => {}),
+      waitFor: mock(async () => {}),
+    };
+    const runtime = createSmokeTourRuntime({
+      animateCursorTo,
+      config: createConfig(),
+      outputDir: "/tmp/demohunter-output",
+      page: {} as never,
+      performClick,
+    });
+
+    await runtime.click(first as never);
+    await runtime.click(second as never);
+
+    expect(animateCursorTo).toHaveBeenNthCalledWith(2, 610, 50, 400);
+    expect(animateCursorTo).toHaveBeenNthCalledWith(3, 710, 90, 0);
+    expect(performClick).toHaveBeenLastCalledWith(second, {}, { x: 710, y: 90 });
+    expect(second.click).not.toHaveBeenCalled();
+  });
+
   test("resets deterministic cursor motion after a document navigation", async () => {
     const waits: number[] = [];
     const page = {

@@ -231,7 +231,7 @@ export function createSmokeTourRuntime(args: {
         throw new Error("DemoHunter click target detached before its cursor destination could be measured.");
       }
 
-      const destination = options?.position === undefined
+      let destination = options?.position === undefined
         ? { x: box.x + box.width / 2, y: box.y + box.height / 2 }
         : { x: box.x + options.position.x, y: box.y + options.position.y };
       const cursor = args.config.record.cursor;
@@ -275,6 +275,27 @@ export function createSmokeTourRuntime(args: {
         await (args.waitForTimeout ?? ((ms: number) => args.page.waitForTimeout(ms)))(durationMs);
       }
 
+      const settledBox = await target.boundingBox();
+      if (settledBox === null) {
+        throw new Error("DemoHunter click target detached after cursor motion completed.");
+      }
+      const settledDestination = options?.position === undefined
+        ? {
+            x: settledBox.x + settledBox.width / 2,
+            y: settledBox.y + settledBox.height / 2,
+          }
+        : {
+            x: settledBox.x + options.position.x,
+            y: settledBox.y + options.position.y,
+          };
+
+      if (
+        args.animateCursorTo !== undefined
+        && (settledDestination.x !== destination.x || settledDestination.y !== destination.y)
+      ) {
+        await args.animateCursorTo(settledDestination.x, settledDestination.y, 0);
+      }
+      destination = settledDestination;
       explicitCursorPosition = destination;
       const clickOptions = {
         ...(options?.position === undefined ? {} : { position: options.position }),
