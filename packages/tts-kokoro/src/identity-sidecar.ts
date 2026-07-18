@@ -66,20 +66,7 @@ export async function resolveKokoroRuntimeIdentity(options: {
 }): Promise<KokoroRuntimeIdentity> {
   const sidecarPath = kokoroRuntimeIdentitySidecarPath(options);
   if (options.advertised !== undefined) {
-    if (options.expectedBackendVersion !== undefined && options.advertised.backendVersion !== options.expectedBackendVersion) {
-      throw new Error(`Kokoro worker backend version ${JSON.stringify(options.advertised.backendVersion)} does not match required version ${JSON.stringify(options.expectedBackendVersion)}.`);
-    }
-    const record: RuntimeSidecar = {
-      schema: 1,
-      protocol: options.protocolIdentity,
-      backendVersion: options.advertised.backendVersion,
-      modelSha256: options.advertised.modelSha256,
-      voicesSha256: options.advertised.voicesSha256,
-      verifiedAt: (options.now?.() ?? new Date()).toISOString(),
-      writeId: randomUUID(),
-    };
-    await atomicWriteJson(sidecarPath, record);
-    return options.advertised;
+    return persistKokoroRuntimeIdentity({ ...options, advertised: options.advertised });
   }
 
   const sidecar = await readRuntimeSidecar(sidecarPath);
@@ -93,6 +80,43 @@ export async function resolveKokoroRuntimeIdentity(options: {
     modelSha256: sidecar.modelSha256,
     voicesSha256: sidecar.voicesSha256,
   };
+}
+
+export function validateKokoroRuntimeIdentity(options: {
+  expectedBackendVersion?: string;
+  advertised: KokoroRuntimeIdentity;
+}): KokoroRuntimeIdentity {
+  if (options.expectedBackendVersion !== undefined && options.advertised.backendVersion !== options.expectedBackendVersion) {
+    throw new Error(`Kokoro worker backend version ${JSON.stringify(options.advertised.backendVersion)} does not match required version ${JSON.stringify(options.expectedBackendVersion)}.`);
+  }
+  if (options.advertised.backendVersion.trim() === ""
+    || !isDigest(options.advertised.modelSha256)
+    || !isDigest(options.advertised.voicesSha256)) {
+    throw new Error("Kokoro worker advertised an invalid runtime identity.");
+  }
+  return options.advertised;
+}
+
+export async function persistKokoroRuntimeIdentity(options: {
+  cacheDir: string;
+  runtimeLocator: string;
+  protocolIdentity: string;
+  expectedBackendVersion?: string;
+  advertised: KokoroRuntimeIdentity;
+  now?: () => Date;
+}): Promise<KokoroRuntimeIdentity> {
+  const advertised = validateKokoroRuntimeIdentity(options);
+  const record: RuntimeSidecar = {
+    schema: 1,
+    protocol: options.protocolIdentity,
+    backendVersion: advertised.backendVersion,
+    modelSha256: advertised.modelSha256,
+    voicesSha256: advertised.voicesSha256,
+    verifiedAt: (options.now?.() ?? new Date()).toISOString(),
+    writeId: randomUUID(),
+  };
+  await atomicWriteJson(kokoroRuntimeIdentitySidecarPath(options), record);
+  return advertised;
 }
 
 export async function resolveKokoroAssetIdentity(options: ResolveKokoroIdentityOptions): Promise<KokoroAssetIdentity> {

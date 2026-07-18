@@ -5,8 +5,10 @@ import { join, resolve } from "node:path";
 import type { NarrationProviderPlugin, NarrationRequest } from "@demohunter/tts-core";
 
 import {
+  persistKokoroRuntimeIdentity,
   resolveKokoroAssetIdentity,
   resolveKokoroRuntimeIdentity,
+  validateKokoroRuntimeIdentity,
   verifyKokoroAssets,
   type KokoroAssetIdentity,
   type KokoroRuntimeIdentity,
@@ -73,17 +75,21 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
         options.backendVersion ?? options.modelVersion ?? request.providerOptions?.modelVersion,
         "modelVersion",
       );
-      const runtimeLocator = JSON.stringify([options.executable, [...(options.args ?? [])], options.cwd ?? ""]);
+      const runtimeLocator = JSON.stringify([
+        options.executable,
+        [...(options.args ?? [])],
+        options.cwd ?? "",
+        explicitEnvironmentSha256(options.env),
+      ]);
       let runtimeIdentity: KokoroRuntimeIdentity;
+      let runtimeIdentityWasAdvertised = false;
       try {
         const ready = await client.discoverIdentity(context.signal);
-        runtimeIdentity = await resolveKokoroRuntimeIdentity({
-          cacheDir: context.cacheDir,
-          runtimeLocator,
-          protocolIdentity: KOKORO_PROTOCOL_IDENTITY,
+        runtimeIdentity = validateKokoroRuntimeIdentity({
           expectedBackendVersion: expectedVersion,
           advertised: ready,
         });
+        runtimeIdentityWasAdvertised = true;
       } catch (error) {
         if (!(error instanceof KokoroWorkerUnavailableError)) throw error;
         runtimeIdentity = await resolveKokoroRuntimeIdentity({
@@ -107,13 +113,11 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
           await client.close().catch(() => undefined);
           client = new KokoroWorkerClient(clientOptions);
           const restarted = await client.discoverIdentity(context.signal);
-          runtimeIdentity = await resolveKokoroRuntimeIdentity({
-            cacheDir: context.cacheDir,
-            runtimeLocator,
-            protocolIdentity: KOKORO_PROTOCOL_IDENTITY,
+          runtimeIdentity = validateKokoroRuntimeIdentity({
             expectedBackendVersion: expectedVersion,
             advertised: restarted,
           });
+          runtimeIdentityWasAdvertised = true;
           identity = await resolveKokoroAssetIdentity({
             cacheDir: context.cacheDir,
             modelPath,
@@ -134,6 +138,15 @@ export function kokoro(options: KokoroPluginOptions): NarrationProviderPlugin {
           protocolSha256: sha256(KOKORO_PROTOCOL_IDENTITY),
           freshlyVerified: true,
         };
+      }
+      if (runtimeIdentityWasAdvertised) {
+        await persistKokoroRuntimeIdentity({
+          cacheDir: context.cacheDir,
+          runtimeLocator,
+          protocolIdentity: KOKORO_PROTOCOL_IDENTITY,
+          expectedBackendVersion: expectedVersion,
+          advertised: runtimeIdentity,
+        });
       }
       const portableIdentity = {
         modelSha256: identity.modelSha256,
@@ -258,6 +271,11 @@ function optionalRuntimeString(value: unknown, name: string): string | undefined
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function explicitEnvironmentSha256(environment: Readonly<Record<string, string>> | undefined): string {
+  const entries = Object.entries(environment ?? {}).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  return sha256(JSON.stringify(entries));
 }
 
 function readPortableIdentity(request: NarrationRequest): Record<string, string> {

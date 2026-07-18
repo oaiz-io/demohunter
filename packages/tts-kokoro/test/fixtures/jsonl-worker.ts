@@ -18,10 +18,13 @@ function wav(text: string): Uint8Array {
 
 if (mode === "startup-timeout") await new Promise(() => {});
 if (mode === "require-inherited-env" && !process.env.PATH) process.exit(17);
-const modelSha256 = mode === "assets" || mode === "mutate-assets"
+const switchableState = mode === "switchable-assets" ? readFileSync(process.argv[5]!, "utf8") : undefined;
+if (switchableState === "unavailable") process.exit(18);
+const usesConfiguredAssets = mode === "assets" || mode === "mutate-assets" || (mode === "switchable-assets" && switchableState === "valid");
+const modelSha256 = usesConfiguredAssets
   ? createHash("sha256").update(readFileSync(process.argv[3]!)).digest("hex")
   : createHash("sha256").update("model").digest("hex");
-const voicesSha256 = mode === "assets" || mode === "mutate-assets"
+const voicesSha256 = usesConfiguredAssets
   ? createHash("sha256").update(readFileSync(process.argv[4]!)).digest("hex")
   : createHash("sha256").update("voices").digest("hex");
 if (mode === "malformed-startup") process.stdout.write("not-json\n"); else send({

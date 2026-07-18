@@ -57,6 +57,11 @@ describe("Kokoro OSS and no-download boundary", () => {
       runtime: "command",
       executable: executablePath,
       args: [workerPath],
+      env: {
+        KOKORO_INVOCATION_LOG: invocationLog,
+        KOKORO_MODEL_PATH: modelPath,
+        KOKORO_VOICES_PATH: voicesPath,
+      },
       modelPath,
       voicesPath,
       modelVersion: "fixture-1",
@@ -86,6 +91,11 @@ describe("Kokoro OSS and no-download boundary", () => {
       runtime: "command",
       executable: executablePath,
       args: [workerPath],
+      env: {
+        KOKORO_INVOCATION_LOG: invocationLog,
+        KOKORO_MODEL_PATH: modelPath,
+        KOKORO_VOICES_PATH: voicesPath,
+      },
       modelPath,
       voicesPath,
       modelVersion: "fixture-2",
