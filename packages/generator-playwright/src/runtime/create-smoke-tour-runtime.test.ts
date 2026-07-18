@@ -245,6 +245,45 @@ describe("createSmokeTourRuntime", () => {
     expect(second.click).toHaveBeenCalledWith({ timeout: 2000 });
   });
 
+  test("resets deterministic cursor motion after a document navigation", async () => {
+    const waits: number[] = [];
+    const page = {
+      goto: mock(async () => null),
+    };
+    const first = {
+      boundingBox: mock(async () => ({ x: 0, y: 0, width: 100, height: 100 })),
+      click: mock(async () => {}),
+      scrollIntoViewIfNeeded: mock(async () => {}),
+      waitFor: mock(async () => {}),
+    };
+    const second = {
+      boundingBox: mock(async () => ({ x: 560, y: 0, width: 100, height: 100 })),
+      click: mock(async () => {}),
+      scrollIntoViewIfNeeded: mock(async () => {}),
+      waitFor: mock(async () => {}),
+    };
+    const events: TourRuntimeEvent[] = [];
+    const runtime = createSmokeTourRuntime({
+      config: createConfig(),
+      page: page as never,
+      outputDir: "/tmp/demohunter-output",
+      onEvent: (event) => events.push(event),
+      waitForTimeout: async (durationMs) => {
+        waits.push(durationMs);
+      },
+    });
+
+    await runtime.click(first as never);
+    await runtime.goto("/next-document");
+    await runtime.click(second as never);
+
+    expect(waits).toEqual([]);
+    expect(events.filter((event) => event.kind === "click")).toEqual([
+      { kind: "click", durationMs: 0 },
+      { kind: "click", durationMs: 0 },
+    ]);
+  });
+
   test("types text incrementally inside narrateWhile with deterministic sleep events", async () => {
     const events: unknown[] = [];
     const waitForTimeout = mock(async () => {});

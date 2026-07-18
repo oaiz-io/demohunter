@@ -88,6 +88,10 @@ export function createSmokeTourRuntime(args: {
   const goto: DemoHunterRunContext["goto"] = async (url, options) => {
     const resolvedUrl = new URL(url, args.config.baseURL).href;
     const response = await args.page.goto(resolvedUrl, options);
+    // A document navigation recreates the browser-side effects runtime, so its
+    // cursor has no prior position. Reset the collection-side position too or
+    // Pass 1 will wait for motion that Pass 2 can only render as an instant jump.
+    explicitCursorPosition = undefined;
     await args.afterNavigation?.();
     return response;
   };
