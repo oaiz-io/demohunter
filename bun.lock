@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "demohunter-workspace",
@@ -40,7 +41,7 @@
     },
     "packages/cli": {
       "name": "demohunter",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "bin": {
         "demohunter": "./dist/bin/demohunter.js",
       },
@@ -112,6 +113,27 @@
         "@demohunter/tts-core": "workspace:*",
       },
     },
+    "packages/video-gen": {
+      "name": "@demohunter/video-gen",
+      "version": "0.0.0",
+      "bin": {
+        "demohunter-video": "./dist/cli/index.js",
+      },
+      "dependencies": {
+        "@demohunter/generator-playwright": "workspace:*",
+        "@demohunter/sdk": "workspace:*",
+        "openai": "^5.12.2",
+        "zod": "^4.1.11",
+      },
+      "devDependencies": {
+        "@types/node": "25.6.0",
+        "playwright": ">=1.61",
+        "typescript": "5.9.3",
+      },
+      "peerDependencies": {
+        "playwright": ">=1.61",
+      },
+    },
   },
   "packages": {
     "@demohunter/generator-playwright": ["@demohunter/generator-playwright@workspace:packages/generator-playwright"],
@@ -127,6 +149,8 @@
     "@demohunter/tts-elevenlabs": ["@demohunter/tts-elevenlabs@workspace:packages/tts-elevenlabs"],
 
     "@demohunter/tts-openai": ["@demohunter/tts-openai@workspace:packages/tts-openai"],
+
+    "@demohunter/video-gen": ["@demohunter/video-gen@workspace:packages/video-gen"],
 
     "@emnapi/core": ["@emnapi/core@1.10.0", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw=="],
 
@@ -447,6 +471,8 @@
     "next": ["next@16.2.6", "", { "dependencies": { "@next/env": "16.2.6", "@swc/helpers": "0.5.15", "baseline-browser-mapping": "^2.9.19", "caniuse-lite": "^1.0.30001579", "postcss": "8.4.31", "styled-jsx": "5.1.6" }, "optionalDependencies": { "@next/swc-darwin-arm64": "16.2.6", "@next/swc-darwin-x64": "16.2.6", "@next/swc-linux-arm64-gnu": "16.2.6", "@next/swc-linux-arm64-musl": "16.2.6", "@next/swc-linux-x64-gnu": "16.2.6", "@next/swc-linux-x64-musl": "16.2.6", "@next/swc-win32-arm64-msvc": "16.2.6", "@next/swc-win32-x64-msvc": "16.2.6", "sharp": "^0.34.5" }, "peerDependencies": { "@opentelemetry/api": "^1.1.0", "@playwright/test": "^1.51.1", "babel-plugin-react-compiler": "*", "react": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0", "react-dom": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0", "sass": "^1.3.0" }, "optionalPeers": ["@opentelemetry/api", "@playwright/test", "babel-plugin-react-compiler", "sass"], "bin": { "next": "dist/bin/next" } }, "sha512-qOVgKJg1+At15NpeUP+eJgCHvTCgXsogweq87Ri/Ix7PkqQHg4sdaXmSFqKlgaIXE4kW0g25LE68W87UANlHtw=="],
 
     "object-assign": ["object-assign@4.1.1", "", {}, "sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg=="],
+
+    "openai": ["openai@5.23.2", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.23.8" }, "optionalPeers": ["ws", "zod"], "bin": { "openai": "bin/cli" } }, "sha512-MQBzmTulj+MM5O8SKEk/gL8a7s5mktS9zUtAkU257WjvobGc9nKcBuVwjyEEcb9SI8a8Y2G/mzn3vm9n1Jlleg=="],
 
     "pathe": ["pathe@2.0.3", "", {}, "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w=="],
 

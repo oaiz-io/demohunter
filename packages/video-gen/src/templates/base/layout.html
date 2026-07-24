@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{TITLE}}</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="deck" data-deck="lesson" aria-live="polite">
+    {{SLIDES}}
+  </main>
+  <nav class="nav" aria-label="Slide navigation">
+    <button type="button" class="nav-button" data-nav="prev" aria-label="Previous slide" disabled>Previous</button>
+    <button type="button" class="nav-button" data-nav="next" aria-label="Next slide">Next</button>
+  </nav>
+  <script src="app.js"></script>
+</body>
+</html>
