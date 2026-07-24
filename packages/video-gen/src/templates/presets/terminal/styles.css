@@ -206,6 +206,21 @@ body::before {
   transform: translateY(24px);
 }
 
+.motion-ready .lesson-section[data-transition="slide-up"][data-reveal-state="pending"] .section-frame {
+  transform: translateY(60px);
+  opacity: 0;
+}
+
+.motion-ready .lesson-section[data-transition="zoom-in"][data-reveal-state="pending"] .section-frame {
+  transform: scale(0.92);
+  opacity: 0;
+}
+
+.motion-ready .lesson-section[data-transition="none"][data-reveal-state="pending"] .section-frame {
+  transform: none;
+  opacity: 1;
+}
+
 .motion-ready .lesson-section[data-transition="slide-left"][data-reveal-state="pending"] .section-frame {
   transform: translateX(36px);
 }

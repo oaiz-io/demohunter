@@ -30,7 +30,7 @@ export const ParagraphBodySchema = z
     type: z.literal("paragraph"),
     text: trimmedNonEmpty(PARAGRAPH_MAX),
   })
-  .strict();
+  .passthrough();
 
 export const BulletListBodySchema = z
   .object({
@@ -40,7 +40,7 @@ export const BulletListBodySchema = z
       .min(1)
       .max(BULLET_ITEMS_MAX),
   })
-  .strict();
+  .passthrough();
 
 export const CodeBlockBodySchema = z
   .object({
@@ -48,7 +48,7 @@ export const CodeBlockBodySchema = z
     language: trimmedNonEmpty(40),
     code: trimmedNonEmpty(CODE_MAX),
   })
-  .strict();
+  .passthrough();
 
 export const BodyElementSchema = z.discriminatedUnion("type", [
   ParagraphBodySchema,
@@ -67,18 +67,21 @@ export const SlideSpecSchema = z
     heading: trimmedNonEmpty(DISPLAY_TEXT_MAX),
     body: z.array(BodyElementSchema).min(1).max(BODY_ELEMENTS_MAX),
     narration: trimmedNonEmpty(NARRATION_MAX),
-    transition: z.enum(["fade", "slide-left"]),
+    transition: z.enum(["fade", "slide-left", "slide-up", "zoom-in", "none"]),
   })
   .strict();
 
 export const ContentSpecSchema = z
   .object({
-    version: z.literal(CONTENT_SPEC_VERSION),
+    version: z.number().int().positive(),
     title: trimmedNonEmpty(DISPLAY_TEXT_MAX),
     duration: DurationSchema,
     slides: z.array(SlideSpecSchema).min(1).max(SLIDES_MAX),
   })
-  .strict();
+  .strict()
+  .refine((s) => s.version === CONTENT_SPEC_VERSION, {
+    message: `version must be ${CONTENT_SPEC_VERSION}`,
+  });
 
 export type ParagraphBody = z.infer<typeof ParagraphBodySchema>;
 export type BulletListBody = z.infer<typeof BulletListBodySchema>;

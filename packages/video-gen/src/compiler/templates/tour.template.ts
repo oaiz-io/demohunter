@@ -47,7 +47,7 @@ ${steps}
 function renderStep(instruction: TourInstructionSource): string {
   const codeAssertion = instruction.hasCodeBlock
     ? `
-        await assertVisible(page.locator(${jsonString(instruction.codeSelector)}));`
+        await assertVisible(page.locator(${jsonString(instruction.codeSelector)}).first());`
     : "";
 
   return `    await chapter(${jsonString(instruction.heading)}, { id: ${jsonString(instruction.slideId)} });

@@ -3,7 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import OpenAI from "openai";
-import { zodTextFormat } from "openai/helpers/zod";
 import { APIError } from "openai";
 
 import { ContentSpecSchema, type ContentSpec } from "./schema.js";
@@ -16,20 +15,23 @@ export const CONTENT_REQUEST_TIMEOUT_MS = 45_000;
 export const MAX_CONTENT_ATTEMPTS = 3;
 export const MAX_BACKOFF_MS = 8_000;
 
-type ResponsesParseResult = {
-  output_parsed?: unknown;
-  refusal?: string | null;
-  output?: Array<{
-    type?: string;
-    role?: string;
-    content?: Array<{ type?: string; refusal?: string; text?: string }>;
-  }>;
-};
+
 
 export type ContentGeneratorClient = {
-  responses: {
-    parse: (args: Record<string, unknown>) => Promise<ResponsesParseResult>;
+  chat: {
+    completions: {
+      create: (args: Record<string, unknown>) => Promise<ChatCompletionResult>;
+    };
   };
+};
+
+type ChatCompletionResult = {
+  choices: Array<{
+    message?: {
+      content?: string | null;
+      refusal?: string | null;
+    };
+  }>;
 };
 
 export type ContentGeneratorDependencies = {
@@ -66,7 +68,14 @@ function defaultCreateClient(env: NodeJS.ProcessEnv): ContentGeneratorClient {
       "OPENAI_API_KEY is not set. Export it in your environment before generating content.",
     );
   }
-  return new OpenAI({ apiKey, timeout: CONTENT_REQUEST_TIMEOUT_MS }) as unknown as ContentGeneratorClient;
+  const openai = new OpenAI({ apiKey, timeout: CONTENT_REQUEST_TIMEOUT_MS });
+  return {
+    chat: {
+      completions: {
+        create: (args: Record<string, unknown>) => openai.chat.completions.create(args as any) as any,
+      },
+    },
+  };
 }
 
 async function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -92,6 +101,56 @@ async function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+
+const CONTENT_SPEC_JSON_SCHEMA = {
+  type: "json_schema" as const,
+  name: "content_spec",
+  strict: true,
+  schema: {
+      type: "object",
+      properties: {
+        version: { type: "integer", const: 1 },
+        title: { type: "string", minLength: 1, maxLength: 200 },
+        duration: { type: "string", pattern: "^\\d+(?:\\.\\d+)?(?:s|m)$" },
+        slides: {
+          type: "array",
+          minItems: 1,
+          maxItems: 20,
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", minLength: 1, maxLength: 64 },
+              heading: { type: "string", minLength: 1, maxLength: 200 },
+              body: {
+                type: "array",
+                minItems: 1,
+                maxItems: 12,
+                items: {
+                  type: "object",
+                  properties: {
+                    type: { type: "string", enum: ["paragraph", "bullet_list", "code_block"], description: "paragraph: use 'text'. bullet_list: use 'items' array. code_block: use 'language' and 'code'." },
+                    text: { type: "string" },
+                    items: { type: "array", items: { type: "string" } },
+                    language: { type: "string" },
+                    code: { type: "string" },
+                  },
+                  required: ["type"],
+                  additionalProperties: false,
+                },
+              },
+              narration: { type: "string", minLength: 1, maxLength: 2000 },
+              transition: { type: "string", enum: ["fade", "slide-left"] },
+            },
+            required: ["id", "heading", "body", "narration", "transition"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["version", "title", "duration", "slides"],
+      additionalProperties: false,
+    },
+};
+
 export async function generateContentSpec(
   input: GenerateContentSpecInput,
   dependencies: ContentGeneratorDependencies = {},
@@ -114,28 +173,40 @@ export async function generateContentSpec(
     throwIfAborted(input.signal);
 
     try {
-      const response = await client.responses.parse({
+      const response = await client.chat.completions.create({
         model,
-        input: [
+        messages: [
           { role: "system", content: systemPrompt },
           {
             role: "user",
             content: buildUserMessage(input.prompt, correctiveHint),
           },
         ],
-        text: {
-          format: zodTextFormat(ContentSpecSchema, "content_spec"),
-        },
+        temperature: 0.3,
+        max_tokens: 4000,
       });
 
-      const refusal = extractRefusal(response);
-      if (refusal !== undefined) {
+      const message = response.choices?.[0]?.message;
+      const refusal = message?.refusal;
+      if (refusal !== undefined && refusal !== null && refusal.trim() !== "") {
         throw new VideoGenError("CONTENT_REFUSED", `The model refused to generate content: ${refusal}`);
       }
 
-      const parsed = response.output_parsed;
-      if (parsed === undefined || parsed === null) {
-        throw new VideoGenError("CONTENT_FAILED", "Content generation returned no parsed output.");
+      const rawContent = message?.content;
+      if (rawContent === undefined || rawContent === null || rawContent.trim() === "") {
+        throw new VideoGenError("CONTENT_FAILED", "Content generation returned empty output.");
+      }
+
+      let parsed: unknown;
+      try {
+        const jsonText = extractJsonBlock(rawContent);
+        parsed = JSON.parse(jsonText);
+      } catch (error) {
+        throw new VideoGenError(
+          "CONTENT_FAILED",
+          `Failed to parse content as JSON. The model returned: ${rawContent.slice(0, 200)}...`,
+          { cause: error },
+        );
       }
 
       const schemaParsed = ContentSpecSchema.safeParse(parsed);
@@ -193,19 +264,6 @@ function buildUserMessage(prompt: string, correctiveHint?: string): string {
   return `${prompt}\n\nYour previous response failed validation. Fix only these issues and return valid JSON for the schema:\n${correctiveHint}`;
 }
 
-function extractRefusal(response: ResponsesParseResult): string | undefined {
-  if (typeof response.refusal === "string" && response.refusal.trim() !== "") {
-    return response.refusal.trim();
-  }
-  for (const item of response.output ?? []) {
-    for (const part of item.content ?? []) {
-      if (typeof part.refusal === "string" && part.refusal.trim() !== "") {
-        return part.refusal.trim();
-      }
-    }
-  }
-  return undefined;
-}
 
 function isRetryableError(error: unknown): boolean {
   if (error instanceof VideoGenError) {
@@ -293,6 +351,21 @@ function toContentError(error: unknown, attempt: number): VideoGenError {
     `Content generation failed after ${attempt} attempt(s): ${message}`,
     { cause: error },
   );
+}
+
+function extractJsonBlock(text: string): string {
+  // Strip markdown code fences if present
+  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenceMatch) {
+    return fenceMatch[1].trim();
+  }
+  // Try to find JSON object boundaries
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return text.slice(firstBrace, lastBrace + 1).trim();
+  }
+  return text.trim();
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

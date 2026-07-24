@@ -22,12 +22,13 @@ export function compileTourInstructions(spec: ContentSpec, tourId: string): Tour
   }
 
   return spec.slides.map((slide) => {
-    const hasCodeBlock = slide.body.some((element) => element.type === "code_block");
+    const codeBlockCount = slide.body.filter((element) => element.type === "code_block").length;
+    const hasSingleCodeBlock = codeBlockCount === 1;
     return {
       slideId: slide.id,
       heading: slide.heading,
       narration: slide.narration,
-      hasCodeBlock,
+      hasCodeBlock: hasSingleCodeBlock,
       sectionSelector: lessonSectionSelector(slide.id),
       headingSelector: sectionHeadingSelector(slide.id),
       codeSelector: sectionCodeBlockSelector(slide.id),
