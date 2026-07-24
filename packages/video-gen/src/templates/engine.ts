@@ -38,32 +38,30 @@ export function isStylePresetName(value: string): value is StylePresetName {
 
 export function renderLesson(input: RenderLessonInput): RenderedSite {
   const layout = resolveAsset("templates", "base", "layout.html");
-  const slideTemplate = resolveAsset("templates", "base", "slide.html");
+  const sectionTemplate = resolveAsset("templates", "base", "section.html");
   const javascript = resolveAsset("templates", "base", "app.js");
   const css = resolveAsset("templates", "presets", input.style, "styles.css");
 
-  const slidesHtml = input.spec.slides
-    .map((slide, index) => renderSlide(slideTemplate, slide, index))
+  const sectionsHtml = input.spec.slides
+    .map((section, index) => renderSection(sectionTemplate, section, index))
     .join("\n");
 
   const html = layout
     .replaceAll("{{TITLE}}", escapeHtml(input.spec.title))
-    .replace("{{SLIDES}}", slidesHtml);
+    .replaceAll("{{STYLE}}", escapeHtml(input.style))
+    .replace("{{SECTIONS}}", sectionsHtml);
 
   return { html, css, javascript };
 }
 
-function renderSlide(template: string, slide: SlideSpec, index: number): string {
-  const isFirst = index === 0;
+function renderSection(template: string, section: SlideSpec, index: number): string {
   return template
-    .replaceAll("{{SLIDE_ID}}", escapeHtml(slide.id))
-    .replaceAll("{{SLIDE_INDEX}}", String(index))
-    .replaceAll("{{TRANSITION}}", escapeHtml(slide.transition))
-    .replaceAll("{{ACTIVE_CLASS}}", isFirst ? " active" : "")
-    .replaceAll("{{ACTIVE_FLAG}}", isFirst ? "true" : "false")
-    .replaceAll("{{ARIA_HIDDEN}}", isFirst ? "false" : "true")
-    .replaceAll("{{HEADING}}", escapeHtml(slide.heading))
-    .replace("{{BODY}}", renderBody(slide.body));
+    .replaceAll("{{SECTION_ID}}", escapeHtml(section.id))
+    .replaceAll("{{SECTION_INDEX}}", String(index))
+    .replaceAll("{{SECTION_NUMBER}}", String(index + 1).padStart(2, "0"))
+    .replaceAll("{{TRANSITION}}", escapeHtml(section.transition))
+    .replaceAll("{{HEADING}}", escapeHtml(section.heading))
+    .replace("{{BODY}}", renderBody(section.body));
 }
 
 function renderBody(body: BodyElement[]): string {
@@ -71,20 +69,21 @@ function renderBody(body: BodyElement[]): string {
 }
 
 function renderBodyElement(element: BodyElement, index: number): string {
+  const revealOrder = index * 3;
   switch (element.type) {
     case "paragraph":
-      return `<p data-body-index="${index}" data-body-type="paragraph">${escapeHtml(element.text)}</p>`;
+      return `<p class="reveal-item body-paragraph" data-reveal="true" data-body-index="${index}" data-body-type="paragraph" style="--reveal-order:${revealOrder}">${escapeHtml(element.text)}</p>`;
     case "bullet_list": {
       const items = element.items
         .map(
           (item, itemIndex) =>
-            `<li data-body-index="${index}" data-item-index="${itemIndex}">${escapeHtml(item)}</li>`,
+            `<li class="reveal-item" data-reveal="true" data-body-index="${index}" data-item-index="${itemIndex}" style="--reveal-order:${revealOrder + itemIndex}"><span>${escapeHtml(item)}</span></li>`,
         )
         .join("");
-      return `<ul data-body-index="${index}" data-body-type="bullet_list">${items}</ul>`;
+      return `<ul class="body-list" data-body-index="${index}" data-body-type="bullet_list">${items}</ul>`;
     }
     case "code_block":
-      return `<pre data-body-index="${index}" data-body-type="code_block" data-code-block="true"><code data-language="${escapeHtml(element.language)}">${escapeHtml(element.code)}</code></pre>`;
+      return `<figure class="reveal-item code-panel" data-reveal="true" data-body-index="${index}" data-body-type="code_block" data-code-block="true" style="--reveal-order:${revealOrder}"><figcaption>${escapeHtml(element.language)}</figcaption><pre><code data-language="${escapeHtml(element.language)}">${escapeHtml(element.code)}</code></pre></figure>`;
     default: {
       const _exhaustive: never = element;
       throw new Error(`Unrecognized body variant: ${JSON.stringify(_exhaustive)}`);
@@ -97,16 +96,17 @@ export function renderLessonFromAssets(input: {
   spec: ContentSpec;
   style: StylePresetName;
   layout: string;
-  slideTemplate: string;
+  sectionTemplate: string;
   javascript: string;
   css: string;
 }): RenderedSite {
-  const slidesHtml = input.spec.slides
-    .map((slide, index) => renderSlide(input.slideTemplate, slide, index))
+  const sectionsHtml = input.spec.slides
+    .map((section, index) => renderSection(input.sectionTemplate, section, index))
     .join("\n");
   const html = input.layout
     .replaceAll("{{TITLE}}", escapeHtml(input.spec.title))
-    .replace("{{SLIDES}}", slidesHtml);
+    .replaceAll("{{STYLE}}", escapeHtml(input.style))
+    .replace("{{SECTIONS}}", sectionsHtml);
   return {
     html,
     css: input.css,

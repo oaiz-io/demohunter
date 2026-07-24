@@ -6,14 +6,22 @@
   <title>{{TITLE}}</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
-  <main class="deck" data-deck="lesson" aria-live="polite">
-    {{SLIDES}}
+<body data-style="{{STYLE}}">
+  <div class="ambient-layer" aria-hidden="true"></div>
+  <header class="lesson-hero" data-lesson-hero="true">
+    <p class="lesson-eyebrow">A DemoHunter visual lesson</p>
+    <h1>{{TITLE}}</h1>
+    <div class="flow-cue" aria-hidden="true">
+      <span>Follow the story</span>
+      <i></i>
+    </div>
+  </header>
+  <main class="lesson-flow" data-lesson-flow="true">
+    {{SECTIONS}}
   </main>
-  <nav class="nav" aria-label="Slide navigation">
-    <button type="button" class="nav-button" data-nav="prev" aria-label="Previous slide" disabled>Previous</button>
-    <button type="button" class="nav-button" data-nav="next" aria-label="Next slide">Next</button>
-  </nav>
+  <footer class="lesson-end" data-lesson-end="true" aria-label="End of lesson">
+    <span>End of lesson</span>
+  </footer>
   <script src="app.js"></script>
 </body>
 </html>

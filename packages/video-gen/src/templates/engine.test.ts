@@ -39,15 +39,21 @@ describe("template engine", () => {
     expect(escapeHtml(`<"&>'`)).toBe("&lt;&quot;&amp;&gt;&#39;");
   });
 
-  test("emits stable selectors and initial active state", () => {
+  test("emits stable continuous-flow sections without navigation controls", () => {
     const rendered = renderLesson({ spec, style: "minimal" });
-    expect(rendered.html).toContain('id="slide-intro"');
-    expect(rendered.html).toContain('data-slide-id="intro"');
-    expect(rendered.html).toContain('data-slide-index="0"');
+    expect(rendered.html).toContain('id="section-intro"');
+    expect(rendered.html).toContain('data-section-id="intro"');
+    expect(rendered.html).toContain('data-section-index="0"');
     expect(rendered.html).toContain('data-transition="fade"');
-    expect(rendered.html).toContain('data-nav="next"');
-    expect(rendered.html).toMatch(/id="slide-intro"[^>]*data-active="true"/);
-    expect(rendered.html).toMatch(/id="slide-next"[^>]*data-active="false"/);
+    expect(rendered.html).toContain('data-reveal-state="pending"');
+    expect(rendered.html).toContain('data-lesson-flow="true"');
+    expect(rendered.html).toContain('data-style="minimal"');
+    expect(rendered.html).not.toContain("data-nav=");
+    expect(rendered.html).not.toContain("<button");
+    expect(rendered.html).not.toContain("data-active=");
+    expect(rendered.html.indexOf('data-section-id="intro"')).toBeLessThan(
+      rendered.html.indexOf('data-section-id="next"'),
+    );
   });
 
   test("is deterministic across presets and runs", () => {
@@ -56,13 +62,15 @@ describe("template engine", () => {
     expect(a.html).toBe(b.html);
     expect(a.css).toBe(b.css);
     expect(a.javascript).toBe(b.javascript);
-    expect(a.css).toContain("--bg:");
-    expect(renderLesson({ spec, style: "notebook" }).css).toContain("--font-sans:");
-    expect(a.html).toBe(renderLesson({ spec, style: "notebook" }).html);
+    expect(a.css).toContain("--void:");
+    expect(renderLesson({ spec, style: "notebook" }).css).toContain("--font-serif:");
+    expect(renderLesson({ spec, style: "notebook" }).html).toContain('data-style="notebook"');
   });
 
-  test("runtime js has no random or variable timers", () => {
+  test("runtime js uses viewport observation without random or variable timers", () => {
     const { javascript } = renderLesson({ spec, style: "minimal" });
+    expect(javascript).toContain("IntersectionObserver");
+    expect(javascript).toContain('data-reveal-state');
     expect(javascript).not.toContain("Math.random");
     expect(javascript).not.toContain("Date.now");
     expect(javascript).not.toContain("setTimeout");

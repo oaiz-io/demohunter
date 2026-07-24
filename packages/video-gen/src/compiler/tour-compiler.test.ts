@@ -33,10 +33,13 @@ describe("tour compiler", () => {
     const compiled = compileTour({ spec, tourId: "dns-names" });
     expect(compiled.moduleSource).toContain('id: "dns-names"');
     expect(compiled.moduleSource).toContain('import { defineTour } from "@demohunter/sdk"');
-    expect(compiled.moduleSource).toContain('#slide-intro[data-active=\\"true\\"]');
-    expect(compiled.moduleSource).toContain('[data-nav=\\"next\\"]');
+    expect(compiled.moduleSource).toContain('[data-section-id=\\"intro\\"]');
+    expect(compiled.moduleSource).toContain("scrollIntoView");
+    expect(compiled.moduleSource).toContain("behavior: \"smooth\"");
+    expect(compiled.moduleSource).toContain("await page.waitForTimeout(720)");
     expect(compiled.moduleSource).toContain("await narrateWhile(");
-    expect(compiled.moduleSource).toContain("await narrate(");
+    expect(compiled.moduleSource).not.toContain("await click(");
+    expect(compiled.moduleSource).not.toContain("data-nav");
     expect(compiled.moduleSource).toContain('{ id: "intro" }');
     expect(compiled.moduleSource).toContain('{ id: "lookup" }');
     expect(compiled.moduleSource).toContain("DNS & \\\"Names\\\"");
@@ -51,7 +54,7 @@ describe("tour compiler", () => {
     expect(instructions.map((item) => item.slideId)).toEqual(["intro", "lookup"]);
     expect(instructions[0]?.hasCodeBlock).toBe(true);
     expect(instructions[1]?.hasCodeBlock).toBe(false);
-    expect(instructions[1]?.isFirst).toBe(false);
+    expect(instructions[1]?.sectionSelector).toBe('[data-section-id="lookup"]');
   });
 
   test("in-memory tour emits the same ordered runtime events as the instruction list", async () => {
@@ -62,11 +65,19 @@ describe("tour compiler", () => {
       waitFor: async () => {
         events.push(`wait:${selector}`);
       },
+      evaluate: async () => {
+        events.push(`scroll:${selector}`);
+      },
     });
 
     const runtime = {
       config: {},
-      page: { locator },
+      page: {
+        locator,
+        waitForTimeout: async (ms: number) => {
+          events.push(`waitForTimeout:${ms}`);
+        },
+      },
       goto: async () => {
         events.push("goto");
         return null;
@@ -78,18 +89,12 @@ describe("tour compiler", () => {
         events.push(`step:${title}`);
         return fn();
       },
-      narrate: async (text: string) => {
-        events.push(`narrate:${text}`);
-      },
       narrateWhile: async (text: string, fn: () => Promise<unknown>) => {
         events.push(`narrateWhile:${text}`);
         return fn();
       },
       assertVisible: async (target: { selector: string }) => {
         events.push(`assertVisible:${target.selector}`);
-      },
-      click: async (target: { selector: string }) => {
-        events.push(`click:${target.selector}`);
       },
     };
 
@@ -98,19 +103,22 @@ describe("tour compiler", () => {
 
     expect(events).toEqual([
       "goto",
-      'wait:#slide-intro[data-active="true"]',
+      'wait:[data-section-id="intro"]',
       "chapter:intro:DNS",
       "step:DNS",
-      'wait:#slide-intro[data-active="true"]',
-      'assertVisible:#slide-intro [data-slide-heading="true"]',
+      'wait:[data-section-id="intro"]',
       'narrateWhile:DNS maps names. Use echo "hello".',
-      'assertVisible:#slide-intro [data-code-block="true"]',
+      'scroll:[data-section-id="intro"]',
+      "waitForTimeout:720",
+      'assertVisible:[data-section-id="intro"] [data-section-heading="true"]',
+      'assertVisible:[data-section-id="intro"] [data-code-block="true"]',
       "chapter:lookup:Lookup",
       "step:Lookup",
-      'click:[data-nav="next"]',
-      'wait:#slide-lookup[data-active="true"]',
-      'assertVisible:#slide-lookup [data-slide-heading="true"]',
-      "narrate:Lookups walk the hierarchy.",
+      'wait:[data-section-id="lookup"]',
+      "narrateWhile:Lookups walk the hierarchy.",
+      'scroll:[data-section-id="lookup"]',
+      "waitForTimeout:720",
+      'assertVisible:[data-section-id="lookup"] [data-section-heading="true"]',
     ]);
   });
 });

@@ -9,7 +9,7 @@ const distRoot = path.join(packageRoot, "dist");
 const ASSETS = [
   "content/prompts/system.txt",
   "templates/base/layout.html",
-  "templates/base/slide.html",
+  "templates/base/section.html",
   "templates/base/app.js",
   "templates/presets/minimal/styles.css",
   "templates/presets/terminal/styles.css",

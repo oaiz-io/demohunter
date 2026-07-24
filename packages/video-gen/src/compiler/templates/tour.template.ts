@@ -13,14 +13,13 @@ export type TourInstructionSource = {
   slideId: string;
   heading: string;
   narration: string;
-  isFirst: boolean;
   hasCodeBlock: boolean;
-  slideSelector: string;
-  activeSelector: string;
+  sectionSelector: string;
   headingSelector: string;
   codeSelector: string;
-  nextSelector: string;
 };
+
+const SCROLL_SETTLE_MS = 720;
 
 export function renderTourModuleSource(input: {
   tourId: string;
@@ -36,9 +35,9 @@ export default defineTour({
   title: "${escapeTypeScriptString(input.title)}",
   async beforeRecord({ goto, page }) {
     await goto("/");
-    await page.locator(${jsonString(input.instructions[0]?.activeSelector ?? '[data-slide-index="0"][data-active="true"]')}).waitFor();
+    await page.locator(${jsonString(input.instructions[0]?.sectionSelector ?? '[data-section-index="0"]')}).waitFor();
   },
-  async run({ page, chapter, step, narrate, narrateWhile, assertVisible, click }) {
+  async run({ page, chapter, step, narrateWhile, assertVisible }) {
 ${steps}
   },
 });
@@ -46,23 +45,27 @@ ${steps}
 }
 
 function renderStep(instruction: TourInstructionSource): string {
-  const navigation = instruction.isFirst
-    ? ""
-    : `      await click(page.locator(${jsonString(instruction.nextSelector)}));
-`;
-
-  const narration = instruction.hasCodeBlock
-    ? `      await narrateWhile(${jsonString(instruction.narration)}, async () => {
-        await assertVisible(page.locator(${jsonString(instruction.codeSelector)}));
-      });`
-    : `      await narrate(${jsonString(instruction.narration)});`;
+  const codeAssertion = instruction.hasCodeBlock
+    ? `
+        await assertVisible(page.locator(${jsonString(instruction.codeSelector)}));`
+    : "";
 
   return `    await chapter(${jsonString(instruction.heading)}, { id: ${jsonString(instruction.slideId)} });
 
     await step(${jsonString(instruction.heading)}, async () => {
-${navigation}      await page.locator(${jsonString(instruction.activeSelector)}).waitFor();
-      await assertVisible(page.locator(${jsonString(instruction.headingSelector)}));
-${narration}
+      const section = page.locator(${jsonString(instruction.sectionSelector)});
+      await section.waitFor();
+      await narrateWhile(${jsonString(instruction.narration)}, async () => {
+        await section.evaluate((element) => {
+          for (const candidate of document.querySelectorAll("[data-section-id]")) {
+            candidate.setAttribute("data-current", candidate === element ? "true" : "false");
+          }
+          element.setAttribute("data-reveal-state", "visible");
+          element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        });
+        await page.waitForTimeout(${SCROLL_SETTLE_MS});
+        await assertVisible(page.locator(${jsonString(instruction.headingSelector)}));${codeAssertion}
+      });
     });`;
 }
 

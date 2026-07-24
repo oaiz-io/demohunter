@@ -1,42 +1,36 @@
 import { defineTour } from "@demohunter/sdk";
 import type { DemoHunterTour } from "@demohunter/sdk";
 
-import type { ContentSpec, SlideSpec } from "../content/schema.js";
+import type { ContentSpec } from "../content/schema.js";
 import type { CompiledTour, CompileTourInput } from "../pipeline/types.js";
 import { VideoGenError } from "../pipeline/errors.js";
 import { isValidTourId } from "../util/slug.js";
 import {
-  activeSlideSelector,
-  nextNavSelector,
-  slideCodeBlockSelector,
-  slideHeadingSelector,
-  slideSectionSelector,
+  lessonSectionSelector,
+  sectionCodeBlockSelector,
+  sectionHeadingSelector,
 } from "./selectors.js";
 import { renderTourModuleSource, type TourInstructionSource } from "./templates/tour.template.js";
 
-export type TourInstruction = TourInstructionSource & {
-  transition: SlideSpec["transition"];
-};
+export const SCROLL_SETTLE_MS = 720;
+
+export type TourInstruction = TourInstructionSource;
 
 export function compileTourInstructions(spec: ContentSpec, tourId: string): TourInstruction[] {
   if (!isValidTourId(tourId)) {
     throw new VideoGenError("COMPILE_FAILED", `Invalid tour id: ${tourId}`);
   }
 
-  return spec.slides.map((slide, index) => {
+  return spec.slides.map((slide) => {
     const hasCodeBlock = slide.body.some((element) => element.type === "code_block");
     return {
       slideId: slide.id,
       heading: slide.heading,
       narration: slide.narration,
-      transition: slide.transition,
-      isFirst: index === 0,
       hasCodeBlock,
-      slideSelector: slideSectionSelector(slide.id),
-      activeSelector: activeSlideSelector(slide.id),
-      headingSelector: slideHeadingSelector(slide.id),
-      codeSelector: slideCodeBlockSelector(slide.id),
-      nextSelector: nextNavSelector(),
+      sectionSelector: lessonSectionSelector(slide.id),
+      headingSelector: sectionHeadingSelector(slide.id),
+      codeSelector: sectionCodeBlockSelector(slide.id),
     };
   });
 }
@@ -86,25 +80,29 @@ export function buildInMemoryTour(input: {
       await goto("/");
       const first = instructions[0];
       if (first !== undefined) {
-        await page.locator(first.activeSelector).waitFor();
+        await page.locator(first.sectionSelector).waitFor();
       }
     },
-    async run({ page, chapter, step, narrate, narrateWhile, assertVisible, click }) {
+    async run({ page, chapter, step, narrateWhile, assertVisible }) {
       for (const instruction of instructions) {
         await chapter(instruction.heading, { id: instruction.slideId });
         await step(instruction.heading, async () => {
-          if (!instruction.isFirst) {
-            await click(page.locator(instruction.nextSelector));
-          }
-          await page.locator(instruction.activeSelector).waitFor();
-          await assertVisible(page.locator(instruction.headingSelector));
-          if (instruction.hasCodeBlock) {
-            await narrateWhile(instruction.narration, async () => {
-              await assertVisible(page.locator(instruction.codeSelector));
+          const section = page.locator(instruction.sectionSelector);
+          await section.waitFor();
+          await narrateWhile(instruction.narration, async () => {
+            await section.evaluate((element) => {
+              for (const candidate of document.querySelectorAll("[data-section-id]")) {
+                candidate.setAttribute("data-current", candidate === element ? "true" : "false");
+              }
+              element.setAttribute("data-reveal-state", "visible");
+              element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
             });
-          } else {
-            await narrate(instruction.narration);
-          }
+            await page.waitForTimeout(SCROLL_SETTLE_MS);
+            await assertVisible(page.locator(instruction.headingSelector));
+            if (instruction.hasCodeBlock) {
+              await assertVisible(page.locator(instruction.codeSelector));
+            }
+          });
         });
       }
     },

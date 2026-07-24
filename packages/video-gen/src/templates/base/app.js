@@ -1,41 +1,44 @@
 (() => {
-  const slides = Array.from(document.querySelectorAll(".slide"));
-  const prevButton = document.querySelector('[data-nav="prev"]');
-  const nextButton = document.querySelector('[data-nav="next"]');
+  const sections = Array.from(document.querySelectorAll("[data-section-id]"));
 
-  if (slides.length === 0 || !(prevButton instanceof HTMLButtonElement) || !(nextButton instanceof HTMLButtonElement)) {
+  if (sections.length === 0) {
     return;
   }
 
-  let activeIndex = 0;
+  document.documentElement.classList.add("motion-ready");
+  const ratios = new Map();
 
-  function setActive(nextIndex) {
-    if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= slides.length) {
-      return;
+  function updateCurrentSection() {
+    let current = null;
+    let bestRatio = 0;
+    for (const section of sections) {
+      const ratio = ratios.get(section) ?? 0;
+      if (ratio > bestRatio) {
+        current = section;
+        bestRatio = ratio;
+      }
     }
-
-    activeIndex = nextIndex;
-
-    for (const [index, slide] of slides.entries()) {
-      const isActive = index === activeIndex;
-      slide.classList.toggle("active", isActive);
-      slide.setAttribute("data-active", isActive ? "true" : "false");
-      slide.setAttribute("aria-hidden", isActive ? "false" : "true");
+    for (const section of sections) {
+      section.setAttribute("data-current", section === current ? "true" : "false");
     }
-
-    prevButton.disabled = activeIndex === 0;
-    nextButton.disabled = activeIndex === slides.length - 1;
-    prevButton.setAttribute("aria-disabled", prevButton.disabled ? "true" : "false");
-    nextButton.setAttribute("aria-disabled", nextButton.disabled ? "true" : "false");
   }
 
-  prevButton.addEventListener("click", () => {
-    setActive(activeIndex - 1);
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0);
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.18) {
+        entry.target.setAttribute("data-reveal-state", "visible");
+      }
+    }
+    updateCurrentSection();
+  }, {
+    root: null,
+    rootMargin: "-12% 0px -12% 0px",
+    threshold: [0, 0.18, 0.35, 0.6],
   });
 
-  nextButton.addEventListener("click", () => {
-    setActive(activeIndex + 1);
-  });
-
-  setActive(0);
+  for (const section of sections) {
+    ratios.set(section, 0);
+    observer.observe(section);
+  }
 })();

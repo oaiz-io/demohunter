@@ -54,7 +54,7 @@ describe("workspace", () => {
       });
 
       expect(await readFile(workspace.contentSpecPath, "utf8")).toContain('"Workspace Lesson"');
-      expect(await readFile(path.join(workspace.siteDir, "index.html"), "utf8")).toContain("slide-intro");
+      expect(await readFile(path.join(workspace.siteDir, "index.html"), "utf8")).toContain("section-intro");
       expect(await readFile(workspace.tourPath, "utf8")).toContain("defineTour");
 
       await expect(assertNoWorkspaceCollision(workspace)).rejects.toMatchObject({

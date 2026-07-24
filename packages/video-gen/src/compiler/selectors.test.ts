@@ -1,24 +1,24 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  activeSlideSelector,
-  nextNavSelector,
-  slideCodeBlockSelector,
-  slideHeadingSelector,
-  slideSectionSelector,
+  lessonSectionSelector,
+  sectionCodeBlockSelector,
+  sectionHeadingSelector,
 } from "./selectors.js";
 
 describe("selectors", () => {
   test("builds stable id and data-attribute selectors", () => {
-    expect(slideSectionSelector("intro")).toBe("#slide-intro");
-    expect(activeSlideSelector("intro")).toBe('#slide-intro[data-active="true"]');
-    expect(slideHeadingSelector("intro")).toBe('#slide-intro [data-slide-heading="true"]');
-    expect(slideCodeBlockSelector("intro")).toBe('#slide-intro [data-code-block="true"]');
-    expect(nextNavSelector()).toBe('[data-nav="next"]');
+    expect(lessonSectionSelector("intro")).toBe('[data-section-id="intro"]');
+    expect(sectionHeadingSelector("intro")).toBe(
+      '[data-section-id="intro"] [data-section-heading="true"]',
+    );
+    expect(sectionCodeBlockSelector("intro")).toBe(
+      '[data-section-id="intro"] [data-code-block="true"]',
+    );
   });
 
-  test("rejects unsafe slide ids", () => {
-    expect(() => slideSectionSelector("../x")).toThrow();
-    expect(() => activeSlideSelector("Bad Id")).toThrow();
+  test("rejects unsafe section ids", () => {
+    expect(() => lessonSectionSelector("../x")).toThrow();
+    expect(() => sectionHeadingSelector("Bad Id")).toThrow();
   });
 });
