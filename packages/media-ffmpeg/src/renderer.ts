@@ -86,11 +86,14 @@ export function buildFFmpegArgs(plan: MediaRenderPlan): string[] {
   if (narration !== undefined && narration.clips.length > 0) {
     const labels = narration.clips.map((_, index) => `[a${index}]`);
     filters.push(...narration.clips.map(
-      (clip, index) => `[${index + 1}:a]adelay=${Math.max(0, Math.round(clip.startMs))}:all=true${labels[index]}`,
+      (clip, index) => `[${index + 1}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,adelay=${Math.max(0, Math.round(clip.startMs))}:all=true${labels[index]}`,
     ));
-    filters.push(labels.length === 1
-      ? `${labels[0]}anull[aout]`
-      : `${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0[aout]`);
+    if (labels.length === 1) {
+      filters.push(`${labels[0]}anull[amixout]`);
+    } else {
+      filters.push(`${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0[amixout]`);
+    }
+    filters.push("[amixout]alimiter=limit=0.9:attack=5:release=50:level=false:latency=true[aout]");
     mappedAudio = "[aout]";
   }
 
