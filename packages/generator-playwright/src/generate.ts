@@ -2,8 +2,9 @@ import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import path from "node:path";
 
 import type { DemoHunterRunContext, HighlightStyle, ResolvedDemoHunterConfig } from "@demohunter/sdk";
+import type { NarrationProviderRegistry } from "@demohunter/tts-core";
 import * as playwright from "playwright";
-import type { BrowserType, Page } from "playwright";
+import type { Browser, BrowserContext, BrowserType, Page } from "playwright";
 
 import { collectTimeline } from "./execute/collect-timeline.js";
 import type {
@@ -43,8 +44,13 @@ export type GenerateLoadedConfig = {
 export type GenerateTourFile = SmokeTourModule;
 
 export type GenerateTourInput = {
+  /** Caller-owned registry. The generator never closes it. */
+  narrationRegistry?: NarrationProviderRegistry;
+  /** Compatibility seam for callers that need the generator to own provider lifecycle. */
+  createLegacyNarrationRegistry?: () => NarrationProviderRegistry;
   loadedConfig: GenerateLoadedConfig;
   onProgress?: GenerationProgressReporter;
+  signal?: AbortSignal;
   tourFile: GenerateTourFile;
 };
 
@@ -91,7 +97,7 @@ const defaultDependencies: GenerateTourDependencies = {
 };
 
 export async function generateTour(
-  { loadedConfig, onProgress, tourFile }: GenerateTourInput,
+  { createLegacyNarrationRegistry, loadedConfig, narrationRegistry, onProgress, signal, tourFile }: GenerateTourInput,
   dependencies: Partial<GenerateTourDependencies> = {},
 ): Promise<GenerateTourResult> {
   const resolvedDependencies = {
@@ -99,6 +105,9 @@ export async function generateTour(
     ...dependencies,
   };
   const { config } = loadedConfig;
+  signal?.throwIfAborted();
+  let ownedNarrationRegistry: NarrationProviderRegistry | undefined;
+  let activeNarrationRegistry = narrationRegistry;
   report(onProgress, {
     phase: "preparing-output",
     message: `Preparing output for ${tourFile.tour.id}`,
@@ -110,9 +119,9 @@ export async function generateTour(
     phase: "launching-browser",
     message: `Launching ${config.browser}`,
   });
-  const browser = await browserType.launch();
-  let passOneContext: Awaited<ReturnType<typeof browser.newContext>> | undefined;
-  let passTwoContext: Awaited<ReturnType<typeof browser.newContext>> | undefined;
+  let browser: Browser | undefined;
+  let passOneContext: BrowserContext | undefined;
+  let passTwoContext: BrowserContext | undefined;
   let primaryError: unknown;
   let passOneDebug: DebugCapture | undefined;
   let passTwoDebug: DebugCapture | undefined;
@@ -124,7 +133,14 @@ export async function generateTour(
   let artifactOutputDir = outputDir;
 
   try {
+    browser = await browserType.launch();
+    ownedNarrationRegistry = narrationRegistry === undefined
+      ? createLegacyNarrationRegistry?.()
+      : undefined;
+    activeNarrationRegistry = narrationRegistry ?? ownedNarrationRegistry;
+
     if (config.output.formats.length > 0) {
+      signal?.throwIfAborted();
       outputStagingRoot = await resolvedDependencies.mkdtemp(
         path.join(path.dirname(outputDir), ".demohunter-output-"),
       );
@@ -149,6 +165,7 @@ export async function generateTour(
       run: () =>
         resolvedDependencies.collectTimeline({
           loadedConfig,
+          ...(activeNarrationRegistry === undefined ? {} : { narrationRegistry: activeNarrationRegistry }),
           onBeforeRun: () => {
             passOneDebug = resolvedDependencies.attachDebugCapture({
               outputDir,
@@ -161,6 +178,7 @@ export async function generateTour(
             reportRuntimeEvent(onProgress, event);
           },
           page: passOnePage,
+          ...(signal === undefined ? {} : { signal }),
           tourFile,
         }),
       getLastRuntimeEvent: () => lastRuntimeEvent,
@@ -169,6 +187,7 @@ export async function generateTour(
     passOneDebug = undefined;
 
     await passOneContext.close();
+    signal?.throwIfAborted();
     passOneContext = undefined;
 
     passTwoContext = await browser.newContext({
@@ -252,6 +271,7 @@ export async function generateTour(
           reportRuntimeEvent(onProgress, event);
         },
         page: passTwoPage,
+        ...(signal === undefined ? {} : { signal }),
         timeline,
         tourFile: wrapTourForRecording({
           applyHighlightVisual: resolvedDependencies.applyHighlightVisual,
@@ -288,6 +308,7 @@ export async function generateTour(
       phase: "muxing-video",
       message: `Muxing ${config.record.container} video`,
     });
+    signal?.throwIfAborted();
     const videos = await resolvedDependencies.muxVideo({
       narrations: recordedNarrations,
       outputDir: artifactOutputDir,
@@ -299,6 +320,7 @@ export async function generateTour(
       phase: "writing-artifacts",
       message: `Writing artifacts for ${tourFile.tour.id}`,
     });
+    signal?.throwIfAborted();
     const workingResult = await resolvedDependencies.writeGenerationOutput({
       tourId: tourFile.tour.id,
       tourTitle: tourFile.tour.title,
@@ -311,6 +333,7 @@ export async function generateTour(
     if (config.output.formats.length > 0) {
       const responsiveSourceDirs: Partial<Record<"standard" | "square" | "mobile", string>> = {};
       for (const format of config.output.formats) {
+        signal?.throwIfAborted();
         if (format.preset === "gif" || format.layout !== "responsive") continue;
         const responsiveRoot = await resolvedDependencies.mkdtemp(
           path.join(path.dirname(outputDir), `.demohunter-${format.preset}-`),
@@ -322,6 +345,7 @@ export async function generateTour(
           message: `Capturing responsive ${format.preset} variant at ${viewport.width}x${viewport.height}`,
         });
         const responsiveResult = await resolvedDependencies.generateResponsiveVariant({
+          narrationRegistry: activeNarrationRegistry,
           loadedConfig: {
             ...loadedConfig,
             config: {
@@ -332,6 +356,7 @@ export async function generateTour(
             },
           },
           onProgress,
+          signal,
           tourFile,
         });
         responsiveSourceDirs[format.preset] = responsiveResult.outputDir;
@@ -397,9 +422,13 @@ export async function generateTour(
     }
 
     try {
-      await browser.close();
+      await browser?.close();
     } catch (error) {
       closeError ??= error;
+    }
+
+    if (ownedNarrationRegistry !== undefined) {
+      await ownedNarrationRegistry.close(primaryError ?? closeError);
     }
 
     if (primaryError === undefined && closeError !== undefined) {

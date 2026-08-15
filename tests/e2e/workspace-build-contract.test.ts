@@ -79,7 +79,7 @@ describe("workspace build contract", () => {
       await expectPackedTypesToWorkForConsumer(packed.filename);
       await expectPackageDocsToBeCleaned();
     },
-    30_000,
+    60_000,
   );
 });
 

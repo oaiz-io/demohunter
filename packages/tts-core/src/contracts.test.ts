@@ -64,6 +64,59 @@ describe("narration contracts", () => {
     assert.equal("language" in request, false);
   });
 
+  test("accepts arbitrary non-empty provider names and rejects blank names", () => {
+    const request = createNarrationRequest({
+      provider: "company/local-kokoro-v2",
+      model: "model-v2",
+      voice: "voice",
+      format: "wav",
+      sampleRate: 24_000,
+      instructions: "",
+      text: "Hello",
+    });
+
+    assert.equal(request.provider, "company/local-kokoro-v2");
+    assert.throws(
+      () => createNarrationRequest({ ...request, provider: "   " }),
+      /Narration provider name must be a non-empty string/,
+    );
+  });
+
+  test("canonicalizes portable provider options and rejects ambiguous values", () => {
+    const request = createNarrationRequest({
+      provider: "local",
+      model: "model",
+      voice: "voice",
+      format: "wav",
+      sampleRate: 24_000,
+      instructions: "",
+      providerOptions: {
+        zeta: [3, { beta: true, alpha: "a" }],
+        alpha: 1,
+      },
+      text: "Hello",
+    });
+
+    assert.deepEqual(request.providerOptions, {
+      alpha: 1,
+      zeta: [3, { alpha: "a", beta: true }],
+    });
+    assert.throws(
+      () => createNarrationRequest({
+        ...request,
+        providerOptions: { revision: undefined },
+      }),
+      /JSON-compatible values/,
+    );
+    assert.throws(
+      () => createNarrationRequest({
+        ...request,
+        providerOptions: { revision: Number.NaN },
+      }),
+      /finite numbers/,
+    );
+  });
+
   test("exports provider and synthesis result types that do not require provider-specific branching", async () => {
     const request = createNarrationRequest({
       provider: "openai",

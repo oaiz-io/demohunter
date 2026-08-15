@@ -87,6 +87,7 @@ export type NarrationSegment = {
 export type NarrationResolverContext = {
   previousText?: string;
   nextText?: string;
+  signal?: AbortSignal;
 };
 
 export type PortableVideoOutputs = {

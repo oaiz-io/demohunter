@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import { normalizeNarrationText, type NarrationRequest } from "../contracts.js";
+import {
+  normalizeNarrationProviderOptions,
+  normalizeNarrationText,
+  type NarrationRequest,
+} from "../contracts.js";
 
 export const NARRATION_CACHE_SCHEMA_VERSION = 1;
 
@@ -33,7 +37,7 @@ export function createNarrationCacheIdentity(
     language: request.language,
     format: request.format,
     sampleRate: request.sampleRate,
-    providerOptions: normalizeProviderOptions(request.providerOptions),
+    providerOptions: normalizeNarrationProviderOptions(request.providerOptions),
     text: normalizeNarrationText(request.text),
     version: options.version ?? NARRATION_CACHE_SCHEMA_VERSION,
   };
@@ -46,30 +50,4 @@ export function createNarrationCacheKey(
   return createHash("sha256")
     .update(JSON.stringify(createNarrationCacheIdentity(request, options)))
     .digest("hex");
-}
-
-function normalizeProviderOptions(
-  options: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  if (options === undefined) {
-    return undefined;
-  }
-
-  return sortPlainObject(options) as Record<string, unknown>;
-}
-
-function sortPlainObject(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortPlainObject);
-  }
-
-  if (typeof value !== "object" || value === null) {
-    return value;
-  }
-
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => [key, sortPlainObject(child)]),
-  );
 }

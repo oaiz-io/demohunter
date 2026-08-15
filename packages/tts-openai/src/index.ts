@@ -1,5 +1,6 @@
 export {
   createOpenAINarrationProvider,
+  createOpenAINarrationProviderPlugin,
 } from "./openai-provider.js";
 export type {
   OpenAINarrationProviderOptions,

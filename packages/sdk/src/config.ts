@@ -90,7 +90,51 @@ export type GenerateOverrides = {
   outputFormats?: OutputFormatRequest[];
 };
 
-export type TTSProviderName = "openai" | "elevenlabs";
+export type TTSProviderName = string;
+
+export type NarrationProviderDescriptor<Name extends string = string, Options = unknown> = {
+  name: Name;
+  options: Options;
+};
+
+export type NarrationProvidersConfig = {
+  tts: readonly NarrationProviderDescriptor[];
+};
+
+export type KokoroCommandProviderOptions = {
+  runtime: "command";
+  executable: string;
+  args?: readonly string[];
+  modelPath?: string;
+  voicesPath?: string;
+  modelVersion?: string;
+  backendVersion?: string;
+  cwd?: string;
+  env?: Readonly<Record<string, string>>;
+  startupTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  shutdownTimeoutMs?: number;
+};
+
+export type KokoroBundledProviderOptions = {
+  runtime?: "bundled";
+  pythonCommand?: string;
+  pythonArgs?: readonly string[];
+  /** Explicit alternative to DemoHunter's bundled worker. Never interpreted as a shell command. */
+  workerPath?: string;
+  modelPath?: string;
+  voicesPath?: string;
+  modelVersion?: string;
+  backendVersion?: string;
+  cwd?: string;
+  env?: Readonly<Record<string, string>>;
+  startupTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  shutdownTimeoutMs?: number;
+};
+
+export type KokoroProviderOptions = KokoroCommandProviderOptions | KokoroBundledProviderOptions;
+export type KokoroProviderDescriptor = NarrationProviderDescriptor<"kokoro", KokoroProviderOptions>;
 
 export type ElevenLabsVoiceSettings = {
   stability?: number;
@@ -119,11 +163,37 @@ export type ElevenLabsTTSConfig = {
   voiceSettings?: ElevenLabsVoiceSettings;
 };
 
-export type TTSConfig = OpenAITTSConfig | ElevenLabsTTSConfig;
+export type KokoroLanguage = "en-US" | "en-GB" | "es" | "fr" | "hi" | "it" | "ja" | "pt-BR" | "zh";
+
+export type KokoroTTSConfig = {
+  provider: "kokoro";
+  model: string;
+  voice: string;
+  format: "wav";
+  instructions: "";
+  language: KokoroLanguage;
+  speed?: number;
+};
+
+export type CustomTTSConfig = {
+  provider: string;
+  model: string;
+  voice: string;
+  format: string;
+  instructions: string;
+  language?: string;
+  providerOptions?: Record<string, unknown>;
+  voiceSettings?: ElevenLabsVoiceSettings;
+  speed?: number;
+};
+
+export type TTSConfig = OpenAITTSConfig | ElevenLabsTTSConfig | KokoroTTSConfig | CustomTTSConfig;
 
 export type DemoHunterUserTTSConfig =
   | (Partial<Omit<OpenAITTSConfig, "provider">> & { provider?: "openai" })
-  | (Partial<Omit<ElevenLabsTTSConfig, "provider">> & { provider: "elevenlabs" });
+  | (Partial<Omit<ElevenLabsTTSConfig, "provider">> & { provider: "elevenlabs" })
+  | (Partial<Omit<KokoroTTSConfig, "provider">> & { provider: "kokoro" })
+  | ({ provider: string } & Partial<Omit<CustomTTSConfig, "provider">>);
 
 export type DemoHunterUserConfig = {
   baseURL: string;
@@ -134,6 +204,7 @@ export type DemoHunterUserConfig = {
   holdPaddingMs?: number;
   record?: DemoHunterUserRecordConfig;
   output?: Partial<OutputConfig>;
+  providers?: { tts?: readonly NarrationProviderDescriptor[] };
   tts?: DemoHunterUserTTSConfig;
 };
 
@@ -146,6 +217,7 @@ export type ResolvedDemoHunterConfig = {
   holdPaddingMs: number;
   record: ResolvedRecordConfig;
   output: OutputConfig;
+  providers?: NarrationProvidersConfig;
   tts: TTSConfig;
 };
 
@@ -210,6 +282,15 @@ export const DEFAULT_ELEVENLABS_TTS_CONFIG: ElevenLabsTTSConfig = {
   },
 };
 
+export const DEFAULT_KOKORO_TTS_CONFIG: KokoroTTSConfig = {
+  provider: "kokoro",
+  model: "kokoro-82m",
+  voice: "af_heart",
+  format: "wav",
+  instructions: "",
+  language: "en-US",
+};
+
 export const DEFAULT_DEMOHUNTER_CONFIG: Omit<ResolvedDemoHunterConfig, "baseURL"> = {
   outputDir: ".demohunter",
   cacheDir: ".demohunter/cache",
@@ -223,6 +304,31 @@ export const DEFAULT_DEMOHUNTER_CONFIG: Omit<ResolvedDemoHunterConfig, "baseURL"
 
 export function defineConfig<T extends DemoHunterUserConfig>(config: T): T {
   return config;
+}
+
+/** Creates a process-free provider descriptor for authored configuration. */
+export function kokoro(options: KokoroProviderOptions = {}): KokoroProviderDescriptor {
+  return {
+    name: "kokoro",
+    options: {
+      runtime: "bundled",
+      ...options,
+      ...(options.runtime === "command" && options.args !== undefined
+        ? { args: [...options.args] }
+        : {}),
+      ...(options.runtime !== "command" && options.pythonArgs !== undefined
+        ? { pythonArgs: [...options.pythonArgs] }
+        : {}),
+    },
+  } as KokoroProviderDescriptor;
+}
+
+/** Creates the semantic WAV/24 kHz Kokoro narration settings. */
+export function kokoroTTS(options: Partial<Omit<KokoroTTSConfig, "provider" | "format" | "instructions">> = {}): KokoroTTSConfig {
+  return {
+    ...DEFAULT_KOKORO_TTS_CONFIG,
+    ...options,
+  };
 }
 
 export function resolveOutputFormatRequests(

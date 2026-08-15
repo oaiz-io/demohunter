@@ -7,6 +7,12 @@ DemoHunter only needs `OPENAI_API_KEY` when a generate run requires uncached nar
 - If the narration is already cached, generation can run offline.
 - If a new narration segment is needed, set `OPENAI_API_KEY` in the environment and rerun the command.
 
+## Kokoro Setup
+
+For `kokoro executable not found`, install or correct the configured Python/worker command yourself. The bundled worker requires both `modelPath` and `voicesPath`; a compatible command adapter may omit both only when its ready message reports model/voices SHA-256 digests and backend version. DemoHunter never installs `kokoro-onnx`/`soundfile`, downloads assets, or bundles weights.
+
+Protocol/version, unsupported-language, WAV/24 kHz, crash, timeout, cancellation, corrupt-output, and corrupt-cache errors are deliberate safety boundaries. Run `demohunter doctor`, confirm a DemoHunter-compatible JSONL worker and supported language (`en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, `zh`), then retry. A fully cached offline run needs a previously verified identity sidecar; a cache miss needs local model and voices files.
+
 ## App Not Reachable
 
 DemoHunter expects the app at `demohunter.config.ts` `baseURL` to already be running.
@@ -39,7 +45,7 @@ Failed collection, replay, and dry-run validation write debug artifacts under `.
 
 ## Doctor
 
-Run `demohunter doctor` to check config loading, local media tools, Playwright browser availability, `baseURL`, writable output/cache directories, and `OPENAI_API_KEY` setup.
+Run `demohunter doctor` to check config loading, local media tools, Playwright browser availability, `baseURL`, writable output/cache directories, and only the selected narration provider's prerequisites.
 
 ## Invalid Tour Module
 

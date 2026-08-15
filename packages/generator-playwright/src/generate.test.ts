@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import path from "node:path";
+import { createNarrationProviderRegistry, type NarrationProviderPlugin } from "@demohunter/tts-core";
 
 import type { CollectedTimeline } from "./execute/generator-types.js";
 import { ReplayTimelineError } from "./execute/replay-timeline.js";
@@ -758,7 +759,106 @@ describe("generateTour", () => {
     expect(muxVideo).not.toHaveBeenCalled();
     expect(writeGenerationOutput).not.toHaveBeenCalled();
   });
+
+  test("never closes a caller-owned narration registry", async () => {
+    const failure = new Error("collect failed");
+    const close = mock(async () => {});
+    const registry = {
+      close,
+      has: () => true,
+      names: () => ["custom"],
+      register() { return this; },
+      resolve() { throw new Error("not used"); },
+    };
+
+    await expect(generateTour(
+      {
+        loadedConfig: createLoadedConfig("/tmp/project"),
+        narrationRegistry: registry,
+        tourFile: createTourFile("/tmp/project"),
+      },
+      createFailingDependencies(failure),
+    )).rejects.toBe(failure);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  test("closes an internally-owned compatibility registry and aggregates close failure", async () => {
+    const failure = new Error("collect failed");
+    const closeFailure = new Error("provider close failed");
+    const plugin: NarrationProviderPlugin = {
+      name: "custom",
+      capabilities: {
+        offlineSynthesis: true,
+        languages: "provider-defined",
+        outputFormats: "provider-defined",
+        sampleRates: "provider-defined",
+        instructions: "provider-defined",
+      },
+      prepareRequest: (request) => request,
+      async synthesize() { throw new Error("not used"); },
+      async close() { throw closeFailure; },
+    };
+
+    const caught = await generateTour(
+      {
+        createLegacyNarrationRegistry: () => createNarrationProviderRegistry([plugin]),
+        loadedConfig: createLoadedConfig("/tmp/project"),
+        tourFile: createTourFile("/tmp/project"),
+      },
+      createFailingDependencies(failure),
+    ).catch((error: unknown) => error);
+
+    expect(caught).toBeInstanceOf(AggregateError);
+    expect((caught as AggregateError).errors).toEqual([failure, closeFailure]);
+    expect((caught as Error).cause).toBe(failure);
+  });
+
+  test("does not launch or create a compatibility registry when already cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException("cancel generation", "AbortError"));
+    const createLegacyNarrationRegistry = mock(() => createNarrationProviderRegistry());
+    const launch = mock(async () => { throw new Error("should not launch"); });
+
+    await expect(generateTour(
+      {
+        createLegacyNarrationRegistry,
+        loadedConfig: createLoadedConfig("/tmp/project"),
+        signal: controller.signal,
+        tourFile: createTourFile("/tmp/project"),
+      },
+      {
+        playwright: {
+          chromium: { launch },
+          firefox: { launch },
+          webkit: { launch },
+        },
+      },
+    )).rejects.toMatchObject({ name: "AbortError" });
+    expect(launch).not.toHaveBeenCalled();
+    expect(createLegacyNarrationRegistry).not.toHaveBeenCalled();
+  });
 });
+
+function createFailingDependencies(failure: Error) {
+  return {
+    attachDebugCapture: mock(() => createDebugCapture()),
+    collectTimeline: mock(async () => { throw failure; }),
+    playwright: {
+      chromium: {
+        launch: mock(async () => ({
+          close: mock(async () => {}),
+          newContext: mock(async () => ({
+            close: mock(async () => {}),
+            newPage: mock(async () => ({ goto: mock(async () => {}) })),
+          })),
+        })),
+      },
+      firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+      webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+    },
+    prepareOutputDir: mock(async () => "/tmp/project/.demohunter/billing-overview"),
+  };
+}
 
 function createLoadedConfig(
   projectRoot: string,

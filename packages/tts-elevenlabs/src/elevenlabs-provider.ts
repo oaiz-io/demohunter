@@ -1,6 +1,8 @@
 import {
   createNarrationRequest,
+  normalizeNarrationText,
   type NarrationProvider,
+  type NarrationProviderPlugin,
   type NarrationRequest,
   type NarrationSynthesisResult,
 } from "@demohunter/tts-core";
@@ -22,10 +24,63 @@ export type ElevenLabsNarrationProviderOptions = {
 export function createElevenLabsNarrationProvider(
   options: ElevenLabsNarrationProviderOptions = {},
 ): NarrationProvider {
+  const plugin = createElevenLabsNarrationProviderPlugin(options);
+
+  return {
+    async synthesize(request) {
+      const context = {
+        cacheDir: process.cwd(),
+        signal: new AbortController().signal,
+      };
+      const prepared = await plugin.prepareRequest(request, context);
+
+      return await plugin.synthesize(prepared, context);
+    },
+  };
+}
+
+export function createElevenLabsNarrationProviderPlugin(
+  options: ElevenLabsNarrationProviderOptions = {},
+): NarrationProviderPlugin {
   const fetchImplementation = options.fetch ?? globalThis.fetch;
 
   return {
-    async synthesize(request: NarrationRequest): Promise<NarrationSynthesisResult> {
+    name: "elevenlabs",
+    capabilities: {
+      offlineSynthesis: false,
+      languages: "provider-defined",
+      outputFormats: "provider-defined",
+      sampleRates: "provider-defined",
+      instructions: "provider-defined",
+    },
+    prepareRequest(request) {
+      if (request.provider !== "elevenlabs") {
+        throw new Error(`ElevenLabs narration received unsupported provider: ${request.provider}`);
+      }
+
+      const providerOptions = {
+        ...request.providerOptions,
+      };
+
+      if (request.model === "eleven_v3") {
+        delete providerOptions.previousText;
+        delete providerOptions.nextText;
+      } else {
+        const previousText = normalizeContextText(providerOptions.previousText);
+        const nextText = normalizeContextText(providerOptions.nextText);
+
+        if (previousText === undefined) delete providerOptions.previousText;
+        else providerOptions.previousText = previousText;
+        if (nextText === undefined) delete providerOptions.nextText;
+        else providerOptions.nextText = nextText;
+      }
+
+      return createNarrationRequest({
+        ...request,
+        providerOptions: Object.keys(providerOptions).length === 0 ? undefined : providerOptions,
+      });
+    },
+    async synthesize(request, context): Promise<NarrationSynthesisResult> {
       if (fetchImplementation === undefined) {
         throw new Error("ElevenLabs narration requires a fetch implementation in the current runtime.");
       }
@@ -35,6 +90,7 @@ export function createElevenLabsNarrationProvider(
       }
 
       const normalizedRequest = createNarrationRequest(request);
+      context.signal.throwIfAborted();
 
       const apiKey = process.env.ELEVENLABS_API_KEY;
 
@@ -49,6 +105,7 @@ export function createElevenLabsNarrationProvider(
           "xi-api-key": apiKey,
         },
         body: JSON.stringify(createSpeechBody(normalizedRequest)),
+        signal: context.signal,
       });
 
       if (!response.ok) {
@@ -80,6 +137,15 @@ export function createElevenLabsNarrationProvider(
       };
     },
   };
+}
+
+function normalizeContextText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = normalizeNarrationText(value);
+  return normalized === "" ? undefined : normalized;
 }
 
 function createSpeechUrl(request: NarrationRequest): string {

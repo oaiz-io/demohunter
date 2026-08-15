@@ -6,6 +6,7 @@ import {
   DEFAULT_COOKIE_BANNER_CONFIG,
   DEFAULT_CURSOR_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
+  DEFAULT_KOKORO_TTS_CONFIG,
   DEFAULT_OUTPUT_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
@@ -14,6 +15,8 @@ import {
 import type {
   CookieBannerConfig,
   DemoHunterUserConfig,
+  DemoHunterUserTTSConfig,
+  NarrationProviderDescriptor,
   ResolvedDemoHunterConfig,
 } from "@demohunter/sdk";
 
@@ -35,6 +38,7 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
   const authoredConfig = readDefaultExport(configModule.default);
   validateAuthoredRecordConfig(authoredConfig.record);
   validateAuthoredOutputConfig(authoredConfig.output);
+  validateAuthoredProviders(authoredConfig.providers);
 
   const config: ResolvedDemoHunterConfig = {
     baseURL: authoredConfig.baseURL,
@@ -58,6 +62,9 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
     output: {
       formats: resolveOutputFormatRequests(authoredConfig.output?.formats ?? DEFAULT_OUTPUT_CONFIG.formats),
     },
+    ...(authoredConfig.providers?.tts === undefined
+      ? {}
+      : { providers: { tts: [...authoredConfig.providers.tts] } }),
     tts: resolveTTSConfig(authoredConfig.tts),
   };
 
@@ -116,6 +123,24 @@ function validateAuthoredRecordConfig(record: DemoHunterUserConfig["record"]): v
 function validateAuthoredOutputConfig(output: DemoHunterUserConfig["output"]): void {
   if (output !== undefined && !isRecordObject(output)) {
     throw new Error("output must be an object");
+  }
+}
+
+function validateAuthoredProviders(providers: DemoHunterUserConfig["providers"]): void {
+  if (providers === undefined) {
+    return;
+  }
+  if (!isRecordObject(providers)) {
+    throw new Error("providers must be an object");
+  }
+  if (providers.tts !== undefined && !Array.isArray(providers.tts)) {
+    throw new Error("providers.tts must be an array of provider descriptors");
+  }
+
+  for (const descriptor of providers.tts ?? []) {
+    if (!isNarrationProviderDescriptor(descriptor)) {
+      throw new Error("providers.tts entries must have a non-empty name and options");
+    }
   }
 }
 
@@ -257,6 +282,14 @@ function resolveProjectPath(projectRoot: string, authoredPath: string): string {
 }
 
 function resolveTTSConfig(authoredTTS: DemoHunterUserConfig["tts"]): ResolvedDemoHunterConfig["tts"] {
+  if (authoredTTS === undefined || authoredTTS.provider === undefined || authoredTTS.provider === "openai") {
+    return {
+      ...DEFAULT_TTS_CONFIG,
+      ...authoredTTS,
+      provider: "openai",
+    };
+  }
+
   if (authoredTTS?.provider === "elevenlabs") {
     return {
       ...DEFAULT_ELEVENLABS_TTS_CONFIG,
@@ -264,9 +297,56 @@ function resolveTTSConfig(authoredTTS: DemoHunterUserConfig["tts"]): ResolvedDem
     };
   }
 
+  if (authoredTTS.provider === "kokoro") {
+    if (authoredTTS.format !== undefined && authoredTTS.format !== "wav") {
+      throw new Error("tts.format must be wav for provider kokoro");
+    }
+    if (authoredTTS.instructions !== undefined && authoredTTS.instructions.trim() !== "") {
+      throw new Error("tts.instructions must be empty for provider kokoro");
+    }
+    return {
+      ...DEFAULT_KOKORO_TTS_CONFIG,
+      ...authoredTTS,
+      provider: "kokoro",
+      format: "wav",
+      instructions: "",
+    };
+  }
+
+  return resolveCustomTTSConfig(authoredTTS);
+}
+
+function resolveCustomTTSConfig(authoredTTS: DemoHunterUserTTSConfig): ResolvedDemoHunterConfig["tts"] {
+  const provider = authoredTTS.provider?.trim();
+  if (provider === undefined || provider === "") {
+    throw new Error("tts.provider must be a non-empty string");
+  }
+
   return {
-    ...DEFAULT_TTS_CONFIG,
     ...authoredTTS,
-    provider: "openai",
+    provider,
+    model: requireCustomTTSString(authoredTTS, "model", provider),
+    voice: requireCustomTTSString(authoredTTS, "voice", provider),
+    format: requireCustomTTSString(authoredTTS, "format", provider),
+    instructions: requireCustomTTSString(authoredTTS, "instructions", provider),
   };
+}
+
+function requireCustomTTSString(
+  config: DemoHunterUserTTSConfig,
+  field: "model" | "voice" | "format" | "instructions",
+  provider: string,
+): string {
+  const value = config[field];
+  if (typeof value !== "string") {
+    throw new Error(`tts.${field} is required for custom provider ${JSON.stringify(provider)}`);
+  }
+  return value;
+}
+
+function isNarrationProviderDescriptor(value: unknown): value is NarrationProviderDescriptor {
+  return isRecordObject(value)
+    && typeof (value as { name?: unknown }).name === "string"
+    && (value as { name: string }).name.trim().length > 0
+    && "options" in (value as object);
 }

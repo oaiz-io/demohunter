@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { createNarrationRequest, resolveNarrationFromCache } from "@demohunter/tts-core";
-import type { ResolveNarrationFromCacheOptions } from "@demohunter/tts-core";
+import { createNarrationProviderRegistry, createNarrationRequest, resolveNarrationFromCache } from "@demohunter/tts-core";
+import type { NarrationProviderPlugin, ResolveNarrationFromCacheOptions } from "@demohunter/tts-core";
 
 import { resolveNarrationSegment } from "./resolve-narration.js";
 
@@ -74,6 +74,7 @@ describe("resolveNarrationSegment", () => {
         text: "Explain the billing dashboard",
       },
       loadedConfig: createLoadedConfig(projectRoot),
+      registry: createTestRegistry("openai"),
     });
 
     expect(segment).toEqual({
@@ -97,6 +98,7 @@ describe("resolveNarrationSegment", () => {
           text: "Explain the billing dashboard",
         },
         loadedConfig: createLoadedConfig(projectRoot),
+        registry: createTestRegistry("openai", "OPENAI_API_KEY is required"),
       }),
     ).rejects.toThrow(/OPENAI_API_KEY/);
   });
@@ -137,13 +139,9 @@ describe("resolveNarrationSegment", () => {
           previousText: "  First, open billing.\r\n",
           nextText: "Next, export the report.",
         },
+        registry: createTestRegistry("elevenlabs"),
       },
       {
-        createProvider: () => ({
-          async synthesize() {
-            throw new Error("provider should not be called by this test double");
-          },
-        }),
         resolveNarrationFromCache: async (options) => {
           capturedRequest = options.request;
 
@@ -184,7 +182,7 @@ describe("resolveNarrationSegment", () => {
       language: "sv",
       providerOptions: {
         nextText: "Next, export the report.",
-        previousText: "First, open billing.",
+        previousText: "  First, open billing.\r\n",
         voiceSettings: {
           stability: 0.21,
           similarityBoost: 0.92,
@@ -220,13 +218,9 @@ describe("resolveNarrationSegment", () => {
           instructions: "",
           language: " sv ",
         }),
+        registry: createTestRegistry("elevenlabs"),
       },
       {
-        createProvider: () => ({
-          async synthesize() {
-            throw new Error("provider should not be called by this test double");
-          },
-        }),
         resolveNarrationFromCache: async (options) => {
           capturedRequest = options.request;
 
@@ -260,7 +254,7 @@ describe("resolveNarrationSegment", () => {
     expect(capturedRequest?.language).toBe("sv");
   });
 
-  test("does not attach narration continuity context to OpenAI requests", async () => {
+  test("passes continuity as generic preparation input without resolving by provider name", async () => {
     const projectRoot = await makeTempProject();
     let capturedRequest: ResolveNarrationFromCacheOptions["request"] | undefined;
 
@@ -276,13 +270,9 @@ describe("resolveNarrationSegment", () => {
           previousText: "First, open billing.",
           nextText: "Next, export the report.",
         },
+        registry: createTestRegistry("openai"),
       },
       {
-        createProvider: () => ({
-          async synthesize() {
-            throw new Error("provider should not be called by this test double");
-          },
-        }),
         resolveNarrationFromCache: async (options) => {
           capturedRequest = options.request;
 
@@ -313,7 +303,10 @@ describe("resolveNarrationSegment", () => {
       },
     );
 
-    expect(capturedRequest?.providerOptions).toBeUndefined();
+    expect(capturedRequest?.providerOptions).toEqual({
+      nextText: "Next, export the report.",
+      previousText: "First, open billing.",
+    });
   });
 
   test("fails clearly when uncached narration requires ELEVENLABS_API_KEY", async () => {
@@ -334,10 +327,60 @@ describe("resolveNarrationSegment", () => {
           format: "mp3_44100_128",
           instructions: "",
         }),
+        registry: createTestRegistry("elevenlabs", "ELEVENLABS_API_KEY is required"),
       }),
     ).rejects.toThrow(/ELEVENLABS_API_KEY/);
   });
+
+  test("resolves arbitrary plugins and reports unknown names without fallback", async () => {
+    const projectRoot = await makeTempProject();
+    const loadedConfig = createLoadedConfig(projectRoot, {
+      provider: "acme-local",
+      model: "v1",
+      voice: "demo",
+      format: "wav",
+      instructions: "",
+    });
+    const registry = createTestRegistry("different-provider");
+
+    await expect(resolveNarrationSegment({
+      event: { kind: "narrate", text: "Hello" },
+      loadedConfig,
+      registry,
+    })).rejects.toThrow('Narration provider "acme-local" is not registered');
+  });
+
+  test("forwards cancellation before cache or provider work", async () => {
+    const projectRoot = await makeTempProject();
+    const controller = new AbortController();
+    controller.abort(new DOMException("cancel narration", "AbortError"));
+
+    await expect(resolveNarrationSegment({
+      event: { kind: "narrate", text: "Hello" },
+      loadedConfig: createLoadedConfig(projectRoot),
+      registry: createTestRegistry("openai"),
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+  });
 });
+
+function createTestRegistry(name: string, synthesisError = "provider should not synthesize") {
+  const plugin: NarrationProviderPlugin = {
+    name,
+    capabilities: {
+      offlineSynthesis: name !== "openai" && name !== "elevenlabs",
+      languages: "provider-defined",
+      outputFormats: "provider-defined",
+      sampleRates: "provider-defined",
+      instructions: "provider-defined",
+    },
+    prepareRequest: (request) => request,
+    async synthesize() {
+      throw new Error(synthesisError);
+    },
+  };
+  return createNarrationProviderRegistry([plugin]);
+}
 
 async function makeTempProject(): Promise<string> {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "demohunter-resolve-narration-"));
@@ -348,14 +391,14 @@ async function makeTempProject(): Promise<string> {
 function createLoadedConfig(
   projectRoot: string,
   tts: {
-    provider: "openai";
+    provider: string;
     model: string;
     voice: string;
     format: string;
     instructions: string;
     language?: string;
   } | {
-    provider: "elevenlabs";
+    provider: string;
     model: string;
     voice: string;
     format: string;

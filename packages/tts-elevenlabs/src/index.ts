@@ -1,5 +1,6 @@
 export {
   createElevenLabsNarrationProvider,
+  createElevenLabsNarrationProviderPlugin,
 } from "./elevenlabs-provider.js";
 export type {
   ElevenLabsNarrationProviderOptions,

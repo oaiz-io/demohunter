@@ -42,6 +42,20 @@ export ELEVENLABS_API_KEY=...
 
 DemoHunter does not store credentials.
 
+## `kokoro executable not found`
+
+Kokoro is selected, but the configured command or Python runtime cannot be resolved. Install the runtime yourself and correct `providers.tts[].options.executable` or `pythonCommand`. DemoHunter does not install Python packages or download anything. Arguments are passed literally with no shell.
+
+## `model file missing` or `voices file missing`
+
+For the bundled worker, set absolute or project-resolvable `modelPath` and `voicesPath` values in the `kokoro(...)` descriptor. DemoHunter contains neither asset. A compatible `runtime: "command"` adapter may omit both paths only when its ready message supplies stable model/voices SHA-256 digests and a backend version. If the runtime or both assets are temporarily unavailable, only narration covered by a previously verified local identity sidecar and audio cache can resolve offline; a partial or uncached setup fails deliberately.
+
+## Kokoro protocol, version, language, or WAV failure
+
+Run `npx demohunter doctor`. The bundled worker expects separately installed `kokoro-onnx` and `soundfile`, protocol v1, one of `en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, or `zh`, and WAV at 24 kHz. A configured `backendVersion` must match the worker handshake. For command mode, the executable must implement DemoHunter's JSONL worker protocol; the upstream Kokoro CLI is not automatically adapted.
+
+Worker crashes, malformed/oversized JSON, corrupt WAV, timeouts, and cancellation terminate the process and discard staging output. Retry after fixing the reported runtime error. Corrupt cache audio is regenerated when local assets are available; executable paths are never part of cache metadata.
+
 ## `DemoHunter could not reach baseURL`
 
 The CLI tried to load your app and got `ERR_CONNECTION_REFUSED` or a similar network error.
@@ -78,7 +92,7 @@ Run:
 npx demohunter doctor
 ```
 
-This checks config loading, `ffmpeg`, `ffprobe`, Playwright browser launchability, `baseURL` reachability, output/cache writability, and whether `OPENAI_API_KEY` is available for uncached narration.
+This checks config loading, `ffmpeg`, `ffprobe`, Playwright browser launchability, `baseURL` reachability, output/cache writability, and prerequisites for only the selected narration provider. Kokoro checks do not install, download, or synthesize narration.
 
 ## `Tour file must default export an object with string id/title and a run function`
 

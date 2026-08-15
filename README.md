@@ -9,7 +9,7 @@ Two workflows are especially useful:
 - **Product, docs, and DevRel**: keep marketing pages, release notes, and onboarding videos in sync with the product by generating demos from repeatable scripts.
 - **AI coding agents**: let an agent attach a narrated demo of its work to a pull request so reviewers can see the changed flow in motion.
 
-DemoHunter is local-first. It does not require a hosted backend, and OpenAI or ElevenLabs is used only for text-to-speech when uncached narration needs to be generated.
+DemoHunter is local-first. It does not require a hosted backend. Narration can use OpenAI, ElevenLabs, or a separately installed local Kokoro runtime.
 
 <video src=".demohunter/demohunter-github/video-1.10x.mp4" controls width="100%"></video>
 
@@ -27,6 +27,7 @@ DemoHunter is local-first. It does not require a hosted backend, and OpenAI or E
 - [x] Per-call voice and tone overrides on `narrate()`.
 - [x] OpenAI TTS (`gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`).
 - [x] ElevenLabs TTS with configurable voice IDs and voice settings.
+- [x] Local Kokoro TTS through a safe external JSONL worker (no bundled weights or downloads).
 - [x] Portable `manifest.json` with sha256 checksums.
 - [x] Offline regeneration when narration is fully cached.
 - [x] Agent skill for Claude and Codex.
@@ -143,6 +144,52 @@ export default defineConfig({
 
 Export `ELEVENLABS_API_KEY` for uncached ElevenLabs narration. Individual calls can override voice, model, format, language, and voice settings: `narrate("...", { voice: "other-voice-id", language: "sv" })`.
 Use ISO 639-1 language codes such as `sv` for Swedish. ElevenLabs receives `language` as the API's `language_code`. OpenAI does not expose a general language parameter for built-in TTS voices, so DemoHunter folds `language` into the voice instructions to steer language and accent.
+
+### Local Kokoro
+
+DemoHunter ships a small, weight-free Python worker, not Kokoro, Python packages, model weights, or voices. Install Python `>=3.10,<3.14` and `kokoro-onnx`/`soundfile` yourself, and provide local model and voices files:
+
+```ts
+import { defineConfig, kokoro, kokoroTTS } from "demohunter";
+
+export default defineConfig({
+  baseURL: "http://localhost:3000",
+  providers: {
+    tts: [kokoro({
+      modelPath: "/opt/kokoro/kokoro-v1.0.onnx",
+      voicesPath: "/opt/kokoro/voices-v1.0.bin",
+    })],
+  },
+  tts: kokoroTTS({ voice: "af_heart", language: "en-US" }),
+});
+```
+
+The bundled worker is the default and launches `python3` with literal arguments and no shell. A compatible external DemoHunter JSONL adapter can instead use the exact command-mode configuration:
+
+```ts
+import { defineConfig, kokoro } from "demohunter";
+
+export default defineConfig({
+  baseURL: "http://localhost:3000",
+  providers: { tts: [kokoro({ runtime: "command", executable: "kokoro" })] },
+  tts: { provider: "kokoro", voice: "en_us_male_1", language: "en-US" },
+});
+```
+
+The executable must implement DemoHunter's JSONL protocol; it is not assumed to be an upstream Kokoro CLI. Its protocol-v1 ready message must report stable model and voices SHA-256 digests plus the backend version, so cache identity remains portable without host asset paths. Full command configuration keeps paths separate from argv:
+
+```ts
+kokoro({
+  runtime: "command",
+  executable: "/usr/local/bin/demohunter-kokoro-worker",
+  args: ["--profile", "local"],
+  modelPath: "/opt/kokoro/kokoro-v1.0.onnx",
+  voicesPath: "/opt/kokoro/voices-v1.0.bin",
+})
+```
+
+Kokoro produces ffmpeg-compatible WAV at 24 kHz. Supported language settings are `en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `ja`, `pt-BR`, and `zh`. Run `npx demohunter doctor` before generating. DemoHunter hashes the model, voices, backend version, and worker protocol into cache identity; executable paths are never written into portable cache metadata.
+If `backendVersion` is configured, it must exactly match the version string in the worker's ready message. Leave it unset unless you deliberately want version pinning.
 
 ## Output
 

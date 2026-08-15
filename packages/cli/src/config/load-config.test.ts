@@ -8,6 +8,7 @@ import {
   DEFAULT_DEMOHUNTER_CONFIG,
   DEFAULT_CURSOR_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
+  DEFAULT_KOKORO_TTS_CONFIG,
   DEFAULT_OUTPUT_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
@@ -39,6 +40,42 @@ describe("loadConfig", () => {
       output: DEFAULT_OUTPUT_CONFIG,
       tts: DEFAULT_TTS_CONFIG,
     });
+  });
+
+  test("preserves Kokoro provider descriptors and applies WAV defaults", async () => {
+    const cwd = await writeConfig(`
+      import { defineConfig, kokoro } from ${JSON.stringify(pathToFileURL(path.resolve("packages/sdk/src/index.ts")).href)};
+      export default defineConfig({
+        baseURL: "http://localhost:4173",
+        providers: { tts: [kokoro({ runtime: "command", executable: "kokoro" })] },
+        tts: { provider: "kokoro", voice: "en_us_male_1", language: "en-US" }
+      });
+    `);
+
+    const loaded = await loadConfig(cwd);
+
+    expect(loaded.config.providers).toEqual({
+      tts: [{ name: "kokoro", options: { runtime: "command", executable: "kokoro" } }],
+    });
+    expect(loaded.config.tts).toEqual({
+      ...DEFAULT_KOKORO_TTS_CONFIG,
+      voice: "en_us_male_1",
+    });
+  });
+
+  test("preserves arbitrary provider names and rejects incomplete custom settings", async () => {
+    const valid = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        tts: { provider: "acme-local", model: "v1", voice: "demo", format: "wav", instructions: "" }
+      };
+    `);
+    expect((await loadConfig(valid)).config.tts.provider).toBe("acme-local");
+
+    const invalid = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", tts: { provider: "acme-local" } };
+    `);
+    await expect(loadConfig(invalid)).rejects.toThrow('tts.model is required for custom provider "acme-local"');
   });
 
   test("resolves relative outputDir and cacheDir against the current working directory", async () => {

@@ -1,6 +1,7 @@
 import {
   createNarrationRequest,
   type NarrationProvider,
+  type NarrationProviderPlugin,
   type NarrationRequest,
   type NarrationSynthesisResult,
 } from "@demohunter/tts-core";
@@ -19,17 +20,66 @@ export type OpenAINarrationProviderOptions = {
 export function createOpenAINarrationProvider(
   options: OpenAINarrationProviderOptions = {},
 ): NarrationProvider {
+  const plugin = createOpenAINarrationProviderPlugin(options);
+
+  return {
+    async synthesize(request) {
+      const context = {
+        cacheDir: process.cwd(),
+        signal: new AbortController().signal,
+      };
+      const prepared = await plugin.prepareRequest(request, context);
+
+      return await plugin.synthesize(prepared, context);
+    },
+  };
+}
+
+export function createOpenAINarrationProviderPlugin(
+  options: OpenAINarrationProviderOptions = {},
+): NarrationProviderPlugin {
   const fetchImplementation = options.fetch ?? globalThis.fetch;
 
   return {
-    async synthesize(request: NarrationRequest): Promise<NarrationSynthesisResult> {
+    name: "openai",
+    capabilities: {
+      offlineSynthesis: false,
+      languages: "provider-defined",
+      outputFormats: ["mp3", "opus", "aac", "flac", "wav", "pcm"],
+      sampleRates: "provider-defined",
+      instructions: "supported",
+    },
+    prepareRequest(request) {
+      if (request.provider !== "openai") {
+        throw new Error(`OpenAI narration received unsupported provider: ${request.provider}`);
+      }
+
+      const providerOptions = { ...request.providerOptions };
+      delete providerOptions.previousText;
+      delete providerOptions.nextText;
+      delete providerOptions.voiceSettings;
+      const { providerOptions: _discardedProviderOptions, ...requestWithoutProviderOptions } = request;
+      const normalizedRequest = createNarrationRequest({
+        ...requestWithoutProviderOptions,
+        ...(Object.keys(providerOptions).length === 0 ? {} : { providerOptions }),
+      });
+
+      assertSupportedModel(normalizedRequest.model);
+      return normalizedRequest;
+    },
+    async synthesize(request, context): Promise<NarrationSynthesisResult> {
       if (fetchImplementation === undefined) {
         throw new Error("OpenAI narration requires a fetch implementation in the current runtime.");
       }
 
       const normalizedRequest = createNarrationRequest(request);
 
+      if (normalizedRequest.provider !== "openai") {
+        throw new Error(`OpenAI narration received unsupported provider: ${normalizedRequest.provider}`);
+      }
+
       assertSupportedModel(normalizedRequest.model);
+      context.signal.throwIfAborted();
 
       const apiKey = process.env.OPENAI_API_KEY;
 
@@ -50,6 +100,7 @@ export function createOpenAINarrationProvider(
           response_format: normalizedRequest.format,
           input: normalizedRequest.text,
         }),
+        signal: context.signal,
       });
 
       if (!response.ok) {

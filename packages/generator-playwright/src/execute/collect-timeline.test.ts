@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import path from "node:path";
+import { createNarrationProviderRegistry, type NarrationProviderPlugin } from "@demohunter/tts-core";
 
 import { collectTimeline } from "./collect-timeline.js";
 
@@ -98,7 +99,7 @@ describe("collectTimeline", () => {
       kind: "narrate",
       text: "Explain the invoice screen",
       voice: "marin",
-    }, undefined);
+    }, { nextText: "Explain the transition" });
     expect(calls).toEqual([
       "setup:true",
       "cookie:after-setup",
@@ -269,6 +270,7 @@ describe("collectTimeline", () => {
       await expect(
         collectTimeline({
           loadedConfig: createLoadedConfig("/tmp/workspace"),
+          narrationRegistry: createFailingRegistry("OPENAI_API_KEY is required"),
           page: page as never,
           tourFile: {
             path: "/tmp/workspace/demos/billing.tour.ts",
@@ -411,6 +413,24 @@ describe("collectTimeline", () => {
     expect(calls).toEqual(["setup", "run", "teardown"]);
   });
 });
+
+function createFailingRegistry(message: string) {
+  const plugin: NarrationProviderPlugin = {
+    name: "openai",
+    capabilities: {
+      offlineSynthesis: false,
+      languages: "provider-defined",
+      outputFormats: "provider-defined",
+      sampleRates: "provider-defined",
+      instructions: "provider-defined",
+    },
+    prepareRequest: (request) => request,
+    async synthesize() {
+      throw new Error(message);
+    },
+  };
+  return createNarrationProviderRegistry([plugin]);
+}
 
 function createLoadedConfig(
   projectRoot: string,

@@ -93,6 +93,30 @@ describe("createNarrationCacheKey", () => {
     assert.equal(second, first);
   });
 
+  test("keys arbitrary providers and prepared model revisions without runtime path inputs", () => {
+    const baseline = createNarrationCacheKey({
+      ...BASE_REQUEST,
+      provider: "local-kokoro",
+      model: "kokoro-82m",
+      providerOptions: {
+        modelSha256: "aaa",
+        backendVersion: "1.0.0",
+      },
+    });
+    const replacement = createNarrationCacheKey({
+      ...BASE_REQUEST,
+      provider: "local-kokoro",
+      model: "kokoro-82m",
+      providerOptions: {
+        modelSha256: "bbb",
+        backendVersion: "1.0.0",
+      },
+    });
+
+    assert.notEqual(replacement, baseline);
+    assert.equal(baseline.includes("/"), false);
+  });
+
   test("normalizes language whitespace before hashing", () => {
     const first = createNarrationCacheKey(createNarrationRequest({
       ...BASE_REQUEST,
