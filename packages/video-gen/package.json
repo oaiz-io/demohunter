@@ -1,0 +1,38 @@
+{
+  "name": "@demohunter/video-gen",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "demohunter-video": "./dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && bun run copy:assets",
+    "copy:assets": "node scripts/copy-assets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@demohunter/generator-playwright": "workspace:*",
+    "@demohunter/sdk": "workspace:*",
+    "openai": "^5.12.2",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "playwright": ">=1.61",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "playwright": ">=1.61"
+  }
+}

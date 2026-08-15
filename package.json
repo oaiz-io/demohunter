@@ -8,8 +8,9 @@
   ],
   "scripts": {
     "build:internals": "bun x tsc -b tsconfig.json --pretty false",
+    "build:video-gen-assets": "bun run --cwd packages/video-gen copy:assets",
     "build:cli": "bun run --cwd packages/cli build",
-    "build": "bun run build:internals && bun run build:cli",
+    "build": "bun run build:internals && bun run build:video-gen-assets && bun run build:cli",
     "clean": "rm -rf packages/*/dist",
     "install:global": "bun run --cwd packages/cli link:global",
     "test:e2e": "bun test tests/e2e",
