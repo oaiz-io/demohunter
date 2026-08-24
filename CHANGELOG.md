@@ -4,6 +4,21 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **DemoHunter Review** — turn a pull request into a local, narrated review artifact.
+  - `demohunter review init [path] --base <ref>` scaffolds a `*.review.ts` grounded in the real `merge-base(base, HEAD)..HEAD` diff, with the true changed-file inventory and an explicit TODO for every authored field.
+  - `demohunter review generate <review-file> --base <ref> [--head <ref>] [--run-verification] [--allow-dirty] [--no-video]` renders a static review website and records a narrated walkthrough through the existing Playwright, narration, caption, chapter, and FFmpeg pipeline, then writes `review.lock.json`.
+  - `demohunter review serve <dir|id> [--port <n>] [--open]` serves one artifact on `127.0.0.1` only: GET/HEAD, no directory listing, `Host` pinned to loopback, `..` and escaping symlinks blocked by a realpath containment check, strict CSP, and range support.
+  - `demohunter review verify <dir|id> [--strict]` re-derives the artifact from Git: lock schema, staleness, artifact checksums, video/audio streams, captions, chapters, portable manifest, changed-file set, coverage, and evidence anchors.
+- Typed `defineReview()` authoring surface exported from `demohunter`, with `changeSet`, `componentDiagram`, `dataFlowDiagram`, `sequenceDiagram`, `diffEvidence`, `codeEvidence`, `verificationCommand`, `risk`, `compatibilityNote`, `securityNote`, `reviewerQuestion`, and `coverageGroup`.
+- 100% changed-file accounting: generation fails when a changed path is unaccounted for, and when an authored path is not in the reviewed range.
+- `demohunter-review` agent skill, installed alongside `demohunter` by `demohunter add-skill`.
+
+### Fixed
+
+- Changed-file collection now passes `--no-abbrev` to `git diff --raw`, so recorded blob shas are full object ids rather than Git's abbreviated form.
+
 ## [0.1.0]
 
 Initial public release.

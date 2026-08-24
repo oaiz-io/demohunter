@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { isExecutedAsEntrypoint, runCli } from "./demohunter.js";
+import { isExecutedAsEntrypoint, parseReviewArgs, runCli } from "./demohunter.js";
 
 function buildStubs(overrides: Partial<Parameters<typeof runCli>[2]> = {}): Parameters<typeof runCli>[2] {
   return {
@@ -9,6 +9,10 @@ function buildStubs(overrides: Partial<Parameters<typeof runCli>[2]> = {}): Para
     initCommand: mock(async () => {}),
     generateCommand: mock(async () => {}),
     addSkillCommand: mock(async () => {}),
+    reviewInitCommand: mock(async () => {}),
+    reviewGenerateCommand: mock(async () => {}),
+    reviewServeCommand: mock(async () => {}),
+    reviewVerifyCommand: mock(async () => ({ ok: true })),
     ...overrides,
   };
 }
@@ -279,5 +283,153 @@ describe("runCli", () => {
         (filePath) => (filePath === symlinkBinPath ? realBinPath : filePath),
       ),
     ).toBe(true);
+  });
+});
+
+describe("runCli review", () => {
+  test("dispatches review init with the requested base", async () => {
+    const stubs = buildStubs();
+
+    await runCli(["review", "init", "--base", "main"], "/tmp/demo", stubs);
+
+    expect(stubs.reviewInitCommand).toHaveBeenCalledWith("/tmp/demo", {
+      baseRef: "main",
+      force: false,
+    });
+  });
+
+  test("dispatches review generate with every flag", async () => {
+    const stubs = buildStubs();
+
+    await runCli(
+      [
+        "review",
+        "generate",
+        "reviews/pr.review.ts",
+        "--base",
+        "main",
+        "--head",
+        "HEAD",
+        "--run-verification",
+        "--allow-dirty",
+        "--no-video",
+      ],
+      "/tmp/demo",
+      stubs,
+    );
+
+    expect(stubs.reviewGenerateCommand).toHaveBeenCalledWith("/tmp/demo", "reviews/pr.review.ts", {
+      baseRef: "main",
+      headRef: "HEAD",
+      runVerification: true,
+      allowDirty: true,
+      skipVideo: true,
+    });
+  });
+
+  test("dispatches review serve and review verify", async () => {
+    const stubs = buildStubs();
+
+    await runCli(["review", "serve", "pr-22-review", "--open", "--port=4321"], "/tmp/demo", stubs);
+    await runCli(["review", "verify", "pr-22-review", "--strict"], "/tmp/demo", stubs);
+
+    expect(stubs.reviewServeCommand).toHaveBeenCalledWith("/tmp/demo", "pr-22-review", {
+      open: true,
+      port: 4321,
+    });
+    expect(stubs.reviewVerifyCommand).toHaveBeenCalledWith("/tmp/demo", "pr-22-review", {
+      strict: true,
+    });
+  });
+
+  test("rejects an unknown review action", async () => {
+    await expect(runCli(["review", "publish"], "/tmp/demo", buildStubs())).rejects.toThrow(
+      "Usage: demohunter review <init|generate|serve|verify>",
+    );
+  });
+});
+
+describe("parseReviewArgs", () => {
+  test("defaults the base to main and head to the repository HEAD", () => {
+    expect(parseReviewArgs("generate", ["reviews/pr.review.ts"]).generate).toEqual({
+      baseRef: "main",
+      runVerification: false,
+      allowDirty: false,
+      skipVideo: false,
+    });
+  });
+
+  test("accepts both --flag value and --flag=value", () => {
+    expect(parseReviewArgs("init", ["--base=release/1.x"]).init?.baseRef).toBe("release/1.x");
+    expect(parseReviewArgs("init", ["--base", "release/1.x"]).init?.baseRef).toBe("release/1.x");
+  });
+
+  test("rejects an unknown flag rather than silently ignoring it", () => {
+    // A dropped --base would produce a confident artifact for the wrong range.
+    expect(() => parseReviewArgs("generate", ["reviews/pr.review.ts", "--bass", "main"])).toThrow(
+      'Unknown "review generate" flag: --bass',
+    );
+  });
+
+  test("rejects a flag that belongs to another review action", () => {
+    expect(() => parseReviewArgs("verify", ["pr-22-review", "--base", "main"])).toThrow(
+      'Unknown "review verify" flag: --base',
+    );
+  });
+
+  test("rejects a missing or repeated flag value", () => {
+    expect(() => parseReviewArgs("generate", ["reviews/pr.review.ts", "--base"])).toThrow(
+      "--base requires a value",
+    );
+    expect(() =>
+      parseReviewArgs("generate", ["reviews/pr.review.ts", "--base", "main", "--base", "dev"]),
+    ).toThrow("--base may only be provided once");
+    expect(() => parseReviewArgs("generate", ["reviews/pr.review.ts", "--base", "--head"])).toThrow(
+      "--base requires a value",
+    );
+  });
+
+  test("rejects a value attached to a boolean flag", () => {
+    expect(() => parseReviewArgs("verify", ["pr-22-review", "--strict=yes"])).toThrow(
+      "--strict does not take a value",
+    );
+  });
+
+  test("requires a target for generate, serve, and verify", () => {
+    expect(() => parseReviewArgs("generate", [])).toThrow(
+      "Usage: demohunter review generate <review-file>",
+    );
+    expect(() => parseReviewArgs("serve", [])).toThrow(
+      "Usage: demohunter review serve <review-dir-or-id>",
+    );
+    expect(() => parseReviewArgs("verify", [])).toThrow(
+      "Usage: demohunter review verify <review-dir-or-id>",
+    );
+  });
+
+  test("rejects more than one positional argument", () => {
+    expect(() => parseReviewArgs("verify", ["a", "b"])).toThrow(
+      "Usage: demohunter review <init|generate|serve|verify>",
+    );
+  });
+
+  test("accepts the scaffold path positionally or with --out, but not both", () => {
+    expect(parseReviewArgs("init", ["docs/pr.review.ts"]).init?.outputPath).toBe("docs/pr.review.ts");
+    expect(parseReviewArgs("init", ["--out", "docs/pr.review.ts"]).init?.outputPath).toBe(
+      "docs/pr.review.ts",
+    );
+    expect(() => parseReviewArgs("init", ["a.ts", "--out", "b.ts"])).toThrow(
+      "either positionally or with --out",
+    );
+  });
+
+  test("validates the serve port", () => {
+    expect(parseReviewArgs("serve", ["pr-22-review", "--port", "0"]).serve?.port).toBe(0);
+    expect(() => parseReviewArgs("serve", ["pr-22-review", "--port", "70000"])).toThrow(
+      "--port requires an integer from 0 to 65535",
+    );
+    expect(() => parseReviewArgs("serve", ["pr-22-review", "--port", "http"])).toThrow(
+      "--port requires an integer from 0 to 65535",
+    );
   });
 });

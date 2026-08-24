@@ -21,6 +21,9 @@
     },
     {
       "path": "./packages/tts-openai"
+    },
+    {
+      "path": "./packages/review"
     }
   ]
 }

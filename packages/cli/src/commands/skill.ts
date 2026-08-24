@@ -6,13 +6,25 @@ import { fileURLToPath } from "node:url";
 export const SKILL_TARGETS = ["claude", "codex"] as const;
 export type SkillTarget = (typeof SKILL_TARGETS)[number];
 
+/**
+ * Every skill bundle shipped in the package, installed together.
+ *
+ * `demohunter` teaches tour authoring; `demohunter-review` teaches turning a
+ * pull request into a review artifact. They are separate bundles because an
+ * agent should load only the one that matches the task in front of it.
+ */
+export const SKILL_BUNDLES = ["demohunter", "demohunter-review"] as const;
+export type SkillBundle = (typeof SKILL_BUNDLES)[number];
+
 export type AddSkillInput = {
   targets: readonly SkillTarget[];
+  /** Bundles to install. Defaults to all of them. */
+  bundles?: readonly SkillBundle[];
 };
 
-const TARGET_DIRECTORIES: Record<SkillTarget, string> = {
-  claude: ".claude/skills/demohunter",
-  codex: ".codex/skills/demohunter",
+const TARGET_SKILL_ROOTS: Record<SkillTarget, string> = {
+  claude: ".claude/skills",
+  codex: ".codex/skills",
 };
 
 export async function addSkillCommand(cwd: string, input: AddSkillInput): Promise<void> {
@@ -20,12 +32,14 @@ export async function addSkillCommand(cwd: string, input: AddSkillInput): Promis
     throw new Error("Usage: demohunter add-skill [--target claude|codex|both]");
   }
 
-  const sourceRoot = findSkillSourceRoot();
+  const bundles = input.bundles ?? SKILL_BUNDLES;
 
   for (const target of input.targets) {
-    const targetDir = path.join(cwd, TARGET_DIRECTORIES[target]);
-    await copyDirectory(sourceRoot, targetDir);
-    console.log(`Installed demohunter skill into ${TARGET_DIRECTORIES[target]}`);
+    for (const bundle of bundles) {
+      const relativeDir = path.join(TARGET_SKILL_ROOTS[target], bundle);
+      await copyDirectory(findSkillSourceRoot(bundle), path.join(cwd, relativeDir));
+      console.log(`Installed ${bundle} skill into ${toPosix(relativeDir)}`);
+    }
   }
 }
 
@@ -60,12 +74,12 @@ function isSkillTarget(value: string): value is SkillTarget {
   return (SKILL_TARGETS as readonly string[]).includes(value);
 }
 
-function findSkillSourceRoot(): string {
+export function findSkillSourceRoot(bundle: SkillBundle): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   let dir = moduleDir;
 
   while (true) {
-    const candidate = path.join(dir, "skills", "demohunter");
+    const candidate = path.join(dir, "skills", bundle);
 
     if (existsSync(path.join(candidate, "SKILL.md"))) {
       return candidate;
@@ -80,7 +94,7 @@ function findSkillSourceRoot(): string {
     dir = parent;
   }
 
-  throw new Error(`Could not locate the DemoHunter skill bundle from ${moduleDir}.`);
+  throw new Error(`Could not locate the ${bundle} skill bundle from ${moduleDir}.`);
 }
 
 async function copyDirectory(sourceDir: string, targetDir: string): Promise<void> {
@@ -101,4 +115,8 @@ async function copyDirectory(sourceDir: string, targetDir: string): Promise<void
       await copyFile(sourcePath, targetPath);
     }
   }
+}
+
+function toPosix(value: string): string {
+  return value.split(path.sep).join("/");
 }

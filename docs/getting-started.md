@@ -151,13 +151,25 @@ export default {
 
 Square defaults to scale-and-pad. Mobile always runs its own responsive capture at 390×844 and encodes to 1080×1920. GIF is silent, palette-based, and limited to 15 seconds. Requested derivatives live under `variants/<preset>/`; the baseline MP4 remains at the output root.
 
-## Install the agent skill (optional)
+## Review a pull request
+
+```sh
+npx demohunter review init --base main
+# edit reviews/<id>.review.ts
+npx demohunter review generate reviews/<id>.review.ts --base main --run-verification
+npx demohunter review serve .demohunter/reviews/<id> --open
+npx demohunter review verify .demohunter/reviews/<id> --strict
+```
+
+This builds a local review website and a narrated walkthrough from one typed definition, grounded in the real `merge-base(base, HEAD)..HEAD` diff. See [Reviewing a pull request](./review.md).
+
+## Install the agent skills (optional)
 
 ```sh
 npx demohunter add-skill --target claude
 ```
 
-Targets: `claude`, `codex`, or `both`. When `--target` is omitted, the skill is installed for both. The skill teaches your coding agent how to author and update DemoHunter tours without inventing wrapper abstractions.
+Targets: `claude`, `codex`, or `both`. When `--target` is omitted, the skills are installed for both. Two bundles ship: `demohunter` teaches your coding agent how to author and update DemoHunter tours without inventing wrapper abstractions, and `demohunter-review` teaches it how to turn a pull request into a review artifact.
 
 ## Repo examples
 
@@ -176,4 +188,6 @@ Same shape for `examples/vite-demo`.
 ## Next steps
 
 - [Troubleshooting](./troubleshooting.md) — common first-run blockers.
+- [Reviewing a pull request](./review.md) — the DemoHunter Review loop end to end.
 - [Agent skill](../packages/cli/skills/demohunter/) — `.tour.ts` authoring rules for AI agents.
+- [Review agent skill](../packages/cli/skills/demohunter-review/) — pull-request review rules for AI agents.
