@@ -305,8 +305,8 @@ function describeCoverage(model: ReviewViewModel): string {
   const groups = model.coverage.groups.filter((group) => group.paths.length > 0);
   const groupClause = groups.length === 0
     ? ""
-    : ` ${countPhrase(groups.length, "coverage group")} accounts for supporting files such as `
-      + `${joinClauses(groups.slice(0, 3).map((group) => group.title))}.`;
+    : ` ${countPhrase(groups.length, "coverage group")} ${groups.length === 1 ? "accounts" : "account"}`
+      + ` for supporting files such as ${joinClauses(groups.slice(0, 3).map((group) => group.title))}.`;
 
   if (!complete) {
     return (
@@ -316,7 +316,7 @@ function describeCoverage(model: ReviewViewModel): string {
   }
 
   return (
-    `All ${totalCount} changed files are accounted for: `
+    `All ${countPhrase(totalCount, "changed file")} ${totalCount === 1 ? "is" : "are"} accounted for: `
     + `${model.coverage.assignments.filter((assignment) => assignment.kind === "chapter").length} explained directly by a change set, `
     + `${model.coverage.assignments.filter((assignment) => assignment.kind === "group").length} grouped.`
     + groupClause

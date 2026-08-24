@@ -91,6 +91,38 @@ describe("buildNarrationSegments", () => {
     expect(verification?.narration[0]).toContain("unverified");
   });
 
+  test("keeps subject and verb in agreement around counted nouns", () => {
+    const spoken = buildNarrationSegments(fullModel())
+      .flatMap((segment) => segment.narration)
+      .join(" ");
+
+    expect(spoken).not.toContain("groups accounts");
+    expect(spoken).not.toContain("group account ");
+
+    const single = makeViewModel({
+      review: makeReviewDefinition(),
+      coverage: {
+        ...makeViewModel().coverage,
+        changedPaths: ["src/app.ts"],
+        totalCount: 1,
+        accountedCount: 1,
+        complete: true,
+        assignments: [
+          { path: "src/app.ts", kind: "chapter", ownerId: "core", ownerTitle: "Core" },
+        ],
+        groups: [
+          { id: "tests", title: "Tests", rationale: "Reviewed with the behaviour.", patterns: ["**/*.test.ts"], paths: ["src/app.test.ts"] },
+        ],
+      },
+    });
+    const coverage = buildNarrationSegments(single).find(
+      (segment) => segment.sectionId === "coverage",
+    );
+
+    expect(coverage?.narration[0]).toContain("All 1 changed file is accounted for");
+    expect(coverage?.narration[0]).toContain("1 coverage group accounts for");
+  });
+
   test("narrates the real coverage split", () => {
     const coverage = buildNarrationSegments(fullModel()).find(
       (segment) => segment.sectionId === "coverage",
