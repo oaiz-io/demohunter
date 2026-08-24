@@ -40,7 +40,11 @@ jobs:
           ffmpeg -version
 
       - name: Install Playwright Chromium runtime
-        run: bun x playwright install --with-deps chromium
+        # Install through the workspace's own Playwright, not `bun x playwright`.
+        # `bun x` resolves playwright@latest, which downloads a different Chromium
+        # revision than the version pinned in bun.lock launches, so every
+        # browser-backed test failed with "Executable doesn't exist".
+        run: ./packages/generator-playwright/node_modules/.bin/playwright install --with-deps chromium
 
       - name: Build demohunter (internals + bundle)
         run: bun run build

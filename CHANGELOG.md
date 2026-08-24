@@ -18,6 +18,7 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 
 ### Fixed
 
+- CI installs the Chromium runtime through the workspace's own Playwright instead of `bun x playwright`, which resolved `playwright@latest` and downloaded a different Chromium revision than the pinned version launches. Every browser-backed test had been failing on `main` with "Executable doesn't exist" since 2026-08-10.
 - Changed-file collection now passes `--no-abbrev` to `git diff --raw`, so recorded blob shas are full object ids rather than Git's abbreviated form.
 - Diff evidence is narrowed to the authored post-image range instead of only selecting whole overlapping hunks, so a focused diff on a newly added file no longer renders the entire file.
 - The narrated walkthrough now includes the architecture chapter. The section list was gated on pre-rendered diagrams, which the viewer computes for itself but the recording pass never populated, so the video skipped the architecture narration and the website navigation had no link to the section that was rendered right below it.
