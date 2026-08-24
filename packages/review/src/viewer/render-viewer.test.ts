@@ -218,3 +218,36 @@ describe("escapeHtml", () => {
 function indexHtml(model: Parameters<typeof renderViewer>[0]): string {
   return renderViewer(model).find((file) => file.path === VIEWER_INDEX_FILE)!.contents;
 }
+
+describe("focused diff scope", () => {
+  test("says when a diff was narrowed to an authored range", () => {
+    const model = makeViewModel();
+    (model.evidenceByChapter.core![0] as { range?: unknown }).range = {
+      startLine: 10,
+      endLine: 20,
+    };
+
+    const html = renderViewer(model).find((file) => file.path === VIEWER_INDEX_FILE)!.contents;
+
+    expect(html).toContain("Narrowed to lines 10-20 of this file at head.");
+    expect(html).toContain("not called out here");
+  });
+
+  test("says when hunks were omitted", () => {
+    const model = makeViewModel();
+    (model.evidenceByChapter.core![0] as { totalHunks: number }).totalHunks = 4;
+
+    const html = renderViewer(model).find((file) => file.path === VIEWER_INDEX_FILE)!.contents;
+
+    expect(html).toContain("Showing 1 of 4 hunks in this file.");
+  });
+
+  test("says nothing when the whole diff for the file is on screen", () => {
+    const html = renderViewer(makeViewModel()).find(
+      (file) => file.path === VIEWER_INDEX_FILE,
+    )!.contents;
+
+    expect(html).not.toContain("Narrowed to lines");
+    expect(html).not.toContain("hunks in this file");
+  });
+});

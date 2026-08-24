@@ -1,5 +1,10 @@
 import type { ReviewEvidence } from "../authoring/review-types.js";
-import { collectFileDiff, selectHunksForRange, DEFAULT_DIFF_CONTEXT_LINES } from "../git/collect-hunks.js";
+import {
+  collectFileDiff,
+  narrowHunkToRange,
+  selectHunksForRange,
+  DEFAULT_DIFF_CONTEXT_LINES,
+} from "../git/collect-hunks.js";
 import type { ChangedFile, DiffHunk } from "../git/git-types.js";
 import { readBlob } from "../git/read-blob.js";
 import type { RunGit } from "../git/run-git.js";
@@ -18,6 +23,8 @@ export type ResolvedDiffEvidence = {
   hunks: DiffHunk[];
   /** Total hunk count before any authored range filter was applied. */
   totalHunks: number;
+  /** Post-image range the author narrowed this evidence to, when they did. */
+  range?: { startLine: number; endLine: number };
   provenance: {
     mergeBaseSha: string;
     headSha: string;
@@ -107,7 +114,14 @@ async function resolveDiffEvidence(
     previousPath: evidence.previousPath ?? changedFile.previousPath,
     contextLines: evidence.contextLines ?? DEFAULT_DIFF_CONTEXT_LINES,
   });
-  const hunks = selectHunksForRange(fileDiff.hunks, evidence.range);
+  const selected = selectHunksForRange(fileDiff.hunks, evidence.range);
+  // Selecting whole hunks is not enough: a newly added file is one hunk
+  // covering the entire file, so the authored range has to trim it as well.
+  const hunks = evidence.range === undefined
+    ? selected
+    : selected
+        .map((hunk) => narrowHunkToRange(hunk, evidence.range!))
+        .filter((hunk): hunk is DiffHunk => hunk !== undefined);
 
   if (hunks.length === 0) {
     throw new ReviewEvidenceError(
@@ -137,6 +151,7 @@ async function resolveDiffEvidence(
     isBinary: false,
     hunks,
     totalHunks: fileDiff.hunks.length,
+    ...(evidence.range === undefined ? {} : { range: evidence.range }),
     provenance,
     anchor: createEvidenceAnchor([
       "diff",

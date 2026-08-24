@@ -102,9 +102,11 @@ export { buildNarrationSegments, compileReviewTour } from "./video/compile-revie
 export type { CompiledReviewTour } from "./video/compile-review-tour.js";
 
 export {
+  CACHE_DIR_GITIGNORE,
   createDefinitionDigest,
-  ensureReviewsRootIgnored,
+  ensureSelfIgnored,
   generateReview,
+  REVIEWS_ROOT_GITIGNORE,
   REVIEWS_DIRECTORY_NAME,
   ReviewWorktreeError,
   toWalkthroughConfig,

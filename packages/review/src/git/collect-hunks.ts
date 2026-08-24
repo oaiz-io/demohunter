@@ -185,10 +185,12 @@ function parseDiffPath(rawPath: string): string | null {
   return unquoted.replace(/^[ab]\//, "");
 }
 
+export type DiffLineRange = { startLine: number; endLine: number };
+
 /** Returns only the hunks overlapping the requested post-image line range. */
 export function selectHunksForRange(
   hunks: readonly DiffHunk[],
-  range: { startLine: number; endLine: number } | undefined,
+  range: DiffLineRange | undefined,
 ): DiffHunk[] {
   if (range === undefined) {
     return [...hunks];
@@ -200,4 +202,49 @@ export function selectHunksForRange(
 
     return hunkEnd >= range.startLine && hunkStart <= range.endLine;
   });
+}
+
+/**
+ * Trims one hunk down to the requested post-image line range.
+ *
+ * Selecting whole hunks is not enough on its own: a newly added file has a
+ * single hunk covering the entire file, so an authored range would "focus" a
+ * seven-hundred-line diff on all seven hundred lines. Narrowing keeps a focused
+ * diff genuinely focused.
+ *
+ * Deletions have no post-image line of their own, so each one is anchored to the
+ * post-image position it sits immediately before. Returns undefined when nothing
+ * in the hunk falls inside the range.
+ */
+export function narrowHunkToRange(hunk: DiffHunk, range: DiffLineRange): DiffHunk | undefined {
+  let oldCursor = hunk.oldStart;
+  let newCursor = hunk.newStart;
+  const positioned = hunk.lines.map((line) => {
+    const position = { oldLine: oldCursor, newLine: newCursor };
+
+    if (line.kind !== "addition") oldCursor += 1;
+    if (line.kind !== "deletion") newCursor += 1;
+
+    return { line, position };
+  });
+  const kept = positioned.filter(
+    (entry) => entry.position.newLine >= range.startLine && entry.position.newLine <= range.endLine,
+  );
+
+  if (kept.length === 0) {
+    return undefined;
+  }
+
+  const first = kept[0]!.position;
+  const oldLines = kept.filter((entry) => entry.line.kind !== "addition").length;
+  const newLines = kept.filter((entry) => entry.line.kind !== "deletion").length;
+
+  return {
+    header: `@@ -${first.oldLine},${oldLines} +${first.newLine},${newLines} @@`,
+    oldStart: first.oldLine,
+    oldLines,
+    newStart: first.newLine,
+    newLines,
+    lines: kept.map((entry) => entry.line),
+  };
 }

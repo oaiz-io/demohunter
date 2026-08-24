@@ -14,6 +14,7 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 - Typed `defineReview()` authoring surface exported from `demohunter`, with `changeSet`, `componentDiagram`, `dataFlowDiagram`, `sequenceDiagram`, `diffEvidence`, `codeEvidence`, `verificationCommand`, `risk`, `compatibilityNote`, `securityNote`, `reviewerQuestion`, and `coverageGroup`.
 - 100% changed-file accounting: generation fails when a changed path is unaccounted for, and when an authored path is not in the reviewed range.
 - `demohunter-review` agent skill, installed alongside `demohunter` by `demohunter add-skill`.
+- `demohunter review generate` writes a self-covering `.gitignore` into both the review artifacts root and the narration cache directory, so generating a review never dirties the work tree it describes.
 
 ### Fixed
 

@@ -396,12 +396,44 @@ function renderDiffBody(evidence: ResolvedDiffEvidence): string {
       return hunkRow + lines;
     })
     .join("");
-  const omitted = evidence.totalHunks > evidence.hunks.length
-    ? '<div class="note">Showing ' + evidence.hunks.length + " of " + evidence.totalHunks
-      + " hunks in this file; the rest are accounted for but not called out here.</div>"
-    : "";
+  const scope = describeDiffScope(evidence);
+  const omitted = scope === ""
+    ? ""
+    : '<div class="note">' + escapeHtml(scope) + "</div>";
 
   return omitted + '<div class="diff"><table><tbody>' + rows + "</tbody></table></div>";
+}
+
+/**
+ * Says plainly what a focused diff is not showing.
+ *
+ * A reviewer has to be able to tell "this is the whole change to this file"
+ * from "this is the part the author chose to call out".
+ */
+function describeDiffScope(evidence: ResolvedDiffEvidence): string {
+  const parts: string[] = [];
+
+  if (evidence.range !== undefined) {
+    parts.push(
+      "Narrowed to lines " + evidence.range.startLine + "-" + evidence.range.endLine
+        + " of this file at head.",
+    );
+  }
+
+  if (evidence.totalHunks > evidence.hunks.length) {
+    parts.push(
+      "Showing " + evidence.hunks.length + " of " + evidence.totalHunks
+        + " hunks in this file.",
+    );
+  }
+
+  if (parts.length === 0) {
+    return "";
+  }
+
+  parts.push("The rest of the file is accounted for, but is not called out here.");
+
+  return parts.join(" ");
 }
 
 function renderCodeBody(evidence: Extract<ResolvedEvidence, { kind: "code" }>): string {

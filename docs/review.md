@@ -149,7 +149,7 @@ Verification commands are argv arrays, so no shell is involved. They run only wi
   review.lock.json    provenance, coverage, evidence anchors, artifact checksums
 ```
 
-The directory carries its own `.gitignore`, so a generated review never dirties the work tree it describes.
+The directory carries its own `.gitignore`, and so does the narration cache beside it, so a generated review never dirties the work tree it describes.
 
 ## Serving
 

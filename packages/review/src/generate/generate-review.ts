@@ -170,7 +170,11 @@ export async function generateReview(
   const reviewsRoot = path.join(input.config.outputDir, REVIEWS_DIRECTORY_NAME);
   const reviewDir = path.join(reviewsRoot, input.review.id);
   await mkdir(reviewDir, { recursive: true });
-  await ensureReviewsRootIgnored(reviewsRoot);
+  await ensureSelfIgnored(reviewsRoot, REVIEWS_ROOT_GITIGNORE);
+  // Recording resolves narration through the cache, which lives outside the
+  // reviews root. Left alone it would show up as an untracked directory and
+  // make the very tree this artifact calls clean look dirty.
+  await ensureSelfIgnored(input.config.cacheDir, CACHE_DIR_GITIGNORE);
 
   const baseModel: ReviewViewModel = {
     generatedAt: resolved.now().toISOString(),
@@ -276,24 +280,33 @@ async function resolveAllEvidence(input: {
 
 /**
  * A review artifact embeds verbatim source from the repository and is rebuilt
- * from the definition on demand, so it is never meant to be committed. The
- * ignore file covers itself as well, which keeps `git status` clean and lets
- * `--strict` verification pass right after generating.
+ * from the definition on demand, so it is never meant to be committed.
  */
-const REVIEWS_ROOT_GITIGNORE = `# Managed by DemoHunter Review. Review artifacts are generated, never committed.
+export const REVIEWS_ROOT_GITIGNORE = `# Managed by DemoHunter Review. Review artifacts are generated, never committed.
 *
 `;
 
-export async function ensureReviewsRootIgnored(reviewsRoot: string): Promise<void> {
-  const gitignorePath = path.join(reviewsRoot, ".gitignore");
+export const CACHE_DIR_GITIGNORE = `# Managed by DemoHunter. Narration cache entries are local and regenerable.
+*
+`;
 
-  // The recording pass writes its own permissive ignore file if none exists, so
-  // this has to land first to win.
+/**
+ * Writes a `.gitignore` that also covers itself, unless one already exists.
+ *
+ * Covering itself is the point: generation requires a clean work tree and
+ * `verify --strict` re-checks it, so a directory DemoHunter creates must not
+ * leave a stray untracked file behind. The recording pass writes its own, more
+ * permissive ignore file when none exists, so this has to land first to win.
+ */
+export async function ensureSelfIgnored(directory: string, contents: string): Promise<void> {
+  const gitignorePath = path.join(directory, ".gitignore");
+
   if (await pathExists(gitignorePath)) {
     return;
   }
 
-  await writeFile(gitignorePath, REVIEWS_ROOT_GITIGNORE, "utf8");
+  await mkdir(directory, { recursive: true });
+  await writeFile(gitignorePath, contents, "utf8");
 }
 
 async function pathExists(candidate: string): Promise<boolean> {

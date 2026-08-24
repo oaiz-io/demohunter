@@ -46,7 +46,7 @@ audio/              per-segment narration clips
 review.lock.json    provenance, coverage, evidence anchors, artifact checksums
 ```
 
-The directory carries its own `.gitignore`, so a generated review never dirties the work tree.
+The directory carries its own `.gitignore`, and so does the narration cache beside it, so a generated review never dirties the work tree.
 
 ## review serve
 

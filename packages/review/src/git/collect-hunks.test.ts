@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { collectFileDiff, parseUnifiedDiff, selectHunksForRange } from "./collect-hunks.js";
+import {
+  collectFileDiff,
+  narrowHunkToRange,
+  parseUnifiedDiff,
+  selectHunksForRange,
+} from "./collect-hunks.js";
 import type { RunGit } from "./run-git.js";
 
 const SINGLE_FILE_DIFF = `diff --git a/src/app.ts b/src/app.ts
@@ -143,5 +148,61 @@ describe("collectFileDiff", () => {
 
     expect(captured).toContain("--unified=7");
     expect(captured.slice(-3)).toEqual(["--", "src/old.ts", "src/app.ts"]);
+  });
+});
+
+describe("narrowHunkToRange", () => {
+  const [hunk] = parseUnifiedDiff(SINGLE_FILE_DIFF, "src/app.ts").hunks;
+
+  test("keeps only the lines inside the post-image range and rewrites the header", () => {
+    const narrowed = narrowHunkToRange(hunk!, { startLine: 11, endLine: 12 });
+
+    expect(narrowed?.lines.map((line) => [line.kind, line.text])).toEqual([
+      ["deletion", "  listen(port);"],
+      ["addition", '  listen(port, "127.0.0.1");'],
+      ["addition", "  logBoundAddress();"],
+    ]);
+    expect(narrowed?.newStart).toBe(11);
+    expect(narrowed?.oldStart).toBe(11);
+    expect(narrowed?.header).toBe("@@ -11,1 +11,2 @@");
+  });
+
+  test("anchors a deletion to the post-image line it sits before", () => {
+    // Line 11 is where the deleted line used to be; asking only for line 12
+    // drops it rather than pulling unrelated context along.
+    const narrowed = narrowHunkToRange(hunk!, { startLine: 12, endLine: 12 });
+
+    expect(narrowed?.lines.map((line) => line.kind)).toEqual(["addition"]);
+    expect(narrowed?.header).toBe("@@ -12,0 +12,1 @@");
+  });
+
+  test("returns the whole hunk when the range covers it", () => {
+    const narrowed = narrowHunkToRange(hunk!, { startLine: 1, endLine: 1000 });
+
+    expect(narrowed?.lines).toEqual(hunk!.lines);
+    expect(narrowed?.oldStart).toBe(hunk!.oldStart);
+    expect(narrowed?.newStart).toBe(hunk!.newStart);
+  });
+
+  test("returns undefined when nothing falls inside the range", () => {
+    expect(narrowHunkToRange(hunk!, { startLine: 500, endLine: 600 })).toBeUndefined();
+  });
+
+  test("narrows a single added-file hunk instead of showing the whole file", () => {
+    const addedFileDiff = `--- /dev/null
++++ b/src/new.ts
+@@ -0,0 +1,5 @@
++const one = 1;
++const two = 2;
++const three = 3;
++const four = 4;
++const five = 5;
+`;
+    const [addedHunk] = parseUnifiedDiff(addedFileDiff, "src/new.ts").hunks;
+    const narrowed = narrowHunkToRange(addedHunk!, { startLine: 2, endLine: 3 });
+
+    expect(narrowed?.lines.map((line) => line.text)).toEqual(["const two = 2;", "const three = 3;"]);
+    // A pure addition has no pre-image lines, which Git writes as -0,0.
+    expect(narrowed?.header).toBe("@@ -0,0 +2,2 @@");
   });
 });

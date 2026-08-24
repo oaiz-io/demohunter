@@ -119,6 +119,19 @@ describe("generateReview", () => {
     expect(status.trim()).toBe("");
   });
 
+  test("ignores the narration cache, which lives outside the reviews root", async () => {
+    const repo = await makeReviewRepo();
+    const input = baseInput(repo);
+    await generateReview(input, fakeDependencies());
+
+    expect(await readFile(path.join(input.config.cacheDir, ".gitignore"), "utf8")).toContain("*");
+
+    // Recording resolves narration through the cache; entries must stay hidden.
+    await writeFile(path.join(input.config.cacheDir, "entry.json"), "{}", "utf8");
+
+    expect((await repo.runGit(["status", "--porcelain"])).trim()).toBe("");
+  });
+
   test("refuses to generate from a dirty work tree", async () => {
     const repo = await makeReviewRepo();
     await writeFile(path.join(repo.root, "src/app.ts"), "uncommitted\n", "utf8");
