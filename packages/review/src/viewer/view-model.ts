@@ -3,7 +3,6 @@ import type { ReviewCoverage } from "../coverage/compute-coverage.js";
 import type { ResolvedEvidence } from "../evidence/resolve-evidence.js";
 import type { ChangedFile, GitComparison, WorktreeStatus } from "../git/git-types.js";
 import type { VerificationReport } from "../verification/run-verification.js";
-import type { RenderedDiagram } from "./diagrams.js";
 
 export type ReviewVideoView = {
   video: string;
@@ -28,7 +27,6 @@ export type ReviewViewModel = {
   files: ChangedFile[];
   coverage: ReviewCoverage;
   evidenceByChapter: Record<string, ResolvedEvidence[]>;
-  diagrams: RenderedDiagram[];
   verification: VerificationReport;
   /** Null during the recording pass, populated once the video exists. */
   video: ReviewVideoView | null;
@@ -57,7 +55,10 @@ export function listReviewSections(model: ReviewViewModel): ReviewSection[] {
     { id: "overview", title: "Problem and scope", kind: "overview" },
   ];
 
-  if (model.diagrams.length > 0) {
+  // Derived from the authored review rather than from rendered SVGs: a
+  // pre-rendered list would be a second source of truth, and the walkthrough
+  // silently lost its architecture chapter the last time it was one.
+  if ((model.review.architecture ?? []).length > 0) {
     sections.push({ id: "architecture", title: "Architecture", kind: "architecture" });
   }
 

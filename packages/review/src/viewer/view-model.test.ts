@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import { makeReviewDefinition, makeViewModel } from "../test-support/view-model-fixture.ts";
-import { renderDiagram } from "./diagrams.js";
 import { listReviewSections, orderedChapters } from "./view-model.js";
 
 describe("listReviewSections", () => {
@@ -15,7 +14,6 @@ describe("listReviewSections", () => {
         security: [],
         reviewerQuestions: [],
       }),
-      diagrams: [],
       verification: { status: "not-run", ran: false, results: [] },
     });
 
@@ -26,15 +24,16 @@ describe("listReviewSections", () => {
     ]);
   });
 
-  test("adds architecture only when a diagram was rendered", () => {
-    const review = makeReviewDefinition();
-    const withDiagrams = makeViewModel({
-      review,
-      diagrams: (review.architecture ?? []).map(renderDiagram),
+  test("adds architecture whenever the review authored a diagram", () => {
+    // The walkthrough reads its chapters from this list, so gating the section
+    // on anything other than the authored review is how the video loses it.
+    expect(listReviewSections(makeViewModel()).map((section) => section.id)).toContain("architecture");
+
+    const withoutDiagrams = makeViewModel({
+      review: makeReviewDefinition({ architecture: [] }),
     });
 
-    expect(listReviewSections(withDiagrams).map((section) => section.id)).toContain("architecture");
-    expect(listReviewSections(makeViewModel({ diagrams: [] })).map((section) => section.id)).not.toContain(
+    expect(listReviewSections(withoutDiagrams).map((section) => section.id)).not.toContain(
       "architecture",
     );
   });

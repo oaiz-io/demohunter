@@ -36,6 +36,10 @@ Pass an existing branch, tag, or sha. Remote-only branches need `origin/<name>` 
 
 The website shows a banner and `review.lock.json` records every candidate. The lowest sorted candidate is used so the range never depends on Git's traversal order. Merge the base into the branch (or rebase) if the ambiguity matters.
 
+## `The narrated walkthrough needs speech this machine has not cached yet`
+
+Narration is content-addressed: a line resolves offline only if that exact text was synthesized before. Editing a `narration` string, changing the reviewed range, or adding a chapter produces lines the cache has never seen. Export the key that matches `tts.provider` in `demohunter.config.ts` (`ELEVENLABS_API_KEY` or `OPENAI_API_KEY`) and rerun, or pass `--no-video` to build the review website alone. A walkthrough-less artifact still verifies — `review verify` reports the missing video as a warning, not a failure.
+
 ## `ffprobe found no audio stream`
 
 Narration did not resolve. Either the narration cache is missing entries and no provider key is exported, or the provider call failed. Check `OPENAI_API_KEY` / `ELEVENLABS_API_KEY`, or run `demohunter cache list` to confirm the cache is populated. Regeneration is fully offline when every narration line is already cached.

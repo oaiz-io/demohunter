@@ -32,7 +32,6 @@ export function makeViewModel(overrides: Partial<ReviewViewModel> = {}): ReviewV
     files,
     coverage: computeCoverage({ review, changedFiles: files }),
     evidenceByChapter: { core: [makeDiffEvidence()] },
-    diagrams: [],
     verification: {
       status: "passed",
       ran: true,

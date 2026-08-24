@@ -128,21 +128,27 @@ export async function reviewGenerateCommand(
   const reviewModule = await resolved.importModule(resolvedReviewPath);
   const review = readReviewDefaultExport(reviewModule.default, resolvedReviewPath);
 
-  const result = await resolved.generateReview({
-    review,
-    sourcePath: toPosix(path.relative(loadedConfig.projectRoot, resolvedReviewPath)),
-    cwd,
-    baseRef: options.baseRef,
-    ...(options.headRef === undefined ? {} : { headRef: options.headRef }),
-    config: loadedConfig.config,
-    generatorVersion: readPackageVersion(),
-    runVerificationCommands: options.runVerification === true,
-    allowDirtyWorktree: options.allowDirty === true,
-    skipVideo: options.skipVideo === true,
-    onProgress: (event: GenerateReviewProgressEvent) => {
-      resolved.log(`[${event.phase}] ${event.message}`);
-    },
-  });
+  let result: Awaited<ReturnType<typeof generateReview>>;
+
+  try {
+    result = await resolved.generateReview({
+      review,
+      sourcePath: toPosix(path.relative(loadedConfig.projectRoot, resolvedReviewPath)),
+      cwd,
+      baseRef: options.baseRef,
+      ...(options.headRef === undefined ? {} : { headRef: options.headRef }),
+      config: loadedConfig.config,
+      generatorVersion: readPackageVersion(),
+      runVerificationCommands: options.runVerification === true,
+      allowDirtyWorktree: options.allowDirty === true,
+      skipVideo: options.skipVideo === true,
+      onProgress: (event: GenerateReviewProgressEvent) => {
+        resolved.log(`[${event.phase}] ${event.message}`);
+      },
+    });
+  } catch (error) {
+    throw improveReviewGenerateError(error);
+  }
 
   resolved.log("");
   resolved.log(`Review artifact: ${result.reviewDir}`);
@@ -158,6 +164,40 @@ export async function reviewGenerateCommand(
   );
   resolved.log("");
   resolved.log(`Serve it with: demohunter review serve ${path.relative(cwd, result.reviewDir)} --open`);
+}
+
+/**
+ * Rewrites the two recording failures a reviewer is most likely to hit.
+ *
+ * Both are environmental rather than authoring mistakes, and both have the same
+ * answer: the review website does not need a recorder, so --no-video still
+ * produces a complete, verifiable artifact.
+ */
+export function improveReviewGenerateError(error: unknown): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  const provider = message.includes("ELEVENLABS_API_KEY")
+    ? "ELEVENLABS_API_KEY"
+    : (message.includes("OPENAI_API_KEY") ? "OPENAI_API_KEY" : undefined);
+
+  if (provider !== undefined) {
+    return new Error(
+      `The narrated walkthrough needs speech this machine has not cached yet, but ${provider} is not set.\n`
+        + `  Export ${provider} and rerun, or pass --no-video to build the review website without the walkthrough.\n`
+        + `  Original error: ${message}`,
+      { cause: error },
+    );
+  }
+
+  if (/(?:ffmpeg|ffprobe) ENOENT/.test(message)) {
+    return new Error(
+      "The narrated walkthrough needs ffmpeg and ffprobe on your PATH.\n"
+        + "  Install ffmpeg, or pass --no-video to build the review website without the walkthrough.\n"
+        + `  Original error: ${message}`,
+      { cause: error },
+    );
+  }
+
+  return error;
 }
 
 /** Serves one generated review directory on loopback only. */

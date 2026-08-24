@@ -1,12 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { makeReviewDefinition, makeViewModel } from "../test-support/view-model-fixture.ts";
-import { renderDiagram } from "../viewer/diagrams.js";
-import { buildNarrationSegments, compileReviewTour } from "./compile-review-tour.js";
+import { buildNarrationSegments, compileReviewTour, pluralize } from "./compile-review-tour.js";
 
 function fullModel() {
-  const review = makeReviewDefinition();
-  return makeViewModel({ review, diagrams: (review.architecture ?? []).map(renderDiagram) });
+  return makeViewModel({ review: makeReviewDefinition() });
 }
 
 describe("buildNarrationSegments", () => {
@@ -60,6 +58,25 @@ describe("buildNarrationSegments", () => {
     expect(verification?.narration[0]).toContain("2 verification commands ran");
     expect(verification?.narration[0]).toContain("1 passed and 1 failed");
     expect(verification?.narration[1]).toContain("Unit tests: failed, exit code 1");
+  });
+
+  test("keeps the spoken script free of wall-clock timings", () => {
+    // Narration is content-addressed in the TTS cache. Speaking a measured
+    // duration would change the text on every regeneration and force a paid
+    // re-synthesis of lines whose review content never moved.
+    const model = fullModel();
+    const slower = fullModel();
+    slower.verification = {
+      ...slower.verification,
+      results: slower.verification.results.map((result) => ({
+        ...result,
+        durationMs: result.durationMs + 9_000,
+      })),
+    };
+
+    expect(compileReviewTour(slower).narrationScript).toEqual(
+      compileReviewTour(model).narrationScript,
+    );
   });
 
   test("says plainly when verification never ran", () => {
@@ -191,3 +208,59 @@ function makeRunContext(sink: { chapters: string[]; narrated: string[] }) {
     },
   };
 }
+
+describe("pluralize", () => {
+  test("uses -ies after a consonant, because narration is spoken aloud", () => {
+    expect(pluralize("security boundary")).toBe("security boundaries");
+    expect(pluralize("query")).toBe("queries");
+  });
+
+  test("keeps -ys after a vowel", () => {
+    expect(pluralize("day")).toBe("days");
+    expect(pluralize("key")).toBe("keys");
+  });
+
+  test("uses -es after a sibilant", () => {
+    expect(pluralize("class")).toBe("classes");
+    expect(pluralize("patch")).toBe("patches");
+    expect(pluralize("index")).toBe("indexes");
+  });
+
+  test("falls back to a plain -s", () => {
+    for (const [noun, plural] of [
+      ["file", "files"],
+      ["diagram", "diagrams"],
+      ["step", "steps"],
+      ["risk", "risks"],
+      ["area", "areas"],
+      ["open question", "open questions"],
+      ["verification command", "verification commands"],
+      ["focused diff", "focused diffs"],
+      ["coverage group", "coverage groups"],
+    ] as const) {
+      expect(pluralize(noun)).toBe(plural);
+    }
+  });
+});
+
+describe("narration pluralization", () => {
+  test("speaks each counted noun correctly", () => {
+    const lines = buildNarrationSegments(fullModel()).flatMap((segment) => segment.narration);
+    const spoken = lines.join(" ");
+
+    expect(spoken).toContain("1 security boundary is touched");
+    expect(spoken).not.toContain("boundarys");
+
+    const many = fullModel();
+    many.review.security = [
+      { id: "s1", title: "One", detail: "First." },
+      { id: "s2", title: "Two", detail: "Second." },
+    ];
+
+    expect(
+      buildNarrationSegments(many)
+        .flatMap((segment) => segment.narration)
+        .join(" "),
+    ).toContain("2 security boundaries are touched");
+  });
+});

@@ -98,7 +98,7 @@ export {
 } from "./server/serve-review.js";
 export type { ReviewServer, ServeReviewOptions } from "./server/serve-review.js";
 
-export { buildNarrationSegments, compileReviewTour } from "./video/compile-review-tour.js";
+export { buildNarrationSegments, compileReviewTour, pluralize } from "./video/compile-review-tour.js";
 export type { CompiledReviewTour } from "./video/compile-review-tour.js";
 
 export {

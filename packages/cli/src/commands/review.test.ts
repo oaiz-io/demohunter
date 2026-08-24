@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {
   DEFAULT_REVIEW_DIRECTORY,
+  improveReviewGenerateError,
   readReviewDefaultExport,
   resolveReviewDir,
   reviewGenerateCommand,
@@ -172,6 +173,29 @@ describe("reviewGenerateCommand", () => {
     );
 
     expect(logs.join("\n")).toContain("not recorded (--no-video)");
+  });
+
+  test("explains a missing narration credential and points at --no-video", async () => {
+    const cwd = await makeTempRoot();
+
+    await expect(
+      reviewGenerateCommand(
+        cwd,
+        "reviews/pr.review.ts",
+        { baseRef: "main" },
+        {
+          log: () => undefined,
+          loadConfig: async () => ({ projectRoot: cwd, configPath: "", config: {} as never }),
+          importModule: async () => ({ default: { id: "pr-22-review", chapters: [] } }),
+          generateReview: (async () => {
+            throw new Error(
+              'Unable to resolve narration segment "Welcome." because ELEVENLABS_API_KEY is required'
+                + " to synthesize narration with ElevenLabs.",
+            );
+          }) as never,
+        },
+      ),
+    ).rejects.toThrow("--no-video");
   });
 
   test("rejects a review file that does not default export a definition", async () => {
@@ -384,3 +408,28 @@ function generateResult(cwd: string) {
     },
   } as never;
 }
+
+describe("improveReviewGenerateError", () => {
+  test("names the credential that is missing and the flag that avoids needing it", () => {
+    const improved = improveReviewGenerateError(
+      new Error("... because OPENAI_API_KEY is required to synthesize narration with OpenAI."),
+    );
+
+    expect((improved as Error).message).toContain("OPENAI_API_KEY is not set");
+    expect((improved as Error).message).toContain("--no-video");
+    expect((improved as Error).cause).toBeInstanceOf(Error);
+  });
+
+  test("explains a missing ffmpeg the same way", () => {
+    const improved = improveReviewGenerateError(new Error("spawn ffprobe ENOENT"));
+
+    expect((improved as Error).message).toContain("ffmpeg and ffprobe");
+    expect((improved as Error).message).toContain("--no-video");
+  });
+
+  test("leaves an authoring failure exactly as it was", () => {
+    const original = new Error("Review coverage is incomplete (79/81 changed files accounted for).");
+
+    expect(improveReviewGenerateError(original)).toBe(original);
+  });
+});

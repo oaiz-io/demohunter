@@ -105,6 +105,22 @@ describe("generateReview", () => {
     expect(result.lock.video?.chapterCount).toBeGreaterThan(0);
   });
 
+  test("walks the authored architecture in the recorded walkthrough", async () => {
+    // The website renders its own SVGs, so a section list derived from
+    // pre-rendered diagrams looked fine on the page while the walkthrough
+    // silently dropped the architecture chapter and its narration.
+    const repo = await makeReviewRepo();
+    const result = await generateReview(baseInput(repo), fakeDependencies());
+    const chapters = JSON.parse(
+      await readFile(path.join(result.reviewDir, "chapters.json"), "utf8"),
+    ) as Array<{ title: string }>;
+    const captions = await readFile(path.join(result.reviewDir, "captions.vtt"), "utf8");
+
+    expect(chapters.map((chapter) => chapter.title)).toContain("Architecture");
+    expect(captions).toContain("The target architecture is shown in");
+    expect(await readFile(result.indexPath, "utf8")).toContain('href="#architecture"');
+  });
+
   test("marks the artifact directory as ignored so it never dirties the tree", async () => {
     const repo = await makeReviewRepo();
     await generateReview(baseInput(repo), fakeDependencies());

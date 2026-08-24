@@ -184,7 +184,6 @@ export async function generateReview(
     files: changedFiles,
     coverage,
     evidenceByChapter,
-    diagrams: [],
     verification,
     video: null,
   };
