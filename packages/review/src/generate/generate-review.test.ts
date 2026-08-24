@@ -294,6 +294,23 @@ describe("generateReview", () => {
     expect(await readFile(result.indexPath, "utf8")).not.toContain('id="walkthrough"');
   });
 
+  test("removes a stale walkthrough rather than leaving it beside a lock that disowns it", async () => {
+    const repo = await makeReviewRepo();
+    const recorded = await generateReview(baseInput(repo), fakeDependencies());
+
+    expect(await pathExists(path.join(recorded.reviewDir, "video.mp4"))).toBe(true);
+
+    const rebuilt = await generateReview(
+      { ...baseInput(repo), skipVideo: true },
+      fakeDependencies(),
+    );
+
+    expect(rebuilt.lock.video).toBeNull();
+    for (const stale of ["video.mp4", "poster.jpg", "captions.srt", "captions.vtt", "chapters.json", "manifest.json", "audio"]) {
+      expect(await pathExists(path.join(rebuilt.reviewDir, stale))).toBe(false);
+    }
+  });
+
   test("removes a stale diagram rather than leaving it beside the lock", async () => {
     const repo = await makeReviewRepo();
     const first = await generateReview(baseInput(repo), fakeDependencies());
@@ -493,4 +510,13 @@ function makeConfig(projectRoot: string): ResolvedDemoHunterConfig {
     output: { formats: [] },
     tts: { provider: "openai", voice: "marin", model: "gpt-4o-mini-tts", format: "mp3", instructions: "Speak clearly." },
   } as ResolvedDemoHunterConfig;
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await stat(target);
+    return true;
+  } catch {
+    return false;
+  }
 }

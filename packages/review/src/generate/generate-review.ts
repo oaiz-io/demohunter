@@ -30,6 +30,17 @@ import { compileReviewTour } from "../video/compile-review-tour.js";
 
 export const REVIEWS_DIRECTORY_NAME = "reviews";
 
+/** Everything a recorded walkthrough leaves in the review directory. */
+const WALKTHROUGH_ARTIFACT_FILES = [
+  "video.mp4",
+  "poster.jpg",
+  "captions.srt",
+  "captions.vtt",
+  "chapters.json",
+  "manifest.json",
+] as const;
+const WALKTHROUGH_ARTIFACT_DIRECTORIES = ["audio"] as const;
+
 export type GenerateReviewProgressEvent = {
   phase:
     | "resolving-git"
@@ -194,6 +205,13 @@ export async function generateReview(
   let videoModel = baseModel;
   let videoResult: Awaited<ReturnType<typeof generateTour>> | undefined;
 
+  if (input.skipVideo === true) {
+    // A lock that records no walkthrough must not sit beside a playable one
+    // from an earlier run: the reviewer would watch a video this artifact does
+    // not vouch for, narrated from a range that may no longer exist.
+    await removeStaleWalkthrough(reviewDir);
+  }
+
   if (input.skipVideo !== true) {
     let server: ReviewServer | undefined;
 
@@ -317,6 +335,12 @@ async function pathExists(candidate: string): Promise<boolean> {
   }
 }
 
+async function removeStaleWalkthrough(reviewDir: string): Promise<void> {
+  for (const relativePath of [...WALKTHROUGH_ARTIFACT_FILES, ...WALKTHROUGH_ARTIFACT_DIRECTORIES]) {
+    await rm(path.join(reviewDir, relativePath), { recursive: true, force: true });
+  }
+}
+
 async function writeViewerFiles(reviewDir: string, model: ReviewViewModel): Promise<void> {
   const files = renderViewer(model);
 
@@ -419,9 +443,7 @@ async function buildReviewLock(input: {
     "assets/viewer.js",
     "data/review.json",
     ...(model.review.architecture ?? []).map((diagram) => `diagrams/${diagram.id}.svg`),
-    ...(input.hasVideo
-      ? ["video.mp4", "poster.jpg", "captions.srt", "captions.vtt", "chapters.json", "manifest.json"]
-      : []),
+    ...(input.hasVideo ? WALKTHROUGH_ARTIFACT_FILES : []),
   ];
 
   const artifacts = [];
