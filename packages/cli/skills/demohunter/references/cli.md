@@ -18,6 +18,7 @@ The current CLI surface is:
 - `demohunter cache prune`
 - `demohunter cache clear`
 - `demohunter add-skill [--target claude|codex|both]`
+- `demohunter review init|generate|serve|verify` — pull-request review artifacts, covered by the separate `demohunter-review` skill
 
 Do not reference unimplemented commands or hosted workflows.
 

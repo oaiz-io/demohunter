@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "demohunter-workspace",
@@ -40,7 +41,7 @@
     },
     "packages/cli": {
       "name": "demohunter",
-      "version": "0.1.3",
+      "version": "0.1.5",
       "bin": {
         "demohunter": "./dist/bin/demohunter.js",
       },
@@ -50,6 +51,7 @@
       },
       "devDependencies": {
         "@demohunter/generator-playwright": "workspace:*",
+        "@demohunter/review": "workspace:*",
         "@demohunter/sdk": "workspace:*",
         "@demohunter/tts-core": "workspace:*",
         "playwright": ">=1.61",
@@ -83,6 +85,22 @@
     "packages/media-ffmpeg": {
       "name": "@demohunter/media-ffmpeg",
       "version": "0.0.0",
+    },
+    "packages/review": {
+      "name": "@demohunter/review",
+      "version": "0.0.0",
+      "dependencies": {
+        "@demohunter/generator-playwright": "workspace:*",
+        "@demohunter/manifest": "workspace:*",
+        "@demohunter/sdk": "workspace:*",
+        "zod": "^4.1.11",
+      },
+      "devDependencies": {
+        "playwright": ">=1.61",
+      },
+      "peerDependencies": {
+        "playwright": ">=1.61",
+      },
     },
     "packages/sdk": {
       "name": "@demohunter/sdk",
@@ -119,6 +137,8 @@
     "@demohunter/manifest": ["@demohunter/manifest@workspace:packages/manifest"],
 
     "@demohunter/media-ffmpeg": ["@demohunter/media-ffmpeg@workspace:packages/media-ffmpeg"],
+
+    "@demohunter/review": ["@demohunter/review@workspace:packages/review"],
 
     "@demohunter/sdk": ["@demohunter/sdk@workspace:packages/sdk"],
 

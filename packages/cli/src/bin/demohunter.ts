@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,7 +9,20 @@ import { doctorCommand } from "../commands/doctor.js";
 import { generateCommand } from "../commands/generate.js";
 import type { GenerateCommandOptions } from "../commands/generate.js";
 import { initCommand } from "../commands/init.js";
+import {
+  reviewGenerateCommand,
+  reviewInitCommand,
+  reviewServeCommand,
+  reviewVerifyCommand,
+} from "../commands/review.js";
+import type {
+  ReviewGenerateOptions,
+  ReviewInitOptions,
+  ReviewServeOptions,
+  ReviewVerifyOptions,
+} from "../commands/review.js";
 import { addSkillCommand, parseSkillTargets } from "../commands/skill.js";
+import { readPackageVersion } from "../utils/read-package-version.js";
 
 type AddSkillInput = {
   targets: readonly ("claude" | "codex")[];
@@ -24,6 +37,14 @@ type CliDependencies = {
   initCommand: (cwd: string, options?: { force?: boolean }) => Promise<void>;
   generateCommand: (cwd: string, tourPath: string, options?: GenerateCommandOptions) => Promise<void>;
   addSkillCommand: (cwd: string, input: AddSkillInput) => Promise<void>;
+  reviewInitCommand: (cwd: string, options: ReviewInitOptions) => Promise<void>;
+  reviewGenerateCommand: (
+    cwd: string,
+    reviewPath: string,
+    options: ReviewGenerateOptions,
+  ) => Promise<void>;
+  reviewServeCommand: (cwd: string, reviewDir: string, options: ReviewServeOptions) => Promise<void>;
+  reviewVerifyCommand: (cwd: string, reviewDir: string, options: ReviewVerifyOptions) => Promise<unknown>;
 };
 
 const defaultDependencies: CliDependencies = {
@@ -32,6 +53,10 @@ const defaultDependencies: CliDependencies = {
   initCommand,
   generateCommand,
   addSkillCommand,
+  reviewInitCommand,
+  reviewGenerateCommand,
+  reviewServeCommand,
+  reviewVerifyCommand,
 };
 
 const HELP_TEXT = `demohunter - generate narrated demo videos from Playwright tours
@@ -46,7 +71,11 @@ Commands:
   cache list               Show cached narration entries
   cache prune              Remove stale or corrupt cache entries
   cache clear              Delete every cached narration entry
-  add-skill [--target ...] Install the DemoHunter agent skill into .claude or .codex
+  add-skill [--target ...] Install the DemoHunter agent skills into .claude or .codex
+  review init              Scaffold a *.review.ts from the real merge-base..HEAD diff
+  review generate <file>   Build the local review website and narrated walkthrough
+  review serve <dir|id>    Serve one generated review on 127.0.0.1 only
+  review verify <dir|id>   Re-derive the artifact from Git and report drift
 
 generate flags:
   --dry-run                Validate the browser flow without narration or video
@@ -60,6 +89,19 @@ generate flags:
 add-skill flags:
   --target <name>          Repeatable. One of: claude, codex, both.
                            When omitted, installs to both.
+
+review flags:
+  --base <ref>             Base branch for merge-base(base, HEAD) (default: main)
+  --head <ref>             Head to review (default: HEAD)
+  --id <slug>              Review id for "review init"
+  --out <path>             Output path for "review init"
+  --force                  Overwrite an existing scaffold
+  --run-verification       Execute the declared verification commands
+  --allow-dirty            Generate a draft artifact from a dirty work tree
+  --no-video               Build the website without recording the walkthrough
+  --port <number>          Loopback port for "review serve" (default: ephemeral)
+  --open                   Open the served review in the default browser
+  --strict                 Also require passing verification and a clean tree
 
 Global flags:
   -h, --help               Print this help text
@@ -80,7 +122,7 @@ export async function runCli(
   }
 
   if (command === "-v" || command === "--version") {
-    console.log(readVersion());
+    console.log(readPackageVersion());
     return;
   }
 
@@ -116,11 +158,203 @@ export async function runCli(
       await dependencies.addSkillCommand(cwd, { targets });
       return;
     }
+    case "review": {
+      await runReviewCommand(rest, cwd, dependencies);
+      return;
+    }
     default:
       throw new Error(
         `Unknown command: ${command}. Run "demohunter --help" to see available commands.`,
       );
   }
+}
+
+export const REVIEW_ACTIONS = ["init", "generate", "serve", "verify"] as const;
+export type ReviewAction = (typeof REVIEW_ACTIONS)[number];
+
+const REVIEW_USAGE =
+  "Usage: demohunter review <init|generate|serve|verify> [target] [flags]";
+
+async function runReviewCommand(
+  args: readonly string[],
+  cwd: string,
+  dependencies: CliDependencies,
+): Promise<void> {
+  const [action, ...rest] = args;
+
+  if (!isReviewAction(action)) {
+    throw new Error(REVIEW_USAGE);
+  }
+
+  const parsed = parseReviewArgs(action, rest);
+
+  switch (action) {
+    case "init":
+      await dependencies.reviewInitCommand(cwd, parsed.init!);
+      return;
+    case "generate":
+      await dependencies.reviewGenerateCommand(cwd, parsed.target!, parsed.generate!);
+      return;
+    case "serve":
+      await dependencies.reviewServeCommand(cwd, parsed.target!, parsed.serve!);
+      return;
+    case "verify":
+      await dependencies.reviewVerifyCommand(cwd, parsed.target!, parsed.verify!);
+      return;
+  }
+}
+
+export type ParsedReviewArgs = {
+  action: ReviewAction;
+  target?: string;
+  init?: ReviewInitOptions;
+  generate?: ReviewGenerateOptions;
+  serve?: ReviewServeOptions;
+  verify?: ReviewVerifyOptions;
+};
+
+const REVIEW_VALUE_FLAGS: Record<ReviewAction, readonly string[]> = {
+  init: ["--base", "--head", "--id", "--out"],
+  generate: ["--base", "--head"],
+  serve: ["--port"],
+  verify: [],
+};
+
+const REVIEW_BOOLEAN_FLAGS: Record<ReviewAction, readonly string[]> = {
+  init: ["--force"],
+  generate: ["--run-verification", "--allow-dirty", "--no-video"],
+  serve: ["--open"],
+  verify: ["--strict"],
+};
+
+export const DEFAULT_REVIEW_BASE_REF = "main";
+
+/**
+ * Parses one `demohunter review <action>` invocation.
+ *
+ * Unknown flags are rejected rather than ignored: a review artifact records
+ * exact shas, so a silently dropped `--base` would produce a confident artifact
+ * for the wrong range.
+ */
+export function parseReviewArgs(action: ReviewAction, args: readonly string[]): ParsedReviewArgs {
+  const values = new Map<string, string>();
+  const booleans = new Set<string>();
+  const positionals: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+
+    if (!arg.startsWith("--")) {
+      positionals.push(arg);
+      continue;
+    }
+
+    const equalsIndex = arg.indexOf("=");
+    const name = equalsIndex === -1 ? arg : arg.slice(0, equalsIndex);
+    const inlineValue = equalsIndex === -1 ? undefined : arg.slice(equalsIndex + 1);
+
+    if (REVIEW_BOOLEAN_FLAGS[action].includes(name)) {
+      if (inlineValue !== undefined) {
+        throw new Error(`${name} does not take a value.`);
+      }
+      booleans.add(name);
+      continue;
+    }
+
+    if (!REVIEW_VALUE_FLAGS[action].includes(name)) {
+      throw new Error(`Unknown "review ${action}" flag: ${name}. ${REVIEW_USAGE}`);
+    }
+
+    const value = inlineValue ?? args[index + 1];
+
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`${name} requires a value.`);
+    }
+
+    if (values.has(name)) {
+      throw new Error(`${name} may only be provided once.`);
+    }
+
+    values.set(name, value);
+    if (inlineValue === undefined) index += 1;
+  }
+
+  if (positionals.length > 1) {
+    throw new Error(REVIEW_USAGE);
+  }
+
+  const target = positionals[0];
+  const baseRef = values.get("--base") ?? DEFAULT_REVIEW_BASE_REF;
+  const headRef = values.get("--head");
+
+  if (action === "init") {
+    if (target !== undefined && values.has("--out")) {
+      throw new Error("Pass the scaffold path either positionally or with --out, not both.");
+    }
+
+    const outputPath = target ?? values.get("--out");
+
+    return {
+      action,
+      ...(target === undefined ? {} : { target }),
+      init: {
+        baseRef,
+        ...(headRef === undefined ? {} : { headRef }),
+        ...(values.has("--id") ? { id: values.get("--id")! } : {}),
+        ...(outputPath === undefined ? {} : { outputPath }),
+        force: booleans.has("--force"),
+      },
+    };
+  }
+
+  if (action === "generate") {
+    if (target === undefined) {
+      throw new Error("Usage: demohunter review generate <review-file> [--base main]");
+    }
+
+    return {
+      action,
+      target,
+      generate: {
+        baseRef,
+        ...(headRef === undefined ? {} : { headRef }),
+        runVerification: booleans.has("--run-verification"),
+        allowDirty: booleans.has("--allow-dirty"),
+        skipVideo: booleans.has("--no-video"),
+      },
+    };
+  }
+
+  if (target === undefined) {
+    throw new Error(`Usage: demohunter review ${action} <review-dir-or-id>`);
+  }
+
+  if (action === "serve") {
+    return {
+      action,
+      target,
+      serve: {
+        ...(values.has("--port") ? { port: parseReviewPort(values.get("--port")!) } : {}),
+        open: booleans.has("--open"),
+      },
+    };
+  }
+
+  return { action, target, verify: { strict: booleans.has("--strict") } };
+}
+
+function parseReviewPort(value: string): number {
+  const port = Number(value);
+
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+    throw new Error("--port requires an integer from 0 to 65535");
+  }
+
+  return port;
+}
+
+function isReviewAction(value: string | undefined): value is ReviewAction {
+  return value !== undefined && (REVIEW_ACTIONS as readonly string[]).includes(value);
 }
 
 export function parseGenerateArgs(args: readonly string[]): {
@@ -315,39 +549,6 @@ function extractTargetValues(args: readonly string[]): string[] {
   }
 
   return values;
-}
-
-function readVersion(): string {
-  try {
-    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-    let dir = moduleDir;
-
-    while (true) {
-      const candidate = path.join(dir, "package.json");
-
-      try {
-        const parsed = JSON.parse(readFileSync(candidate, "utf8")) as { name?: string; version?: string };
-
-        if (parsed.name === "demohunter" && typeof parsed.version === "string") {
-          return parsed.version;
-        }
-      } catch {
-        // ignore and keep walking up
-      }
-
-      const parent = path.dirname(dir);
-
-      if (parent === dir) {
-        break;
-      }
-
-      dir = parent;
-    }
-  } catch {
-    // fall through
-  }
-
-  return "unknown";
 }
 
 async function main(): Promise<void> {

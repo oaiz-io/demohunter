@@ -71,6 +71,7 @@
   },
   "devDependencies": {
     "@demohunter/generator-playwright": "workspace:*",
+    "@demohunter/review": "workspace:*",
     "@demohunter/sdk": "workspace:*",
     "@demohunter/tts-core": "workspace:*",
     "playwright": ">=1.61",

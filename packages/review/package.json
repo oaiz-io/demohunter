@@ -1,0 +1,31 @@
+{
+  "name": "@demohunter/review",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@demohunter/generator-playwright": "workspace:*",
+    "@demohunter/manifest": "workspace:*",
+    "@demohunter/sdk": "workspace:*",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "playwright": ">=1.61"
+  },
+  "peerDependencies": {
+    "playwright": ">=1.61"
+  }
+}

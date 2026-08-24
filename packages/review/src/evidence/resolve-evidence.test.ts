@@ -1,0 +1,314 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+
+import { collectChangedFiles } from "../git/collect-changed-files.js";
+import type { ChangedFile } from "../git/git-types.js";
+import { resolveComparison } from "../git/resolve-comparison.js";
+import type { RunGit } from "../git/run-git.js";
+import { createTempRepo, type TempRepo } from "../test-support/temp-repo.ts";
+import { createEvidenceAnchor, createTextDigest } from "./anchors.js";
+import { renderHunks, resolveEvidence, ReviewEvidenceError } from "./resolve-evidence.js";
+
+describe("createEvidenceAnchor", () => {
+  test("is stable for the same parts", () => {
+    expect(createEvidenceAnchor(["diff", "src/a.ts"])).toBe(createEvidenceAnchor(["diff", "src/a.ts"]));
+    expect(createEvidenceAnchor(["diff", "src/a.ts"])).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test("length-prefixing keeps two different field splits distinct", () => {
+    expect(createEvidenceAnchor(["ab", "c"])).not.toBe(createEvidenceAnchor(["a", "bc"]));
+  });
+
+  test("digests the exact text", () => {
+    expect(createTextDigest("hello")).toBe(createTextDigest("hello"));
+    expect(createTextDigest("hello")).not.toBe(createTextDigest("hello "));
+  });
+});
+
+describe("renderHunks", () => {
+  test("prefixes each line with its diff marker", () => {
+    const rendered = renderHunks([
+      {
+        header: "@@ -1,2 +1,2 @@",
+        oldStart: 1,
+        oldLines: 2,
+        newStart: 1,
+        newLines: 2,
+        lines: [
+          { kind: "context", oldLine: 1, newLine: 1, text: "const a = 1;" },
+          { kind: "deletion", oldLine: 2, newLine: null, text: "const b = 2;" },
+          { kind: "addition", oldLine: null, newLine: 2, text: "const b = 3;" },
+        ],
+      },
+    ]);
+
+    expect(rendered).toBe("@@ -1,2 +1,2 @@\n const a = 1;\n-const b = 2;\n+const b = 3;");
+  });
+});
+
+describe("resolveEvidence", () => {
+  let repo: TempRepo;
+  let runGit: RunGit;
+  let mergeBaseSha: string;
+  let headSha: string;
+  let changedFilesByPath: Map<string, ChangedFile>;
+
+  beforeAll(async () => {
+    repo = await createTempRepo("demohunter-review-evidence-");
+    runGit = repo.runGit;
+
+    await repo.write("src/app.ts", ["const port = 3000;", "listen(port);", "export {};"].join("\n") + "\n");
+    await repo.write("src/legacy.ts", "export const legacy = true;\n");
+    await repo.write("assets/logo.bin", "\u0000\u0001\u0002binary\u0000\n");
+    await repo.write("src/moved.ts", "export const moved = true;\n");
+    await repo.commit("base");
+    await repo.runGit(["checkout", "--quiet", "-b", "feature"]);
+
+    await repo.write(
+      "src/app.ts",
+      ["const port = 3000;", 'listen(port, "127.0.0.1");', "logBoundAddress();", "export {};"].join("\n") + "\n",
+    );
+    await repo.write("src/renamed.ts", "export const legacy = true;\nexport const extra = 1;\n");
+    await repo.remove("src/legacy.ts");
+    await repo.write("src/pure-rename.ts", "export const moved = true;\n");
+    await repo.remove("src/moved.ts");
+    await repo.write("src/added.ts", "export const added = true;\n");
+    await repo.write("assets/logo.bin", "\u0000\u0001\u0002changed\u0000\n");
+    await repo.commit("feature work");
+
+    const comparison = await resolveComparison({ runGit, baseRef: "main", headRef: "HEAD" });
+    mergeBaseSha = comparison.mergeBaseSha;
+    headSha = comparison.headSha;
+    changedFilesByPath = new Map(
+      (await collectChangedFiles({ runGit, mergeBaseSha, headSha })).map((file) => [file.path, file]),
+    );
+  });
+
+  afterAll(async () => {
+    await repo.dispose();
+  });
+
+  test("snapshots diff evidence with the exact blob shas from the range", async () => {
+    const resolved = await resolveEvidence({
+      runGit,
+      chapterId: "core",
+      mergeBaseSha,
+      headSha,
+      changedFilesByPath,
+      evidence: { kind: "diff", id: "app-diff", path: "src/app.ts", note: "Check the bind address." },
+    });
+
+    expect(resolved.kind).toBe("diff");
+    if (resolved.kind !== "diff") return;
+
+    expect(resolved.provenance.mergeBaseSha).toBe(mergeBaseSha);
+    expect(resolved.provenance.headSha).toBe(headSha);
+    expect(resolved.provenance.oldBlobSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(resolved.provenance.newBlobSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(resolved.provenance.oldBlobSha).not.toBe(resolved.provenance.newBlobSha);
+    expect(resolved.hunks.length).toBeGreaterThan(0);
+    expect(resolved.totalHunks).toBe(resolved.hunks.length);
+    expect(resolved.note).toBe("Check the bind address.");
+    expect(resolved.anchor).toMatch(/^[0-9a-f]{64}$/);
+    expect(resolved.contentDigest).toBe(createTextDigest(renderHunks(resolved.hunks)));
+  });
+
+  test("re-resolving the same evidence produces the same anchor", async () => {
+    const request = {
+      runGit,
+      chapterId: "core",
+      mergeBaseSha,
+      headSha,
+      changedFilesByPath,
+      evidence: { kind: "diff" as const, id: "app-diff", path: "src/app.ts" },
+    };
+
+    const first = await resolveEvidence(request);
+    const second = await resolveEvidence(request);
+
+    expect(second.anchor).toBe(first.anchor);
+  });
+
+  test("carries the previous path through for a renamed file", async () => {
+    const resolved = await resolveEvidence({
+      runGit,
+      chapterId: "core",
+      mergeBaseSha,
+      headSha,
+      changedFilesByPath,
+      evidence: { kind: "diff", id: "rename", path: "src/renamed.ts" },
+    });
+
+    expect(resolved.kind).toBe("diff");
+    if (resolved.kind !== "diff") return;
+    expect(resolved.previousPath).toBe("src/legacy.ts");
+    expect(resolved.status).toBe("renamed");
+  });
+
+  test("explains a pure rename instead of telling the author to widen the range", async () => {
+    await expect(
+      resolveEvidence({
+        runGit,
+        chapterId: "core",
+        mergeBaseSha,
+        headSha,
+        changedFilesByPath,
+        evidence: { kind: "diff", id: "pure-rename", path: "src/pure-rename.ts" },
+      }),
+    ).rejects.toThrow("without any content change");
+  });
+
+  test("snapshots code evidence from head and from base", async () => {
+    const head = await resolveEvidence({
+      runGit,
+      chapterId: "core",
+      mergeBaseSha,
+      headSha,
+      changedFilesByPath,
+      evidence: { kind: "code", id: "app-head", path: "src/app.ts", startLine: 1, endLine: 2 },
+    });
+    const base = await resolveEvidence({
+      runGit,
+      chapterId: "core",
+      mergeBaseSha,
+      headSha,
+      changedFilesByPath,
+      evidence: {
+        kind: "code",
+        id: "app-base",
+        path: "src/app.ts",
+        startLine: 1,
+        endLine: 2,
+        side: "base",
+      },
+    });
+
+    expect(head.kind).toBe("code");
+    if (head.kind !== "code" || base.kind !== "code") return;
+
+    expect(head.side).toBe("head");
+    expect(head.lines.map((line) => line.text)).toEqual([
+      "const port = 3000;",
+      'listen(port, "127.0.0.1");',
+    ]);
+    expect(base.side).toBe("base");
+    expect(base.lines.map((line) => line.text)).toEqual(["const port = 3000;", "listen(port);"]);
+    expect(head.anchor).not.toBe(base.anchor);
+  });
+
+  test("clamps an end line past the file length but keeps the real range in the title", async () => {
+    const resolved = await resolveEvidence({
+      runGit,
+      chapterId: "core",
+      mergeBaseSha,
+      headSha,
+      changedFilesByPath,
+      evidence: { kind: "code", id: "app-clamped", path: "src/app.ts", startLine: 1, endLine: 900 },
+    });
+
+    expect(resolved.kind).toBe("code");
+    if (resolved.kind !== "code") return;
+    expect(resolved.endLine).toBe(4);
+    expect(resolved.title).toBe("src/app.ts:1-4");
+  });
+
+  test("refuses evidence for a path outside the reviewed range", async () => {
+    await expect(
+      resolveEvidence({
+        runGit,
+        chapterId: "core",
+        mergeBaseSha,
+        headSha,
+        changedFilesByPath,
+        evidence: { kind: "diff", id: "ghost", path: "src/never-touched.ts" },
+      }),
+    ).rejects.toThrow(ReviewEvidenceError);
+  });
+
+  test("refuses diff evidence for a binary file", async () => {
+    await expect(
+      resolveEvidence({
+        runGit,
+        chapterId: "core",
+        mergeBaseSha,
+        headSha,
+        changedFilesByPath,
+        evidence: { kind: "diff", id: "binary", path: "assets/logo.bin" },
+      }),
+    ).rejects.toThrow("binary file");
+  });
+
+  test("refuses a range that selects no hunks", async () => {
+    await expect(
+      resolveEvidence({
+        runGit,
+        chapterId: "core",
+        mergeBaseSha,
+        headSha,
+        changedFilesByPath,
+        evidence: {
+          kind: "diff",
+          id: "empty-range",
+          path: "src/app.ts",
+          range: { startLine: 900, endLine: 950 },
+        },
+      }),
+    ).rejects.toThrow("selected no hunks");
+  });
+
+  test("refuses code evidence that starts past the end of the file", async () => {
+    await expect(
+      resolveEvidence({
+        runGit,
+        chapterId: "core",
+        mergeBaseSha,
+        headSha,
+        changedFilesByPath,
+        evidence: { kind: "code", id: "past-end", path: "src/app.ts", startLine: 500, endLine: 501 },
+      }),
+    ).rejects.toThrow("has only 4 line(s)");
+  });
+
+  test("reads the pre-image of a renamed file from its old path", async () => {
+    const resolved = await resolveEvidence({
+      runGit,
+      chapterId: "core",
+      mergeBaseSha,
+      headSha,
+      changedFilesByPath,
+      evidence: {
+        kind: "code",
+        id: "rename-base-side",
+        path: "src/renamed.ts",
+        startLine: 1,
+        endLine: 1,
+        side: "base",
+      },
+    });
+
+    expect(resolved.kind).toBe("code");
+    if (resolved.kind !== "code") return;
+    // The blob is addressed by sha, so the pre-image resolves even though the
+    // path did not exist under this name at the merge base.
+    expect(resolved.lines.map((line) => line.text)).toEqual(["export const legacy = true;"]);
+  });
+
+  test("refuses code evidence read from a side where the file does not exist", async () => {
+    await expect(
+      resolveEvidence({
+        runGit,
+        chapterId: "core",
+        mergeBaseSha,
+        headSha,
+        changedFilesByPath,
+        evidence: {
+          kind: "code",
+          id: "added-base-side",
+          path: "src/added.ts",
+          startLine: 1,
+          endLine: 1,
+          side: "base",
+        },
+      }),
+    ).rejects.toThrow("does not exist there");
+  });
+});

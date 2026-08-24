@@ -29,7 +29,8 @@ DemoHunter is local-first. It does not require a hosted backend, and OpenAI or E
 - [x] ElevenLabs TTS with configurable voice IDs and voice settings.
 - [x] Portable `manifest.json` with sha256 checksums.
 - [x] Offline regeneration when narration is fully cached.
-- [x] Agent skill for Claude and Codex.
+- [x] DemoHunter Review: turn a pull request into a local narrated review artifact.
+- [x] Agent skills for Claude and Codex.
 - [ ] Other AI voice providers (Cartesia, local Piper).
 - [ ] Background music and sound effects.
 - [ ] Hosted / cloud generation.
@@ -163,18 +164,39 @@ With no `output.formats` or `--format` flags, DemoHunter keeps the original mani
 
 Identical narration text is cached locally. Reruns don't re-pay for TTS.
 
-## Agent skill
+## Review a pull request
 
-Teach Claude or Codex to write tours for you:
+DemoHunter Review turns a large pull request into a local narrated review artifact: a static website plus a walkthrough video, both rendered from one typed definition and grounded in the real `merge-base(base, HEAD)..HEAD` diff.
+
+```sh
+npx demohunter review init --base main
+# edit reviews/<id>.review.ts
+npx demohunter review generate reviews/<id>.review.ts --base main --run-verification
+npx demohunter review serve .demohunter/reviews/<id> --open
+npx demohunter review verify .demohunter/reviews/<id> --strict
+```
+
+The reviewer gets the problem and scope, component and sequence diagrams, a recommended review order, the important focused diffs with what to check in each, real verification results, risks, compatibility notes, reviewer questions, and 100% accounting of every changed file — plus the same material narrated over the page.
+
+It records exact base, head, and merge-base shas, snapshots displayed evidence from those exact blobs, fails generation when any changed file is unaccounted for, and detects a stale artifact as soon as HEAD moves. The viewer binds `127.0.0.1` only and loads nothing from a network.
+
+See [Reviewing a pull request](https://github.com/emilwareus/demohunter/blob/main/docs/review.md) for the full definition surface.
+
+## Agent skills
+
+Teach Claude or Codex to write tours and pull-request reviews for you:
 
 ```sh
 npx demohunter add-skill                  # installs to both .claude/ and .codex/
 npx demohunter add-skill --target claude  # or just one
 ```
 
+Two bundles are installed: `demohunter` for authoring `.tour.ts` files, and `demohunter-review` for turning a pull request into a review artifact.
+
 ## Docs
 
 - [Getting started](https://github.com/emilwareus/demohunter/blob/main/docs/getting-started.md)
+- [Reviewing a pull request](https://github.com/emilwareus/demohunter/blob/main/docs/review.md)
 - [Troubleshooting](https://github.com/emilwareus/demohunter/blob/main/docs/troubleshooting.md)
 
 ## CLI
@@ -189,7 +211,14 @@ npx demohunter generate <tour-file> --format standard --format square
 npx demohunter generate <tour-file> --format gif --duration 12
 npx demohunter doctor                     # check local prerequisites
 npx demohunter cache list|prune|clear     # manage narration cache
-npx demohunter add-skill [--target ...]   # install agent skill (claude | codex | both)
+npx demohunter add-skill [--target ...]   # install agent skills (claude | codex | both)
+npx demohunter review init --base main    # scaffold a review from the real diff
+npx demohunter review generate <file> --base main --run-verification
+                                           # build the review website and walkthrough
+npx demohunter review serve <dir|id> --open
+                                           # serve one review on 127.0.0.1 only
+npx demohunter review verify <dir|id> --strict
+                                           # re-derive the artifact from Git
 npx demohunter --help
 ```
 

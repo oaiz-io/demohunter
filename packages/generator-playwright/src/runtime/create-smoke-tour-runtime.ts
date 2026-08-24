@@ -143,11 +143,20 @@ export function createSmokeTourRuntime(args: {
         });
         return result;
       } catch (error) {
-        emit({
-          chapterTitle: currentChapter,
-          kind: "step-end",
-          title,
-        });
+        // Pass 2 throws from `emit` when the replayed event stream diverges from
+        // the collected one. A step that already failed is guaranteed to diverge
+        // here, so letting that second throw escape would replace the real
+        // failure with a timeline mismatch that only describes the unwinding.
+        try {
+          emit({
+            chapterTitle: currentChapter,
+            kind: "step-end",
+            title,
+          });
+        } catch {
+          // Swallowed on purpose: `error` is the failure worth reporting.
+        }
+
         throw error;
       }
     },

@@ -22,6 +22,10 @@ lib-cov
 coverage
 *.lcov
 
+# DemoHunter Review's changed-file accounting lives in a directory named
+# "coverage", which the istanbul rule above would otherwise swallow.
+!packages/review/src/coverage/
+
 # nyc test coverage
 .nyc_output
 

@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import path from "node:path";
 
 import type { CollectedTimeline } from "./execute/generator-types.js";
+import { RecordingInterruptedError } from "./execute/recording-interruption.js";
 import { ReplayTimelineError } from "./execute/replay-timeline.js";
 import { generateTour } from "./generate.js";
 import type { GenerateLoadedConfig } from "./generate.js";
@@ -702,6 +703,64 @@ describe("generateTour", () => {
     );
     expect(muxVideo).not.toHaveBeenCalled();
     expect(writeGenerationOutput).not.toHaveBeenCalled();
+  });
+
+  test("reports an externally closed browser as an interruption, and keeps the original error in the debug artifact", async () => {
+    const targetClosedError = new Error(
+      "page.waitForTimeout: Target page, context or browser has been closed",
+    );
+    const debugCapture = createDebugCapture();
+    const stopScreencast = mock(async ({ primaryError }) => {
+      throw primaryError;
+    });
+
+    const failure = await generateTour(
+      {
+        loadedConfig: createLoadedConfig("/tmp/project"),
+        tourFile: createTourFile("/tmp/project"),
+      },
+      {
+        attachDebugCapture: mock(() => debugCapture),
+        collectTimeline: mock(async () => createTimeline()),
+        installRecordingEffects: mock(async () => {}),
+        muxVideo: mock(async () => {
+          throw new Error("should not mux after an interruption");
+        }),
+        playwright: {
+          chromium: {
+            launch: mock(async () => ({
+              close: mock(async () => {}),
+              newContext: mock(async () => ({
+                close: mock(async () => {}),
+                newPage: mock(async () => ({ goto: mock(async () => {}) })),
+              })),
+            })),
+          },
+          firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+          webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+        },
+        prepareOutputDir: mock(async () => "/tmp/project/.demohunter/billing-overview"),
+        replayTimeline: mock(async ({ onBeforeRun }) => {
+          await onBeforeRun?.();
+          throw targetClosedError;
+        }),
+        startScreencast: mock(async () => {}),
+        stopScreencast,
+        writeGenerationOutput: mock(async () => {
+          throw new Error("should not write after an interruption");
+        }),
+      },
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(RecordingInterruptedError);
+    expect((failure as Error).message).toContain("recording the replay");
+    expect((failure as Error).cause).toBe(targetClosedError);
+    expect(debugCapture.captureFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ error: targetClosedError, phase: "record-replay" }),
+    );
+    expect(stopScreencast).toHaveBeenCalledWith(
+      expect.objectContaining({ primaryError: failure }),
+    );
   });
 
   test("does not start recording or write debug artifacts when pre-record setup fails", async () => {
