@@ -48,6 +48,12 @@ Narration did not resolve. Either the narration cache is missing entries and no 
 
 The recording pass ended early. Rerun `demohunter review generate`; the underlying failure is usually reported above the caption check in the generate log.
 
+## `The browser closed while DemoHunter was still recording the replay`
+
+Nothing in the tour closes the browser, so something outside the process did: a command timeout, a Ctrl+C, or a shell that went away. Playwright closes the browsers it launched when the process is signalled but does not stop the process, which is why an interrupted run used to surface as a failed recording step.
+
+A review walkthrough plays narration in real time, so generating one takes roughly as long as the finished video. Give the command a time budget that covers the whole walkthrough, run it in the background if your runner enforces one, and rerun. The debug artifact under `<review-dir>/debug/` keeps the original error from the interrupted run.
+
 ## Video recording fails to start
 
 The walkthrough is recorded through the normal DemoHunter pipeline, so it needs Chromium and `ffmpeg`/`ffprobe`:

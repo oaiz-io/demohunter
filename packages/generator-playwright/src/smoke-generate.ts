@@ -13,6 +13,7 @@ import type { BrowserType, Page } from "playwright";
 import { attachDebugCapture } from "./debug/failure-artifacts.js";
 import type { DebugCapture } from "./debug/failure-artifacts.js";
 import type { GenerationProgressEvent, GenerationProgressReporter, TourRuntimeEvent } from "./execute/generator-types.js";
+import { describeRecordingInterruption } from "./execute/recording-interruption.js";
 import { createSmokeLifecycleContext, createSmokeTourRuntime } from "./runtime/create-smoke-tour-runtime.js";
 import {
   createCookieBannerMiddleware,
@@ -147,6 +148,10 @@ export async function smokeGenerate(
           lastRuntimeEvent,
           onProgress,
         });
+        // The debug artifact keeps the original error, stack included. Only the
+        // thrown error is rewritten, so the message a caller sees names the
+        // real cause when the browser was closed from outside the process.
+        primaryError = describeRecordingInterruption(primaryError, "dry-run");
         throw primaryError;
       }
     }

@@ -15,6 +15,7 @@ import type {
 } from "./execute/generator-types.js";
 import { attachDebugCapture } from "./debug/failure-artifacts.js";
 import type { DebugArtifactResult, DebugCapture, DebugPhase } from "./debug/failure-artifacts.js";
+import { describeRecordingInterruption } from "./execute/recording-interruption.js";
 import { replayTimeline } from "./execute/replay-timeline.js";
 import { prepareOutputDir as prepareOutputDirHelper } from "./output/prepare-output-dir.js";
 import { renderOutputVariants } from "./output/render-output-variants.js";
@@ -263,7 +264,10 @@ export async function generateTour(
         }),
       });
     } catch (error) {
-      primaryError = error;
+      // The debug artifact keeps the original error, stack included, because
+      // that is what a later diagnosis reads. Only the thrown error is
+      // rewritten, so the message a caller sees names the real cause.
+      primaryError = describeRecordingInterruption(error, "record-replay");
       await captureDebugFailure({
         debugCapture: passTwoDebug,
         error,
@@ -465,7 +469,7 @@ async function capturePhaseFailure<T>(input: {
       onProgress: input.onProgress,
       phase: input.phase,
     });
-    throw error;
+    throw describeRecordingInterruption(error, input.phase);
   }
 }
 
