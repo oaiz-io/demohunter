@@ -88,6 +88,45 @@ describe("createSmokeTourRuntime", () => {
     ]);
   });
 
+  test("reports the failure inside a step, not the divergence its unwinding causes", async () => {
+    // Pass 2 throws from onEvent as soon as the replayed stream diverges, and a
+    // step that already failed always diverges on its closing step-end. The
+    // original failure has to survive that second throw.
+    const runtime = createSmokeTourRuntime({
+      config: createConfig(),
+      page: {} as never,
+      outputDir: "/tmp/demohunter-output",
+      onEvent: (event) => {
+        if (event.kind === "step-end") {
+          throw new Error("replayed stream diverged");
+        }
+      },
+    });
+
+    await expect(
+      runtime.step("Open invoice view", async () => {
+        throw new Error("the page closed mid-step");
+      }),
+    ).rejects.toThrow("the page closed mid-step");
+  });
+
+  test("still surfaces an emit failure when the step itself succeeded", async () => {
+    const runtime = createSmokeTourRuntime({
+      config: createConfig(),
+      page: {} as never,
+      outputDir: "/tmp/demohunter-output",
+      onEvent: (event) => {
+        if (event.kind === "step-end") {
+          throw new Error("replayed stream diverged");
+        }
+      },
+    });
+
+    await expect(runtime.step("Open invoice view", async () => "ok")).rejects.toThrow(
+      "replayed stream diverged",
+    );
+  });
+
   test("uses Playwright-native methods for stability, highlighting, snapshots, and visibility", async () => {
     const events: unknown[] = [];
     const waitForTimeout = mock(async () => {});

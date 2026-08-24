@@ -19,6 +19,7 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 ### Fixed
 
 - Changed-file collection now passes `--no-abbrev` to `git diff --raw`, so recorded blob shas are full object ids rather than Git's abbreviated form.
+- A step that fails during the recording pass now reports the failure that actually happened. Pass 2 throws as soon as the replayed event stream diverges, and the `step-end` emitted while unwinding a failed step always diverges, so the real error was being replaced by a confusing timeline mismatch.
 
 ## [0.1.0]
 
