@@ -5,7 +5,7 @@ milestone_name: milestone
 status: milestone_complete
 stopped_at: v1.0 archived; no active milestone
 last_updated: "2026-09-02T16:10:00+02:00"
-last_activity: 2026-09-02 -- Quick task 260902-m9p aligned public documentation and licensing with OAIZ Labs
+last_activity: 2026-09-02 -- Quick task 260902-m9p shipped in PR #25
 progress:
   total_phases: 6
   completed_phases: 6
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: none — milestone archived
 Plan: none
 Status: v1.0 complete
-Last activity: 2026-09-02 -- Quick task 260902-m9p aligned public documentation and licensing with OAIZ Labs
+Last activity: 2026-09-02 -- Quick task 260902-m9p shipped in PR #25
 Progress: [██████████] 100%
 
 ## Performance Metrics
