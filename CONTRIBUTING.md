@@ -15,7 +15,7 @@ You need Bun, Node.js 20 or later, `ffmpeg`, `ffprobe`, and the Playwright Chrom
 
 ```sh
 bun install
-bun x playwright install chromium
+bun run --cwd packages/cli playwright install chromium
 bun run verify
 ```
 

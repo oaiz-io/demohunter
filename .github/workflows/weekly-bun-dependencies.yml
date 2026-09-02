@@ -57,7 +57,7 @@ jobs:
 
       - name: Install Playwright Chromium runtime
         if: steps.changes.outputs.changed == 'true'
-        run: bun x playwright install --with-deps chromium
+        run: bun run --cwd packages/cli playwright install --with-deps chromium
 
       - name: Run verify
         if: steps.changes.outputs.changed == 'true'
