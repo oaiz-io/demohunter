@@ -1,5 +1,7 @@
 # Phase 2 - Cloud Offering
 
+> Historical proposal. These hosted features are not part of the current open-source product and are not a public delivery commitment. The local CLI does not depend on OAIZ services.
+
 ## Summary
 
 Build a hosted product that takes generated OSS output from `.demohunter/<tour-id>/` and turns it into a shareable watch link with hosted video, transcript, chapters, managed TTS, and project history.

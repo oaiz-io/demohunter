@@ -1,6 +1,6 @@
 # Getting started
 
-This guide walks through installing DemoHunter, scaffolding a starter tour, and generating your first demo.
+This guide shows how to install DemoHunter, create a starter tour, and generate your first demo.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ npm install --save-dev demohunter
 npx playwright install chromium
 ```
 
-DemoHunter ships Playwright as a runtime dependency. You install the browser runtime once per machine.
+DemoHunter uses Playwright. Install the browser runtime once on each machine.
 
 ## Scaffold a starter
 
@@ -34,7 +34,7 @@ demos/sample.tour.ts
 demos/sample-site/index.html
 ```
 
-The first `demohunter generate` run also writes `.demohunter/.gitignore` so generated artifacts stay out of source control without touching your project-level `.gitignore`.
+The first generation also writes `.demohunter/.gitignore`. This keeps generated files out of source control without changing the project-level `.gitignore`.
 
 ## Generate the starter demo
 
@@ -47,8 +47,8 @@ The starter tour does not call `narrate(...)`, so it runs without `OPENAI_API_KE
 
 ## Point at your own app
 
-1. Start your app yourself (DemoHunter does not start it for you).
-2. Set `baseURL` in `demohunter.config.ts` to wherever your app is reachable.
+1. Start your app. DemoHunter does not start it for you.
+2. Set `baseURL` in `demohunter.config.ts` to the application URL.
 3. Write a tour under `demos/` that exercises one flow. Use normal Playwright (`page.getByRole`, `page.click`, etc.). Add `narrate(...)` for static states and `narrateWhile(...)` when narration should continue over navigation, clicks, typing, waits, or highlights.
 
 Example:
@@ -105,7 +105,7 @@ export default {
 };
 ```
 
-Use `tts.language` for the demo's narration language, with ISO 639-1 codes such as `sv` for Swedish. Use `narrate("...", { voice: "other-voice-id", language: "sv" })` or `narrateWhile(...)` options when a single segment should use a different voice, model, format, language, or ElevenLabs voice settings. DemoHunter does not infer narration language from locale environment variables such as `DEMO_LOCALE`.
+Use `tts.language` for the narration language. Use an ISO 639-1 code such as `sv` for Swedish. A `narrate()` or `narrateWhile()` call can override the voice, model, format, language, or ElevenLabs voice settings. DemoHunter does not infer the narration language from locale environment variables such as `DEMO_LOCALE`.
 
 ## Polish and social outputs
 
@@ -149,7 +149,7 @@ export default {
 };
 ```
 
-Square defaults to scale-and-pad. Mobile always runs its own responsive capture at 390×844 and encodes to 1080×1920. GIF is silent, palette-based, and limited to 15 seconds. Requested derivatives live under `variants/<preset>/`; the baseline MP4 remains at the output root.
+Square output uses scale-and-pad by default. Mobile runs a responsive capture at 390×844 and encodes it at 1080×1920. GIF output is silent and has a 15-second limit. Variants are in `variants/<preset>/`. The baseline MP4 stays at the output root.
 
 ## Install the agent skill (optional)
 
@@ -157,7 +157,7 @@ Square defaults to scale-and-pad. Mobile always runs its own responsive capture 
 npx demohunter add-skill --target claude
 ```
 
-Targets: `claude`, `codex`, or `both`. When `--target` is omitted, the skill is installed for both. The skill teaches your coding agent how to author and update DemoHunter tours without inventing wrapper abstractions.
+Targets are `claude`, `codex`, or `both`. If you omit `--target`, DemoHunter installs the skill for both agents.
 
 ## Repo examples
 
@@ -177,3 +177,4 @@ Same shape for `examples/vite-demo`.
 
 - [Troubleshooting](./troubleshooting.md) — common first-run blockers.
 - [Agent skill](../packages/cli/skills/demohunter/) — `.tour.ts` authoring rules for AI agents.
+- [Contributing](../CONTRIBUTING.md) — repository setup and pull request guidance.

@@ -53,7 +53,10 @@ describe("oss onboarding contract", () => {
     expect(workflow).toContain("actions/checkout@v6");
     expect(workflow).toContain("actions/cache@v5");
     expect(workflow).toContain("apt-get install -y ffmpeg");
-    expect(workflow).toContain("bun x playwright install --with-deps chromium");
+    expect(workflow).toContain(
+      "bun run --cwd packages/cli playwright install --with-deps chromium",
+    );
+    expect(workflow).not.toContain("bun x playwright install");
     expect(workflow).toContain("bun run verify");
     expect(workflow).toContain("npm publish --dry-run");
     expect(workflow).not.toContain("OPENAI_API_KEY:");

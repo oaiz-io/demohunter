@@ -4,9 +4,14 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- DemoHunter is now an OAIZ Labs open-source project maintained by OAIZ AB.
+- Public documentation is shorter and separates current guidance from historical product plans.
+
 ### Fixed
 
-- The workspace now pins `playwright` at the root, so `bun x playwright install` in CI runs the lockfile's Playwright instead of resolving `playwright@latest`. The two had drifted to different Chromium revisions, and every browser-backed test failed with "Executable doesn't exist at .../chromium_headless_shell-1228".
+- GitHub workflows now install the Chromium revision required by the lockfile's Playwright version.
 
 ## [0.1.0]
 

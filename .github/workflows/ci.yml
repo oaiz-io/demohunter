@@ -40,7 +40,7 @@ jobs:
           ffmpeg -version
 
       - name: Install Playwright Chromium runtime
-        run: bun x playwright install --with-deps chromium
+        run: bun run --cwd packages/cli playwright install --with-deps chromium
 
       - name: Build demohunter (internals + bundle)
         run: bun run build

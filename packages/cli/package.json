@@ -3,7 +3,7 @@
   "version": "0.1.5",
   "description": "CLI and SDK for turning Playwright-style tours into narrated demo videos, captions, and a portable manifest, locally.",
   "license": "MIT",
-  "author": "Emil Wareus",
+  "author": "OAIZ AB",
   "homepage": "https://github.com/oaiz-io/demohunter#readme",
   "repository": {
     "type": "git",

@@ -1,69 +1,50 @@
 # DemoHunter
 
-**Narrated product demos as code**
+**Create narrated product demos from Playwright-style TypeScript.**
 
-DemoHunter turns Playwright-style automation into narrated product demos. You write a `.tour.ts` file, run the CLI locally, and get portable demo assets under `.demohunter/`: video, captions, chapters, poster, narration audio, and a checksummed manifest.
+DemoHunter is a CLI and SDK for repeatable product demos. Write a `.tour.ts` file, run one command, and get a video, captions, chapters, narration audio, a poster, and a checksummed manifest.
 
-Two workflows are especially useful:
+DemoHunter runs locally and does not need a hosted backend. It only sends narration text to your selected text-to-speech provider when the audio is not in the local cache.
 
-- **Product, docs, and DevRel**: keep marketing pages, release notes, and onboarding videos in sync with the product by generating demos from repeatable scripts.
-- **AI coding agents**: let an agent attach a narrated demo of its work to a pull request so reviewers can see the changed flow in motion.
-
-DemoHunter is local-first. It does not require a hosted backend, and OpenAI or ElevenLabs is used only for text-to-speech when uncached narration needs to be generated.
+DemoHunter is an [OAIZ Labs](https://oaiz.io/) open-source project maintained by OAIZ.
 
 <video src=".demohunter/demohunter-github/video-1.10x.mp4" controls width="100%"></video>
 
-## Features
+## Why DemoHunter?
 
-- [x] Cached narration. Same text never hits the TTS API twice.
-- [x] MP4 by default, WebM optional.
-- [x] SRT and VTT captions generated from narration.
-- [x] Chapter markers and overlays.
-- [x] Action overlays (mouse clicks visible on the recording).
-- [x] Smooth SVG cursor motion with deterministic `click(locator)` choreography.
-- [x] Opt-in dismissal for recognized cookie-consent vendors.
-- [x] Standard, square, responsive mobile, and GIF social outputs.
-- [x] All three Playwright browsers: Chromium, Firefox, WebKit.
-- [x] Per-call voice and tone overrides on `narrate()`.
-- [x] OpenAI TTS (`gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`).
-- [x] ElevenLabs TTS with configurable voice IDs and voice settings.
-- [x] Portable `manifest.json` with sha256 checksums.
-- [x] Offline regeneration when narration is fully cached.
-- [x] Agent skill for Claude and Codex.
-- [ ] Other AI voice providers (Cartesia, local Piper).
-- [ ] Background music and sound effects.
-- [ ] Hosted / cloud generation.
-- [ ] Cursor agent skill.
-- [ ] GitHub PR comment / webhook automation / GitHub Action.
+- **Playwright-native:** use familiar locators and browser actions.
+- **Local-first:** run against local, preview, or public applications.
+- **Repeatable:** keep demos in source control with the product code.
+- **Portable:** get standard media files and a versioned manifest under `.demohunter/`.
+- **Efficient:** reuse cached narration and regenerate offline when the cache is complete.
+- **Agent-friendly:** install the included skill for Claude or Codex.
 
-PRs welcome on anything unchecked.
+DemoHunter supports Chromium, Firefox, and WebKit; OpenAI and ElevenLabs narration; MP4 and WebM recording; SRT and VTT captions; cursor and chapter overlays; and standard, square, mobile, and GIF outputs.
 
-## Install
+## Quick start
+
+Requirements: Node.js 20 or later, `ffmpeg`, `ffprobe`, and a Playwright browser.
 
 ```sh
 npm install --save-dev demohunter
 npx playwright install chromium
-export OPENAI_API_KEY=sk-...
-# or, with tts.provider: "elevenlabs"
-export ELEVENLABS_API_KEY=...
+npx demohunter init
 ```
 
-You also need `ffmpeg` and `ffprobe` on your `PATH`. A provider API key is only required when generating narration that is not already cached.
-
-## Quick start
-
-Start your app on `http://localhost:3000`. In another terminal:
+Start your application. Then set its URL in `demohunter.config.ts` and generate the starter tour:
 
 ```sh
-npx demohunter init
-# edit demohunter.config.ts and point baseURL at your app
 npx demohunter generate demos/sample.tour.ts
 open .demohunter/sample-smoke/video.mp4
 ```
 
-That's the full loop: scaffold, write the tour, render the video.
+Set `OPENAI_API_KEY` before you generate uncached OpenAI narration. For ElevenLabs, select that provider in the config and set `ELEVENLABS_API_KEY`. DemoHunter does not store these keys.
 
-## What a tour looks like
+```sh
+export OPENAI_API_KEY=sk-...
+```
+
+## Write a tour
 
 ```ts
 // demos/billing-overview.tour.ts
@@ -72,22 +53,19 @@ import { defineTour } from "demohunter";
 export default defineTour({
   id: "billing-overview",
   title: "Billing overview",
+
   async beforeRecord({ goto, page }) {
     await goto("/");
     await page.getByRole("heading", { name: "Workspace" }).waitFor();
   },
+
   async run({ page, chapter, click, step, narrate, narrateWhile }) {
-    await chapter("Open the workspace");
+    await chapter("Create an invoice");
 
-    await step("Land on the dashboard", async () => {
-      await narrate("This is the billing workspace. Invoices, exports, and credits all live in one place.");
-    });
-
-    await step("Create a new invoice", async () => {
-      await narrateWhile("Creating an invoice is one step now. The customer field has type-ahead search built in.", async ({ sleep, typeText }) => {
+    await step("Open the invoice form", async () => {
+      await narrate("This workspace keeps invoices, exports, and credits in one place.");
+      await narrateWhile("Create a new invoice from here.", async () => {
         await click(page.getByRole("button", { name: "New invoice" }));
-        await sleep(700);
-        await typeText(page.getByLabel("Customer"), "Acme", { replace: true });
       });
     });
   },
@@ -98,101 +76,48 @@ export default defineTour({
 npx demohunter generate demos/billing-overview.tour.ts
 ```
 
-You get `.demohunter/billing-overview/video.mp4` with narration timed to each step or choreographed over visible motion, plus captions and a manifest.
-
-Use Playwright's `.fill()` for setup or hidden prep. When text entry should be visible in the final recording, use `typeText(...)` inside `narrateWhile(...)` so the field is typed incrementally with deterministic natural pacing.
-
-## Config
-
-```ts
-// demohunter.config.ts
-import { defineConfig } from "demohunter";
-
-export default defineConfig({
-  baseURL: "http://localhost:3000",
-  // tts: { voice: "marin", model: "gpt-4o-mini-tts", language: "sv" },
-  // viewport: { width: 1440, height: 900 },
-  // record: { container: "mp4", cursor: { color: "#3b82f6" } },
-  // output: { formats: [{ preset: "square" }, { preset: "gif", durationMs: 12_000 }] },
-});
-```
-
-Cookie automation ships disabled. Enable it for known OneTrust, Cookiebot, Didomi, TrustArc, or Quantcast banners with `record.cookieBanners.enabled`, or for one run with `--cookie-dismiss reject`. Custom `beforeRecord` logic runs after the built-in dismissal step.
-
-`record.container` selects MP4/WebM recording output. The older `record.format` spelling remains accepted during migration; `--format` refers only to distribution presets.
-
-OpenAI remains the default TTS provider and reads `OPENAI_API_KEY` only when uncached narration is needed. To use ElevenLabs instead:
-
-```ts
-export default defineConfig({
-  baseURL: "http://localhost:3000",
-  tts: {
-    provider: "elevenlabs",
-    voice: "JBFqnCBsd6RMkjVDRZzb",
-    model: "eleven_multilingual_v2",
-    format: "mp3_44100_128",
-    language: "sv",
-    voiceSettings: {
-      stability: 0.5,
-      similarityBoost: 0.75,
-      useSpeakerBoost: true,
-    },
-  },
-});
-```
-
-Export `ELEVENLABS_API_KEY` for uncached ElevenLabs narration. Individual calls can override voice, model, format, language, and voice settings: `narrate("...", { voice: "other-voice-id", language: "sv" })`.
-Use ISO 639-1 language codes such as `sv` for Swedish. ElevenLabs receives `language` as the API's `language_code`. OpenAI does not expose a general language parameter for built-in TTS voices, so DemoHunter folds `language` into the voice instructions to steer language and accent.
+Use `narrate()` for a static screen. Use `narrateWhile()` when visible actions must occur during the narration. Use Playwright directly for application setup, authentication, and assertions.
 
 ## Output
 
-Every run writes to `.demohunter/<tour-id>/`:
+Each run writes portable assets to `.demohunter/<tour-id>/`:
 
-```
+```text
 video.mp4       narrated demo
 poster.jpg      cover frame
-captions.srt    SRT subtitles
-captions.vtt    WebVTT subtitles
+captions.srt    SRT captions
+captions.vtt    WebVTT captions
 chapters.json   chapter timeline
-manifest.json   portable, checksummed index
-audio/          per-segment narration clips
-variants/       requested square, mobile, or GIF derivatives
+manifest.json   versioned file index with SHA-256 checksums
+audio/          narration segments
+variants/       optional square, mobile, or GIF outputs
 ```
 
-With no `output.formats` or `--format` flags, DemoHunter keeps the original manifest v1 layout unchanged. Multi-format runs publish a checksummed manifest v2 atomically. Mobile uses its own 390×844 two-pass browser capture so responsive navigation and selectors are validated rather than stretched from desktop.
-
-Identical narration text is cached locally. Reruns don't re-pay for TTS.
-
-## Agent skill
-
-Teach Claude or Codex to write tours for you:
+## Useful commands
 
 ```sh
-npx demohunter add-skill                  # installs to both .claude/ and .codex/
-npx demohunter add-skill --target claude  # or just one
+npx demohunter init
+npx demohunter generate <tour-file>
+npx demohunter generate <tour-file> --dry-run
+npx demohunter generate <tour-file> --format standard --format square
+npx demohunter doctor
+npx demohunter cache list|prune|clear
+npx demohunter add-skill [--target claude|codex|both]
 ```
 
-## Docs
+Cookie-banner automation is off by default. Enable it for a supported vendor with `--cookie-dismiss reject` or in `demohunter.config.ts`.
 
+## Documentation
+
+- [Documentation index](https://github.com/oaiz-io/demohunter/blob/main/docs/README.md)
 - [Getting started](https://github.com/oaiz-io/demohunter/blob/main/docs/getting-started.md)
 - [Troubleshooting](https://github.com/oaiz-io/demohunter/blob/main/docs/troubleshooting.md)
+- [DemoHunter agent skill](https://github.com/oaiz-io/demohunter/tree/main/packages/cli/skills/demohunter)
 
-## CLI
+## Contributing and support
 
-```sh
-npx demohunter init                       # scaffold starter tour + config
-npx demohunter generate <tour-file>       # run a tour, write output
-npx demohunter generate <tour-file> --dry-run
-                                           # validate browser flow without TTS/video
-npx demohunter generate <tour-file> --cursor smooth --cookie-dismiss reject
-npx demohunter generate <tour-file> --format standard --format square
-npx demohunter generate <tour-file> --format gif --duration 12
-npx demohunter doctor                     # check local prerequisites
-npx demohunter cache list|prune|clear     # manage narration cache
-npx demohunter add-skill [--target ...]   # install agent skill (claude | codex | both)
-npx demohunter --help
-```
+DemoHunter is under active development. Issues and pull requests are welcome. Read the [contribution guide](https://github.com/oaiz-io/demohunter/blob/main/CONTRIBUTING.md) before you submit a change. Report security problems as described in the [security policy](https://github.com/oaiz-io/demohunter/blob/main/SECURITY.md).
 
 ## License
 
-[MIT](LICENSE)
+DemoHunter is available under the [MIT License](LICENSE). Copyright is held by OAIZ AB and DemoHunter contributors.

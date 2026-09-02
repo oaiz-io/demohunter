@@ -1,4 +1,7 @@
-Create a CLI/SDK dev tool that is an installable package to create narrated demos programatically.
-The demo files should be based on on playwright as a base, with some narration capabilities added on top.
+# Project scope
 
-The product will be open source with an optional cloud offering. The open source version will be to provide their own openai api key for TTS, and everything is generated locally. With Cloud we offer more voices, hosting of the videos, etc. The open source part should stand on its own legs completely, and not be tied to the cloud offering by default.
+DemoHunter turns Playwright-style TypeScript tours into narrated product-demo assets. It is an open-source CLI and SDK from OAIZ Labs.
+
+The open-source product must work locally without an OAIZ service. It writes portable, versioned output under `.demohunter/`. Text-to-speech providers are optional and read credentials only from environment variables. A complete narration cache must support offline regeneration.
+
+Hosted products can use DemoHunter output in the future, but they must remain optional additions to the open-source workflow.
