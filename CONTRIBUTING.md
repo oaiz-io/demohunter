@@ -39,6 +39,16 @@ The repository is a Bun workspace. The public `demohunter` package is in `packag
 
 Keep generated `.demohunter/` files out of pull requests unless they are intentional project fixtures.
 
+## Documentation style
+
+Short sentences and direct language. Verify every command, file path, and public symbol against the current code before you commit it.
+
+Keep the README on purpose, install, and the first successful run. Detailed reference material goes in `docs/`. Do not use em-dashes.
+
+## Reporting a vulnerability
+
+Do not open a public issue. See [SECURITY.md](SECURITY.md).
+
 ## Conduct
 
 Be respectful and constructive. Focus reviews on the work, give clear reasons for requested changes, and assume good intent. Harassment and discriminatory behavior are not accepted.
