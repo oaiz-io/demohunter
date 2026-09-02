@@ -4,6 +4,10 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- The workspace now pins `playwright` at the root, so `bun x playwright install` in CI runs the lockfile's Playwright instead of resolving `playwright@latest`. The two had drifted to different Chromium revisions, and every browser-backed test failed with "Executable doesn't exist at .../chromium_headless_shell-1228".
+
 ## [0.1.0]
 
 Initial public release.
@@ -20,5 +24,5 @@ Initial public release.
 - OpenAI narration with deterministic local cache, atomic writes, sha256 integrity, and offline reuse.
 - Portable Zod-validated `manifest.json` for downstream consumers.
 
-[Unreleased]: https://github.com/emilwareus/demohunter/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/emilwareus/demohunter/releases/tag/v0.1.0
+[Unreleased]: https://github.com/oaiz-io/demohunter/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/oaiz-io/demohunter/releases/tag/v0.1.0

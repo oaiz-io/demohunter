@@ -174,8 +174,8 @@ npx demohunter add-skill --target claude  # or just one
 
 ## Docs
 
-- [Getting started](https://github.com/emilwareus/demohunter/blob/main/docs/getting-started.md)
-- [Troubleshooting](https://github.com/emilwareus/demohunter/blob/main/docs/troubleshooting.md)
+- [Getting started](https://github.com/oaiz-io/demohunter/blob/main/docs/getting-started.md)
+- [Troubleshooting](https://github.com/oaiz-io/demohunter/blob/main/docs/troubleshooting.md)
 
 ## CLI
 

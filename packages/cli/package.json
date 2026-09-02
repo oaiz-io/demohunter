@@ -4,13 +4,13 @@
   "description": "CLI and SDK for turning Playwright-style tours into narrated demo videos, captions, and a portable manifest, locally.",
   "license": "MIT",
   "author": "Emil Wareus",
-  "homepage": "https://github.com/emilwareus/demohunter#readme",
+  "homepage": "https://github.com/oaiz-io/demohunter#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/emilwareus/demohunter.git"
+    "url": "git+https://github.com/oaiz-io/demohunter.git"
   },
   "bugs": {
-    "url": "https://github.com/emilwareus/demohunter/issues"
+    "url": "https://github.com/oaiz-io/demohunter/issues"
   },
   "keywords": [
     "playwright",
