@@ -123,4 +123,4 @@ npx demohunter init
 npx demohunter generate demos/sample.tour.ts
 ```
 
-If that fails, [open an issue](https://github.com/emilwareus/demohunter/issues) with the command, the full output, and your OS / Node / `ffmpeg` versions.
+If that fails, [open an issue](https://github.com/oaiz-io/demohunter/issues) with the command, the full output, and your OS / Node / `ffmpeg` versions.

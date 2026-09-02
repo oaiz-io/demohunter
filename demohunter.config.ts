@@ -1,5 +1,5 @@
 export default {
-  baseURL: "https://github.com/emilwareus/demohunter",
+  baseURL: "https://github.com/oaiz-io/demohunter",
   viewport: { width: 1440, height: 900 },
   tts: {
     provider: "elevenlabs",
