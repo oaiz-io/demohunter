@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: milestone_complete
 stopped_at: v1.0 archived; no active milestone
-last_updated: "2026-06-12T11:23:00+02:00"
-last_activity: 2026-06-12 -- Quick task 260612-jackson generated DemoHunter GitHub demo
+last_updated: "2026-09-02T16:10:00+02:00"
+last_activity: 2026-09-02 -- Quick task 260902-m9p aligned public documentation and licensing with OAIZ Labs
 progress:
   total_phases: 6
   completed_phases: 6
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: none — milestone archived
 Plan: none
 Status: v1.0 complete
-Last activity: 2026-06-12 -- Quick task 260612-jackson generated DemoHunter GitHub demo
+Last activity: 2026-09-02 -- Quick task 260902-m9p aligned public documentation and licensing with OAIZ Labs
 Progress: [██████████] 100%
 
 ## Performance Metrics
@@ -43,6 +43,7 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
+| 2026-09-02 | 260902-m9p | Align documentation and licensing with OAIZ Labs | Named OAIZ AB in license and package metadata, moved public links to `oaiz-io`, shortened the README, separated current docs from historical plans, and added contribution and security guidance. |
 | 2026-06-12 | 260612-jackson | Generate DemoHunter GitHub demo | Added a root DemoHunter tour for the GitHub README and example source flow, regenerated it with ElevenLabs Bella narration, and exported a 1.10x `video-1.10x.mp4` at 25.08 seconds. |
 | 2026-06-12 | 260612-frj | Implement automatic ElevenLabs narration continuity | Added automatic adjacent narration context for compatible ElevenLabs clips, serialized `previous_text` and `next_text`, skipped unsupported `eleven_v3` stitching, and verified with focused tests, typecheck, and full verification. |
 | 2026-06-11 | 260611-lsi | Review and fix natural text entry implementation until clean | Ran full verification and iterative subagent review, added strict type-text replay events, hardened runtime validation, preserved sleep-only type compatibility, and added SDK/CLI consumer declaration fixtures. |
