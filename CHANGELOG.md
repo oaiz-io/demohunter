@@ -4,6 +4,11 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- DemoHunter is now an OAIZ Labs open-source project maintained by OAIZ AB.
+- Public documentation is shorter and separates current guidance from historical product plans.
+
 ## [0.1.0]
 
 Initial public release.
@@ -20,5 +25,5 @@ Initial public release.
 - OpenAI narration with deterministic local cache, atomic writes, sha256 integrity, and offline reuse.
 - Portable Zod-validated `manifest.json` for downstream consumers.
 
-[Unreleased]: https://github.com/emilwareus/demohunter/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/emilwareus/demohunter/releases/tag/v0.1.0
+[Unreleased]: https://github.com/oaiz-io/demohunter/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/oaiz-io/demohunter/releases/tag/v0.1.0

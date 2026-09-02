@@ -1,6 +1,6 @@
 import { defineTour } from "demohunter";
 
-const repositoryUrl = "https://github.com/emilwareus/demohunter";
+const repositoryUrl = "https://github.com/oaiz-io/demohunter";
 const exampleTourUrl = `${repositoryUrl}/blob/main/examples/vite-demo/demos/vite-demo.tour.ts`;
 const cliAnchorUrl = `${repositoryUrl}#cli`;
 

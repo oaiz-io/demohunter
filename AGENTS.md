@@ -3,15 +3,15 @@
 
 **DemoHunter**
 
-DemoHunter is an open-source TypeScript CLI and SDK for creating narrated product demos programmatically from Playwright-style `.tour.ts` files. It runs locally, generates portable demo assets into `.demohunter/`, and uses OpenAI text-to-speech only for narration generation. The cloud offering is a later additive product, not a dependency of the OSS core.
+DemoHunter is an OAIZ Labs open-source TypeScript CLI and SDK maintained by OAIZ AB. It creates narrated product demos from Playwright-style `.tour.ts` files. It runs locally, generates portable demo assets into `.demohunter/`, and supports OpenAI and ElevenLabs text-to-speech. A cloud offering can be an additive product later, but it is not a dependency of the OSS core.
 
 **Core Value:** Developers can turn normal Playwright automation into portable narrated demo assets locally, without depending on a hosted backend.
 
 ### Constraints
 
-- **Tech stack**: Bun workspace, TypeScript 5+, ESM-first, Playwright `>=1.59`, ffmpeg-backed media generation - matches the Phase 1 implementation plan.
+- **Tech stack**: Bun workspace, TypeScript 5+, ESM-first, Playwright `>=1.61`, and ffmpeg-backed media generation.
 - **Product boundary**: OSS must stand on its own and work entirely locally - cloud features cannot leak into the default flow.
-- **Provider boundary**: TTS reads `OPENAI_API_KEY` from environment only - no embedded auth flow or custom credential storage in v1.
+- **Provider boundary**: TTS reads `OPENAI_API_KEY` or `ELEVENLABS_API_KEY` from the environment only. DemoHunter does not store credentials.
 - **Output contract**: `.demohunter/` must be portable and versioned so Cloud can ingest it later without source-repo access.
 - **Reliability**: Narration caching is mandatory, including offline regeneration behavior and corrupt-cache recovery.
 <!-- GSD:project-end -->

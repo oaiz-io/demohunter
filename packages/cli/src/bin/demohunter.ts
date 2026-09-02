@@ -65,7 +65,7 @@ Global flags:
   -h, --help               Print this help text
   -v, --version            Print the installed version
 
-Docs: https://github.com/emilwareus/demohunter`;
+Docs: https://github.com/oaiz-io/demohunter`;
 
 export async function runCli(
   argv: string[],

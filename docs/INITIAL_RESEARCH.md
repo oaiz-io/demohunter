@@ -1,4 +1,8 @@
-This research has been split into two focused documents:
+# Original product research
+
+> Historical document. This index records the initial product split. For current user documentation, start with the [documentation index](README.md).
+
+The original research was split into two documents:
 
 * `docs/phase_1_oss_core.md`
 * `docs/phase_2_cloud_offering.md`

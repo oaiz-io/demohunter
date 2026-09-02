@@ -1,5 +1,7 @@
 # Phase 1 - OSS Core
 
+> Historical design document. It records the initial implementation plan and can contain old names or examples. For current behavior, use the [documentation index](README.md) and `demohunter --help`.
+
 ## Summary
 
 Build a simple open-source TypeScript toolkit that lets developers write playwright-like narrated demo scripts in `.tour.ts` files and generate local demo assets into a `.demohunter/` directory in the current working directory.
@@ -27,7 +29,7 @@ The OSS core is intentionally narrow:
 6. AI editor support is just a companion skill.
    It teaches Claude/Codex/etc. how to use the library and CLI. It is not product infrastructure.
 7. Default TTS choice is `gpt-4o-mini-tts`.
-8. Minimum Playwright version is `>=1.59`.
+8. The initial minimum Playwright version was `>=1.59`. The current package requirement is `>=1.61`.
 
 ## Primary users
 
@@ -423,7 +425,7 @@ Build:
 * cache pruning
 * better errors
 * CI
-* Apache-2.0 or MIT license
+* MIT license
 
 Exit:
 
