@@ -9,6 +9,10 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 - DemoHunter is now an OAIZ Labs open-source project maintained by OAIZ AB.
 - Public documentation is shorter and separates current guidance from historical product plans.
 
+### Fixed
+
+- GitHub workflows now install the Chromium revision required by the lockfile's Playwright version.
+
 ## [0.1.0]
 
 Initial public release.
