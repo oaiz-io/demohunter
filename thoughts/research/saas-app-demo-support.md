@@ -6,6 +6,18 @@
 
 **Decision:** Support real-SaaS demos by passing a user-owned Playwright session file into both passes, not by teaching DemoHunter to sign in. Add a small, optional `session.storageState` config (with an environment override) that both passes load into their fresh browser contexts. Add doctor and CLI guardrails around it, and write documentation that treats live accounts as a separate risk class: side effects happen once per pass, personal data can reach the output, and Google blocks automated sign-in. Launch options, a `session capture` helper and layout-tolerant click replay should follow as separate slices. Stealth or anti-detection tooling, stored passwords and a productized "log into Google for you" feature stay out of the OSS core.
 
+## Implementation status (this branch)
+
+The research below describes `main` @ `2fe22b4`, and its repository anchors point at that commit; files changed on this branch have since moved. The owner answered both open questions with the defaults: Q1 (a), a user-managed session file only, and Q2 (a), no arbitrary browser arguments. Slices 1–5 were then implemented on this same branch instead of in the separate follow-on PRs that Part 4.2 plans. Where the code differs from the sketches, the code and `docs/saas-apps.md` are authoritative:
+
+- `locale` and `timezoneId` sit under `launch` (`launch: { channel?, headless?, locale?, timezoneId? }`), not at the top level as sketched in Part 3.3. `channel` accepts any non-empty string, and unknown `launch` keys are rejected.
+- The capture command takes the start URL as a positional argument: `demohunter session capture <start-url> [--out <path>]`. `--out` defaults to the resolved `session.storageState`.
+- Session paths that start with `~` are rejected, because Node does not expand them.
+- The expired-session hint is added to any generation failure that has no more specific hint, except a replay divergence, and it does not mention debug output. In full generation, debug capture starts at `onBeforeRun`, so a failure in `setup` or `beforeRecord` writes no debug artifacts, contrary to the assumption in Part 3.1.
+- The sample terminal output in Part 3.7 is illustrative. The real notice is one line, such as `Session: loading storage state from session.storageState (config) into 2 browser passes against https://www.notion.so. Live-account actions in this tour will run 2 times.`
+- Headed generation (`launch.headless: false`) was checked on Linux under Xvfb with Playwright's Chromium build 1228. The video has the viewport's size, as in headless mode; headed Chromium also draws classic scrollbars. This settles the headed-mode row of Part 4.3.
+- Still open: acceptance criterion 10 (three consecutive Notion generations) and the rest of the Part 4.3 validation matrix. Both need a maintainer with demo accounts.
+
 ## Executive summary
 
 DemoHunter already records real third-party websites. The repository's own dogfood demo points at `https://github.com/oaiz-io/demohunter` (`demohunter.config.ts:2`, `demos/demohunter-github.tour.ts:10-13`). What it lacks for Notion, Slack and Gmail is a **signed-in** browser, and today that is left to the author on purpose. The v1 requirements say authors keep "auth, session, and app bootstrap logic in normal Playwright code" (`.planning/milestones/v1.0-REQUIREMENTS.md:39`). The authoring reference forbids invented helpers such as `login()` (`packages/cli/skills/demohunter/references/authoring.md:60`).
@@ -76,7 +88,7 @@ Both passes start the same way:
 
 **What authors can reach today.** `DemoHunterLifecycleContext` exposes `config`, `goto` and `page` (`runtime-types.ts:64-68`). `page.context()` is the full Playwright `BrowserContext`, so an author can already call `context.addCookies()` inside `setup` (see Part 4.1 for the zero-code recipe). There is no DemoHunter-level hook before context creation. That is why the initial `page.goto(baseURL)` cannot be authenticated without a config change.
 
-**Timing between passes.** Narration synthesis happens after Pass 1's `run` and `teardown` complete (`collect-timeline.ts:94`, `buildCollectedTimeline` at `:97-140`). On a cold cache, the gap between Pass 1 sign-in and Pass 2 sign-in includes every uncached TTS request. It is short in absolute terms and not a realistic expiry window for the long-lived cookies these apps use. It does mean an **expired** session fails in Pass 1's `setup` or `beforeRecord`, before any TTS spend. That is the right place to fail.
+**Timing between passes.** Narration synthesis happens after Pass 1's `run` and `teardown` complete (`collect-timeline.ts:94`, `buildCollectedTimeline` at `:97-149`). On a cold cache, the gap between Pass 1 sign-in and Pass 2 sign-in includes every uncached TTS request. It is short in absolute terms and not a realistic expiry window for the long-lived cookies these apps use. It does mean an **expired** session fails in Pass 1's `setup` or `beforeRecord`, before any TTS spend. That is the right place to fail.
 
 ### 1.2 Determinism versus live SaaS state
 
@@ -106,7 +118,7 @@ Navigation resets the cursor origin (`create-smoke-tour-runtime.ts:78-82`, `:104
 **Failure modes that surface as timeouts, not mismatches:**
 
 - **Popups and interstitials.** Onboarding tours, "what's new" modals, cookie or consent dialogs on first load of a fresh context, notification-permission prompts and session-reauth prompts. A fresh context per pass means first-visit UI can appear in **both** passes, or in only one if the provider remembers dismissal server-side. The cookie-banner middleware only knows vendor consent banners (`packages/generator-playwright/src/middleware/cookie-banner-middleware.ts`) and is off by default (`config.ts:157-162`).
-- **Never-idle networks.** `waitForStable()` defaults to `waitForLoadState("networkidle")` (`create-smoke-tour-runtime.ts:178-189`). Playwright's own type docs mark `networkidle` as **DISCOURAGED** (`playwright-core@1.61.0/types/types.d.ts:3172`). Apps that poll or beacon continuously may never go idle, or may go idle at different times per pass (**UNVERIFIED** for these three apps specifically). SaaS tours should pass `{ state: "domcontentloaded" }` and wait on a user-facing locator, which the repo's own GitHub demo already does (`demos/demohunter-github.tour.ts:50-52`).
+- **Never-idle networks.** `waitForStable()` defaults to `waitForLoadState("networkidle")` (`create-smoke-tour-runtime.ts:178-189`). Playwright's own type docs mark `networkidle` as **DISCOURAGED** (`playwright-core@1.61.0/types/types.d.ts:3172`). Apps that poll or beacon continuously may never go idle, or may go idle at different times per pass (**UNVERIFIED** for these three apps specifically). SaaS tours should pass `{ state: "domcontentloaded" }` and wait on a user-facing locator, which the repo's own GitHub demo already does (`demos/demohunter-github.tour.ts:46-48`).
 - **Server-side results of Pass 1.** If Pass 1 creates a Notion page titled "Q3 plan" and nothing deletes it, Pass 2 sees two "Q3 plan" entries. `getByRole(..., { name: "Q3 plan" })` then hits Playwright's strict-mode multiple-match error, or the sidebar shifts and the next click's `durationMs` changes. Part 1.6 covers this in detail.
 
 **Selectors on SaaS apps.** The authoring reference asks for "stable and user-facing" selectors — headings, labels, buttons and explicit test ids (`authoring.md:61`). Third-party apps provide no test ids for their customers, and some use generated class names or dynamic ids. Role and label selectors (`getByRole`, `getByLabel`, `getByPlaceholder`) remain the right choice because accessibility names are the most stable public surface. They are not a contract, though: vendors rename buttons without notice. Real-SaaS tours are therefore **expected to rot** in a way local-app tours are not. The user does not control the release train, and there is no CI signal until the next generation fails.
@@ -123,7 +135,7 @@ Three further facts matter for auth design:
 
 ### 1.4 Bot and automation detection surface
 
-**What DemoHunter launches today.** It calls `browserType.launch()` with no options (`generate.ts:113`). Playwright's `headless` option "Defaults to `true`" (`playwright-core@1.61.0/types/types.d.ts:16120-16124`). For Chromium without a `channel`, Playwright 1.61 resolves the executable to `chromium-headless-shell` when headless (`getExecutableName` in `playwright-core@1.61.0/lib/coreBundle.js`). That is the old headless build. Since Playwright 1.49, the real browser in "new headless" mode is only used with `channel: "chrome" | "msedge" | "chromium"` ([Playwright release notes, v1.49](https://playwright.dev/docs/release-notes)). DemoHunter has no config for `headless` or `channel`.
+**What DemoHunter launches today.** It calls `browserType.launch()` with no options (`generate.ts:113`). Playwright's `headless` option "Defaults to `true`" (`playwright-core@1.61.0/types/types.d.ts:23328-23332`, in `LaunchOptions`). For Chromium without a `channel`, Playwright 1.61 resolves the executable to `chromium-headless-shell` when headless (`getExecutableName` in `playwright-core@1.61.0/lib/coreBundle.js`). That is the old headless build. Since Playwright 1.49, the real browser in "new headless" mode is only used with `channel: "chrome" | "msedge" | "chromium"` ([Playwright release notes, v1.49](https://playwright.dev/docs/release-notes)). DemoHunter has no config for `headless` or `channel`.
 
 **Detection signals an automated Chromium exposes:**
 
@@ -133,7 +145,7 @@ Three further facts matter for auth design:
 - Datacenter IPs when run in CI.
 - New device and location signals on every sign-in, which is why sign-in-per-pass is worse than session reuse.
 
-Notably, the Playwright 1.61 bundle's own browser-config resolution for its MCP/CLI tooling appends `--disable-blink-features=AutomationControlled` to Chromium launch args by default. The same bundle's persistent-context launcher passes `ignoreDefaultArgs: ["--enable-automation"]` (both observed in `playwright-core@1.61.0/lib/coreBundle.js`). Microsoft's own agent tooling therefore already softens the most obvious automation flag. That is a useful reference point for what counts as ordinary configuration rather than evasion.
+Notably, the Playwright 1.61 bundle's own browser-config resolution for its MCP/CLI tooling appends `--disable-blink-features=AutomationControlled` to Chromium launch args unless the user already passed a `--disable-blink-features` argument. The persistent contexts Playwright opens for its own recorder and trace-viewer windows pass `ignoreDefaultArgs: ["--enable-automation"]`; the MCP persistent-context launcher does not (both observed in `playwright-core@1.61.0/lib/coreBundle.js`). Microsoft's own agent tooling therefore already softens the most obvious automation flag. That is a useful reference point for what counts as ordinary configuration rather than evasion.
 
 **Google specifically.** Google says it may block sign-in from browsers that "Are being controlled through software automation rather than a human" and that are "embedded in a different application" ([support.google.com/accounts/answer/7675428](https://support.google.com/accounts/answer/7675428)). Users of Playwright report the resulting "This browser or app may not be secure" page ([microsoft/playwright#19420](https://github.com/microsoft/playwright/issues/19420)). This applies to a **human** typing credentials into a Playwright-launched window too, because the check is on the browser, not the typist. Reusing a session created in a normal browser avoids the sign-in check, but Google may still challenge or invalidate a session that suddenly appears in an automated browser (**UNVERIFIED**; no primary source found).
 
@@ -200,7 +212,7 @@ These are not auth problems, but they appear the moment the target is a real acc
 
   For Gmail this is inbox text. Failed request URLs from SaaS apps can carry identifiers in query strings (**UNVERIFIED** per app). The directory is inside the `.demohunter/` tree whose portability is a product promise (`AGENTS.md:15`). It is not referenced by the manifest, but it sits next to the output.
 - **The video, captions and poster show whatever the account shows:** names, emails, avatars, other workspaces in the switcher, message previews, notification counts. Nothing in the pipeline masks content. `snapshot` is only an event marker (`create-smoke-tour-runtime.ts:199-212`), and the screencast API DemoHunter uses has no masking options ([class-screencast](https://playwright.dev/docs/api/class-screencast)).
-- **The manifest records no provenance.** The v1 manifest the generator writes has `tour`, `playback`, `artifacts` and `timeline` only (`packages/generator-playwright/src/output/write-generation-output.ts:105-178`). The v2 schema adds variants but no source or target metadata (`packages/manifest/src/schema.ts:157-165`). Nothing session-related can leak into it today, and Part 3.5 argues it should stay that way.
+- **The manifest records no provenance.** The v1 manifest the generator writes has `tour`, `playback`, `artifacts` and `timeline` only (`packages/generator-playwright/src/output/write-generation-output.ts:105-178`). The v2 manifest, written instead when `output.formats` requests variants (`packages/generator-playwright/src/output/render-output-variants.ts:170-179`), adds variants but no source or target metadata (`packages/manifest/src/schema.ts:157-168`). Nothing session-related can leak into either today, and Part 3.5 argues it should stay that way.
 
 ### 1.7 Part 1 scorecard
 
@@ -501,12 +513,12 @@ The primary control is **demo data in a demo account**, documented prominently. 
 
 ### 3.5 Mechanism 5 — manifest and output provenance (evaluated; no change now)
 
-The generator writes manifest v1 (`write-generation-output.ts:105-178`). v2 exists as a schema but is not yet written (`packages/manifest/src/schema.ts:157-165`). Recording "recorded against a live third-party app with a session" would help a future Cloud label or gate content, but it has two problems:
+The generator writes manifest v1 (`write-generation-output.ts:105-178`) and replaces it with manifest v2 (`packages/manifest/src/schema.ts:157-168`) only when `output.formats` requests variants (`packages/generator-playwright/src/output/render-output-variants.ts:170-179`). Neither version has source or target fields. Recording "recorded against a live third-party app with a session" would help a future Cloud label or gate content, but it has two problems:
 
 - **Anything identifying is sensitive:** the session path, a hash of the file (a correlatable fingerprint), cookie names, account email, workspace name, and even the `baseURL` host for private preview environments.
-- **Cloud ingestion does not need it yet.** Mode 1, hosted output, is the Cloud's first product (`docs/phase_2_cloud_offering.md:67-77`). Mode 3, cloud generation, is explicitly later, and even then targets "reachable preview/staging environments", not third-party SaaS (`docs/phase_2_cloud_offering.md:77-79`).
+- **Cloud ingestion does not need it yet.** Mode 1, hosted output, is the Cloud's first product (`docs/phase_2_cloud_offering.md:9-13`, `:67-71`). Mode 3, cloud generation, is explicitly later, and even then targets "reachable preview/staging environments", not third-party SaaS (`docs/phase_2_cloud_offering.md:77-79`).
 
-**Recommendation:** no manifest change in these slices. When v2 becomes the written format, consider at most `capture: { sessionLoaded: boolean }`, and document permanently that paths, hashes, hosts and account identifiers are excluded. Separately, consider moving `debug/` out of the portable per-tour directory when manifest v2 lands, so `.demohunter/<tour>/` holds only manifest-listed artifacts.
+**Recommendation:** no manifest change in these slices. When v2 becomes the only written format, consider at most `capture: { sessionLoaded: boolean }`, and document permanently that paths, hashes, hosts and account identifiers are excluded. Separately, consider moving `debug/` out of the portable per-tour directory at the same point, so `.demohunter/<tour>/` holds only manifest-listed artifacts.
 
 ### 3.6 Recommended set and touch list
 
@@ -700,6 +712,8 @@ This complies with the existing guidance: plain Playwright in user code, no inve
 
 ### 4.2 Draft PR proposal
 
+*Superseded: slices 1–5 landed on this branch together with the research. See [Implementation status](#implementation-status-this-branch).*
+
 **Draft PR A: this research (deliverable of this run).**
 
 - **Worktree / branch:** `/workspace/demohunter-saas-research`, branch `research/saas-app-demos`, cut from `main` @ `2fe22b4`.
@@ -803,4 +817,4 @@ DemoHunter is closer to "computer use through tour files" than it looks. The two
 - a `session capture` convenience command;
 - ignoring the layout-derived click duration during replay matching.
 
-The hard parts are not engineering. Every pass performs real actions, real accounts contain real people's data, and Google does not want automated browsers signing in. The answer to all three is to record against demo workspaces and test accounts that the user owns, with sessions the user creates, on the user's machine. Draft PR A carries this research and the boundary decision. Implementation follows in five independent slices, starting with `feat/session-storage-state` once Q1 is answered.
+The hard parts are not engineering. Every pass performs real actions, real accounts contain real people's data, and Google does not want automated browsers signing in. The answer to all three is to record against demo workspaces and test accounts that the user owns, with sessions the user creates, on the user's machine. Draft PR A carries this research and the boundary decision. The owner answered Q1, and the five slices were implemented on the same branch (see Implementation status).
