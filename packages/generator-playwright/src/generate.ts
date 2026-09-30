@@ -189,7 +189,7 @@ export async function generateTour(
 
     const passTwoPage = await passTwoContext.newPage();
     let recordingStartedAt: number | undefined;
-    let screencastStarted = false;
+    let screencastRunning = false;
 
     try {
       report(onProgress, {
@@ -206,7 +206,7 @@ export async function generateTour(
             actionCursor: showCursor ? "none" : "pointer",
             viewport: config.viewport,
           });
-          screencastStarted = true;
+          screencastRunning = true;
           passTwoDebug = resolvedDependencies.attachDebugCapture({
             outputDir,
             page: passTwoPage,
@@ -214,8 +214,14 @@ export async function generateTour(
           });
           recordingStartedAt = resolvedDependencies.now();
         },
+        // Authored teardown often cleans up visibly (deleting what the tour
+        // created, signing out), so the recording ends with `run`.
+        onAfterRun: async () => {
+          screencastRunning = false;
+          await resolvedDependencies.stopScreencast({ page: passTwoPage });
+        },
         onMatchedEvent: (event, index) => {
-          if (recordingStartedAt === undefined) {
+          if (recordingStartedAt === undefined || !screencastRunning) {
             return;
           }
 
@@ -270,7 +276,7 @@ export async function generateTour(
       });
     }
 
-    if (screencastStarted) {
+    if (screencastRunning) {
       await resolvedDependencies.stopScreencast({
         page: passTwoPage,
         primaryError,

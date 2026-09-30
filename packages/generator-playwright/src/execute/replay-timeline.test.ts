@@ -87,6 +87,66 @@ describe("replayTimeline", () => {
     expect(contexts[2]).toBe(contexts[3]);
   });
 
+  test("calls onAfterRun after run succeeds and before teardown", async () => {
+    const calls: string[] = [];
+
+    await replayTimeline({
+      loadedConfig: createLoadedConfig("/tmp/workspace"),
+      onAfterRun: () => {
+        calls.push("after-run");
+      },
+      onBeforeRun: () => {
+        calls.push("before-run");
+      },
+      page: { goto: mock(async () => {}), waitForTimeout: mock(async () => {}) } as never,
+      timeline: { entries: [], narrations: [] },
+      tourFile: {
+        path: "/tmp/workspace/demos/billing.tour.ts",
+        tour: {
+          id: "billing-overview",
+          title: "Billing overview",
+          run: async () => {
+            calls.push("run");
+          },
+          teardown: async () => {
+            calls.push("teardown");
+          },
+        },
+      },
+    });
+
+    expect(calls).toEqual(["before-run", "run", "after-run", "teardown"]);
+  });
+
+  test("skips onAfterRun when run fails but still tears down and rethrows the run error", async () => {
+    const runError = new Error("run failed");
+    const onAfterRun = mock(() => {});
+    const teardown = mock(async () => {});
+
+    await expect(
+      replayTimeline({
+        loadedConfig: createLoadedConfig("/tmp/workspace"),
+        onAfterRun,
+        page: { goto: mock(async () => {}), waitForTimeout: mock(async () => {}) } as never,
+        timeline: { entries: [], narrations: [] },
+        tourFile: {
+          path: "/tmp/workspace/demos/billing.tour.ts",
+          tour: {
+            id: "billing-overview",
+            title: "Billing overview",
+            run: async () => {
+              throw runError;
+            },
+            teardown,
+          },
+        },
+      }),
+    ).rejects.toBe(runError);
+
+    expect(onAfterRun).not.toHaveBeenCalled();
+    expect(teardown).toHaveBeenCalledTimes(1);
+  });
+
   test("waits for narration duration plus hold padding exactly once per narration event", async () => {
     const waitForTimeout = mock(async () => {});
     const page = {

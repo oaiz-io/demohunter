@@ -19,6 +19,8 @@ import type { CollectedTimeline, CollectedTimelineEntry, TourRuntimeEvent } from
 export type ReplayTimelineInput = {
   loadedConfig: SmokeGenerateInput["loadedConfig"];
   onBeforeRun?: () => Promise<void> | void;
+  /** Called after `run` succeeds and before authored `teardown`. */
+  onAfterRun?: () => Promise<void> | void;
   onMatchedEvent?: (event: TourRuntimeEvent, index: number) => void;
   onRuntimeEvent?: (event: TourRuntimeEvent) => void;
   page: Page;
@@ -49,6 +51,7 @@ export class ReplayTimelineError extends Error {
 export async function replayTimeline({
   loadedConfig,
   onBeforeRun,
+  onAfterRun,
   onMatchedEvent,
   onRuntimeEvent,
   page,
@@ -102,6 +105,7 @@ export async function replayTimeline({
     await Promise.resolve(tourFile.tour.beforeRecord?.(lifecycleContext));
     await Promise.resolve(onBeforeRun?.());
     await Promise.resolve(tourFile.tour.run(runtime));
+    await Promise.resolve(onAfterRun?.());
   } catch (error) {
     primaryError = error;
   } finally {

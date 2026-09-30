@@ -10,6 +10,7 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 
 ### Changed
 
+- The recording now stops when `run` finishes, before `teardown` runs, so cleanup such as deleting demo data or signing out is never in the video.
 - DemoHunter is now an OAIZ Labs open-source project maintained by OAIZ AB.
 - Public documentation is shorter and separates current guidance from historical product plans.
 

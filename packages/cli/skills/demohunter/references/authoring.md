@@ -21,7 +21,7 @@ Lifecycle order:
 - `setup` runs before each pass.
 - `beforeRecord` runs after `setup` and before the recorded portion of full generation.
 - `run` is the first authored hook included in the final screencast.
-- `teardown` runs after `run`.
+- `teardown` runs after `run`, once the recording has stopped, so cleanup never appears in the video.
 
 ## Run Context
 
