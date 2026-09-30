@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { browserLaunchOptions } from "@demohunter/generator-playwright";
 import * as playwright from "playwright";
 
-import { isPathInside, loadConfig } from "../config/load-config.js";
+import { assertNoHomeShorthand, isPathInside, loadConfig } from "../config/load-config.js";
 import { readGitIgnoreStatus } from "../config/session-file.js";
 
 export type SessionCaptureInput = {
@@ -45,6 +45,9 @@ export async function sessionCaptureCommand(
   };
   const { config } = await resolvedDependencies.loadConfig(cwd);
   const startUrl = parseStartUrl(input.startUrl);
+  if (input.out !== undefined) {
+    assertNoHomeShorthand(input.out, "--out");
+  }
   const outPath = input.out === undefined ? config.session?.storageState : path.resolve(cwd, input.out);
 
   if (outPath === undefined) {

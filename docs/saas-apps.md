@@ -34,7 +34,7 @@ chmod 600 ../.demohunter-sessions/notion-demo.json
 
 ## Store it outside the repository
 
-- Use a directory next to the project, such as `../.demohunter-sessions/`, or a directory in your home folder. If the file must live inside a repository, add it to `.gitignore`.
+- Use a directory next to the project, such as `../.demohunter-sessions/`, or a directory in your home folder. Write a home-folder path in full: DemoHunter does not expand `~` and rejects paths that start with it. If the file must live inside a repository, add it to `.gitignore`.
 - DemoHunter rejects session paths inside `outputDir` or `cacheDir`, because `.demohunter/` output is meant to be shared.
 - Keep one file per app and account.
 

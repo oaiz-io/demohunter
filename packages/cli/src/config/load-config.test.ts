@@ -529,12 +529,21 @@ describe("loadConfig", () => {
     ["an array", '["../session.json"]', "session must be an object with a storageState path"],
     ["an empty path", '{ storageState: "  " }', "session.storageState must be a non-empty path"],
     ["a missing path", "{}", "session.storageState must be a non-empty path"],
+    ["an unexpanded home path", '{ storageState: "~/.demohunter-sessions/app.json" }', 'session.storageState starts with "~", which DemoHunter does not expand'],
   ])("rejects session as %s", async (_label, session, message) => {
     const cwd = await writeConfig(`
       export default { baseURL: "http://localhost:4173", session: ${session} };
     `);
 
     await expect(loadConfig(cwd, {})).rejects.toThrow(message);
+  });
+
+  test("rejects a DEMOHUNTER_STORAGE_STATE that starts with ~ instead of resolving it inside the project", async () => {
+    const cwd = await writeConfig('export default { baseURL: "http://localhost:4173" };');
+
+    await expect(loadConfig(cwd, { DEMOHUNTER_STORAGE_STATE: "~/.demohunter-sessions/app.json" })).rejects.toThrow(
+      'DEMOHUNTER_STORAGE_STATE starts with "~", which DemoHunter does not expand. Use an absolute path or a path relative to the project root.',
+    );
   });
 
   test("rejects session paths inside outputDir or cacheDir, including from the environment", async () => {

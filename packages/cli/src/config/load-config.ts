@@ -88,6 +88,17 @@ function validateAuthoredSessionConfig(session: DemoHunterUserConfig["session"])
   if (typeof session.storageState !== "string" || session.storageState.trim().length === 0) {
     throw new Error("session.storageState must be a non-empty path to a Playwright storage-state file");
   }
+  assertNoHomeShorthand(session.storageState, "session.storageState");
+}
+
+// Node does not expand "~", so "~/sessions/app.json" would resolve to a
+// directory literally named "~" inside the project.
+export function assertNoHomeShorthand(authoredPath: string, name: string): void {
+  if (authoredPath.startsWith("~")) {
+    throw new Error(
+      `${name} starts with "~", which DemoHunter does not expand. Use an absolute path or a path relative to the project root.`,
+    );
+  }
 }
 
 const LAUNCH_OPTIONS = ["channel", "headless", "locale", "timezoneId"] as const;
@@ -130,6 +141,9 @@ function resolveSessionConfig(
   portableDirs: { outputDir: string; cacheDir: string },
 ): ResolvedDemoHunterConfig["session"] {
   const envPath = env[STORAGE_STATE_ENV]?.trim();
+  if (envPath) {
+    assertNoHomeShorthand(envPath, STORAGE_STATE_ENV);
+  }
   const session: ResolvedDemoHunterConfig["session"] = envPath
     ? { storageState: resolveProjectPath(projectRoot, envPath), source: "env" }
     : authoredSession === undefined

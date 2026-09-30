@@ -59,6 +59,7 @@ describe("sessionCaptureCommand", () => {
   test.each([
     ["inside outputDir", { out: ".demohunter/app.json" }, "Refusing to write the session inside outputDir"],
     ["inside cacheDir", { out: "tmp/cache/app.json" }, "Refusing to write the session inside cacheDir"],
+    ["for an unexpanded ~ in --out", { out: "~/sessions/app.json" }, '--out starts with "~", which DemoHunter does not expand'],
     ["committable by git", { gitStatus: "not-ignored" as const }, "it is inside a git work tree and not ignored"],
     ["without a destination", { session: false }, "Pass --out <path>, or set session.storageState"],
     ["for a non-web start URL", { startUrl: "file:///etc/passwd" }, "session capture needs an http(s) start URL"],
