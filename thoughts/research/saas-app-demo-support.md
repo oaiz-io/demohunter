@@ -650,3 +650,157 @@ What makes this robust:
 - nothing session-related reaches `.demohunter/`.
 
 When the session expires, Pass 1 fails at the `beforeRecord` heading wait, before any TTS request. The CLI hint says to recreate the session file.
+
+## Part 4 — Verdict and the draft-PR proposal
+
+### 4.1 What works today with zero code changes
+
+**Public, signed-out pages of any SaaS app work now.** The repository's own demo records github.com (`demohunter.config.ts:2`, `demos/demohunter-github.tour.ts`).
+
+**Signed-in apps work today too, through author code.** `setup` runs in both passes before `beforeRecord` and receives the page (`collect-timeline.ts:72`, `replay-timeline.ts:99`, `runtime-types.ts:64-68`). `page.context()` is a full Playwright `BrowserContext`. So a tour can load a storage-state file the user created with `npx playwright open --save-storage=...`:
+
+```ts
+import { readFile } from "node:fs/promises";
+import { defineTour } from "demohunter";
+
+export default defineTour({
+  id: "notion-today",
+  title: "Notion, signed in, no DemoHunter changes",
+  async setup({ page }) {
+    const state = JSON.parse(await readFile(process.env.NOTION_STATE_FILE ?? "", "utf8"));
+    await page.context().addCookies(state.cookies);
+    // localStorage from state.origins would need page.evaluate per origin; rarely needed for sign-in.
+    await page.goto("https://www.notion.so/", { waitUntil: "domcontentloaded" });
+  },
+  async beforeRecord({ page }) {
+    await page.getByRole("heading", { name: "Demo hub" }).waitFor(); // illustrative
+  },
+  async run(/* ... */) {},
+});
+```
+
+This complies with the existing guidance: plain Playwright in user code, no invented `login()` (`authoring.md:60`). Its limits are why slice 1 is still worth doing:
+
+- the first `goto(baseURL)` in each pass is unauthenticated, because it happens before `setup` (`collect-timeline.ts:67`);
+- localStorage and IndexedDB restore is manual;
+- nothing warns about the session file's location or expiry;
+- debug capture writes page text;
+- every author re-implements the same lines.
+
+**Signing in inside `beforeRecord` with credentials from the environment works only for accounts with no 2FA, no emailed code, no CAPTCHA and no automated-browser block.** It happens `2 × (1 + responsive presets)` times per generation. It is not viable for Google. It is not recommended anywhere, because it puts passwords in the environment of a tool that promises not to handle them.
+
+| Target | Today, zero code | With slices 1–2 | With slices 3–5 | Genuinely hard |
+| --- | --- | --- | --- | --- |
+| Notion (own demo workspace) | Works via `addCookies` in `setup`; replay can fail on click-distance drift | Clean: config-level session, guardrails, off-camera cleanup | Robust to layout drift; `session capture` UX | Broad anti-robot clause (Part 1.5); UI renames rot selectors |
+| Slack (own demo workspace) | Same as Notion | Same as Notion; every send is real, twice or more | Same | Admin SSO/session policies in someone else's workspace; posting to real people |
+| Gmail (test account) | Sign-in in a Playwright window likely blocked; session reuse from such a window may be impossible | Works only if a session can be created without tripping the block (**UNVERIFIED**) | `channel: "chrome"` + headed capture improves the odds (**UNVERIFIED**) | Google's explicit automated-sign-in block and "bypassing our systems" clause; inbox PII |
+| Workspace or enterprise accounts (any app) | Technically the same | Technically the same | Same | Organizational policy, not DemoHunter, decides; the docs must say so |
+
+**Verdict.** DemoHunter can record narrated demos of real signed-in SaaS apps. For Notion and Slack in workspaces the user owns, the gap to a good experience is small and entirely inside the product boundary: load a user-owned session file into both passes, keep cleanup off camera, tolerate click-distance drift, and document the live-account hazards. Gmail is the honest exception. It is possible only with a test account and a session Google agrees to issue. It must not be pursued with evasion, and it should be documented as best effort. "Log into Google for you" as a product feature, local or hosted, is out of scope under the current constraints and the current Google terms.
+
+### 4.2 Draft PR proposal
+
+**Draft PR A: this research (deliverable of this run).**
+
+- **Worktree / branch:** `/workspace/demohunter-saas-research`, branch `research/saas-app-demos`, cut from `main` @ `2fe22b4`.
+- **Title:** `docs: research — narrated demos of real SaaS apps (Notion, Slack, Gmail)`
+- **Contains:** only `thoughts/research/saas-app-demo-support.md`. No code, no config, no docs outside `thoughts/`.
+- **Why docs-only:** slice 1 amends a documented non-goal ("Must not provide auth/session/bootstrap abstractions", `docs/phase_1_oss_core.md:200`) and depends on the owner's answer to Q1. That decision should be reviewable on its own, without code attached.
+- **Body outline:**
+  - the decision paragraph;
+  - the verdict table from Part 4.1;
+  - the slice plan below;
+  - Q1 and Q2;
+  - a note that no session files, cookies or real-account screenshots were produced or committed.
+- **Acceptance:** the owner approves or amends the boundary (Q1), the slice split, and the launch-args position (Q2). The PR then merges as a research record, like `thoughts/research/tts-stitching-tone-consistency.md`.
+
+**Follow-on implementation PRs.** Each gets its own worktree from `main` after PR A is accepted, and each is independently shippable:
+
+| # | Branch | Title | Depends on |
+| --- | --- | --- | --- |
+| 1 | `feat/session-storage-state` | `feat: load a user-owned Playwright session into both passes` | PR A (Q1) |
+| 2 | `feat/record-excludes-teardown` | `feat: stop recording before teardown` | — (independent; helps SaaS cleanup) |
+| 3 | `feat/browser-launch-options` | `feat: launch.channel, launch.headless, locale and timezone` | — |
+| 4 | `feat/session-capture-command` | `feat: demohunter session capture` | 1, 3 |
+| 5 | `feat/advisory-click-duration` | `fix: match click events without layout-derived duration` | — |
+
+Slices 2, 3 and 5 are general improvements that also benefit local apps, so they can land in any order. Slice 1 is the only one that changes the product boundary.
+
+**Interaction with open work.**
+
+- **Slice 1 is not only for third-party SaaS.** The same `session.storageState` serves the more common case of a user's own staging or preview app behind a sign-in wall. Today that case uses the same `beforeRecord` login pattern and has the same double-sign-in problem.
+- **PR #23 (DemoHunter Review)** compiles its walkthrough into an in-memory tour and hands it to the existing Playwright pipeline (per the PR description). A context-level session option would reach it without extra plumbing, but PR #23 does not need one: its target is a locally rendered review site.
+- **PR #19 (Kokoro TTS and provider registry)** also edits `packages/sdk/src/config.ts` and `load-config.ts`. The changes are additive and independent, but whichever merges second must rebase the config types and validation.
+- **PR #20 (video-generation-agent concept)** is where agent-assisted *authoring* of SaaS tours belongs (Part 2.5), not the generator.
+
+**Slice 1 acceptance criteria:**
+
+1. With no `session` and no `DEMOHUNTER_STORAGE_STATE`, generation output is unchanged and all existing tests pass without modification.
+2. With a session, both `newContext` calls in `generate.ts`, and the context in `smoke-generate.ts`, receive `storageState` from the same resolved path. Unit tests assert the options on both calls and for a responsive variant.
+3. `load-config` rejects non-object `session`, empty paths, and paths inside `outputDir` or `cacheDir`. It resolves relative paths from the project root. The environment variable overrides config.
+4. An end-to-end test uses a local fixture server whose page requires a cookie. The tour fails with an actionable session hint without the file and succeeds with it.
+5. The same test greps every file under the tour's output directory, including `manifest.json`, captions, chapters and any `debug/` artifacts produced by a forced failure, and asserts that neither the session path nor any cookie value appears.
+6. Under a session, failure debug capture writes no `body.txt` and strips URL queries.
+7. `demohunter doctor` reports existence, parse, ignore status and cookie expiry for the configured file, without printing cookie names or values.
+8. `generate` prints the session source and the live pass count before Pass 1.
+9. Documentation ships with it: `docs/saas-apps.md` (session creation, storage location, per-app recipes, the terms summary from Part 1.5 with links, the Gmail caveat), the updated `phase_1_oss_core.md` wording, and updated skill guidance (`SKILL.md:21`, `references/authoring.md:60-68`).
+10. Manual validation by a maintainer: the Notion worked example (Part 3.7) generates successfully three times in a row against a demo workspace. The PR records the outcome in text only; no session files or real-account media are committed.
+
+### 4.3 Validation plan for the UNVERIFIED items
+
+Before slice 1 leaves draft, a maintainer should run a small manual matrix and record results in the PR body. This settles the claims this document could not verify from sources:
+
+| Question | Method |
+| --- | --- |
+| Does a storage-state session load and stay valid for Notion, Slack and a Gmail test account? | Create via `playwright open --save-storage`, then generate twice, a day apart |
+| Does any provider rotate cookies so that Pass 2 is signed out? | Inspect Pass 2 failures; diff cookie values before and after Pass 1 in memory only |
+| Does Google permit sign-in in a Playwright-launched window with `--channel chrome`, headed? | One manual attempt on a test account; stop at the first block, and do not retry with evasion |
+| Do replays drift on `click.durationMs` in practice? | Five consecutive generations of the Notion example, counting `ReplayTimelineError` reasons |
+| Does `page.screencast` behave identically in headed mode? | Compare frame size and duration for the same tour, headed and headless |
+| Exact Notion terms wording | Read `app.notion.com` Personal Use Terms in a browser and replace the search-snippet quote in Part 1.5 |
+
+### 4.4 Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+| --- | --- | --- | --- |
+| Account challenge, lock or suspension (especially Google) | Medium for Gmail; low for Notion and Slack (**UNVERIFIED**) | High for the user | Test and demo accounts only; no evasion; docs say so first |
+| Session file committed or leaked (git, CI logs, shared drives) | Medium | High (bearer credential) | Refuse paths inside the output tree; `git check-ignore` warning; path-only environment variable; docs and `0600` guidance; never printed |
+| Real side effects multiplied per pass (duplicate messages, pages, emails) | High without guidance | Medium to high (real colleagues) | Pass-count notice; recipes; off-camera teardown; demo workspaces |
+| Personal data in video, poster or debug output | High on real accounts | High | Demo-data guidance; debug redaction under a session; no page text in narration |
+| Selector rot as vendors change UI | High over time | Medium (regeneration fails) | Role and label selectors; `doctor`-style dry run of the tour's `beforeRecord` could follow |
+| Refresh-token rotation signs Pass 2 out | Unknown | Medium | Validation matrix; in-memory `carry-forward` option only if observed |
+| Boundary creep, from `session capture` to "log in for me" to a hosted session vault | Medium over time | High (terms, security, credential custody) | Q1 fixed in writing; `session capture` never types into the page |
+| Support load ("Gmail doesn't work") | Medium | Low to medium | Gmail documented as best effort with the reason |
+| Terms wording changes | Low to medium | Medium | The docs link to the primary pages rather than paraphrasing them as permission |
+
+### 4.5 Open questions for the owner
+
+**Q1. Is a user-managed session file the permanent boundary, or is productized sign-in in scope?**
+*Context:* The recommendation keeps DemoHunter to loading a session the user created by hand. A productized "connect your Google, Slack or Notion account" flow, local or in Cloud, would mean DemoHunter or OAIZ holding bearer credentials for third-party accounts (against `AGENTS.md:14`). It would also mean automating Google sign-in, which Google blocks and its terms frame as bypassing.
+*Options:*
+- (a) User-managed session file only, in OSS and Cloud.
+- (b) User-managed in OSS; Cloud may later host sessions for specific providers after a separate legal and security review.
+- (c) Productize sign-in helpers, including Google.
+
+*Default if unanswered:* (a). Slice 1 proceeds on that basis, and the docs state it.
+
+**Q2. May users pass arbitrary Chromium launch arguments?**
+*Context:* A `launch.args` passthrough would let users add `--disable-blink-features=AutomationControlled`. Playwright's own MCP tooling appends that flag for Chromium by default (Part 1.4). It is also the first step from configuration toward evasion, and DemoHunter documentation would be implicated.
+*Options:*
+- (a) No passthrough; only `channel` and `headless`.
+- (b) Passthrough documented as the user's responsibility, with no DemoHunter defaults.
+- (c) Apply the MCP-style default.
+
+*Default if unanswered:* (a).
+
+## Bottom line
+
+DemoHunter is closer to "computer use through tour files" than it looks. The two-pass engine does not compare page content, so live SaaS data does not by itself break replay. Playwright already provides a human-in-the-loop way to create a session file, and a tour can load one today in `setup`. What is missing is small and fits the product's boundaries:
+
+- a `session.storageState` option loaded into both fresh contexts, with doctor, CLI and debug-output guardrails;
+- stopping the recording before `teardown`;
+- launch-channel and locale options;
+- a `session capture` convenience command;
+- ignoring the layout-derived click duration during replay matching.
+
+The hard parts are not engineering. Every pass performs real actions, real accounts contain real people's data, and Google does not want automated browsers signing in. The answer to all three is to record against demo workspaces and test accounts that the user owns, with sessions the user creates, on the user's machine. Draft PR A carries this research and the boundary decision. Implementation follows in five independent slices, starting with `feat/session-storage-state` once Q1 is answered.
