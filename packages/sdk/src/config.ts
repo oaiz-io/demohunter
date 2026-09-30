@@ -128,9 +128,10 @@ export type DemoHunterUserTTSConfig =
 export type SessionConfig = {
   /**
    * Path to a Playwright storage-state JSON file that you created and own, for
-   * example with `npx playwright open --save-storage=<file> <url>`. Relative
-   * paths resolve from the project root. DemoHunter only reads the file and
-   * loads it into both passes. It must not be inside outputDir or cacheDir.
+   * example with `demohunter session capture <url>` or
+   * `npx playwright open --save-storage=<file> <url>`. Relative paths resolve
+   * from the project root. Generation only reads the file and loads it into
+   * both passes. It must not be inside outputDir or cacheDir.
    */
   storageState: string;
 };

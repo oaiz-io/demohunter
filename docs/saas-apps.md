@@ -13,7 +13,7 @@ DemoHunter never signs in for you, never sees or stores your password, and does 
 
 ## Create a session file
 
-Run `session capture` with the app's sign-in page:
+From your DemoHunter project, run `session capture` with the app's sign-in page:
 
 ```sh
 npx demohunter session capture https://www.notion.so/login --out ../.demohunter-sessions/notion-demo.json
