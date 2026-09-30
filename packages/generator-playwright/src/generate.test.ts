@@ -338,6 +338,207 @@ describe("generateTour", () => {
     ]);
   });
 
+  test("loads the same session file into both passes and redacts their debug capture", async () => {
+    const page = { goto: mock(async () => {}) };
+    const context = {
+      close: mock(async () => {}),
+      newPage: mock(async () => page),
+    };
+    const browser = {
+      close: mock(async () => {}),
+      newContext: mock(async () => context),
+    };
+    const session = { storageState: "/home/demo/.demohunter-sessions/app.json", source: "env" as const };
+    const attachDebugCapture = mock(() => createDebugCapture());
+    const generateResponsiveVariant = mock(async () => ({
+      captionsSrtPath: "/tmp/mobile/captions.srt",
+      captionsVttPath: "/tmp/mobile/captions.vtt",
+      chaptersPath: "/tmp/mobile/chapters.json",
+      outputDir: "/tmp/mobile",
+      videoPath: "/tmp/mobile/video.mp4",
+    }));
+
+    await generateTour({
+      loadedConfig: createLoadedConfig("/tmp/project", {
+        output: { formats: [{ preset: "mobile", layout: "responsive" }] },
+        session,
+      }),
+      tourFile: createTourFile("/tmp/project"),
+    }, {
+      attachDebugCapture,
+      collectTimeline: mock(async ({ onBeforeRun }) => {
+        await onBeforeRun?.();
+        return { entries: [], narrations: [] };
+      }),
+      generateResponsiveVariant,
+      installRecordingEffects: mock(async () => {}),
+      mkdir: mock(async () => undefined),
+      mkdtemp: mock(async (prefix) => `${prefix}fixture`),
+      muxVideo: mock(async () => ({
+        mp4: { fileName: "video.mp4", format: "mp4", path: "/tmp/video.mp4" },
+      })),
+      playwright: {
+        chromium: { launch: mock(async () => browser) },
+        firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+        webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+      },
+      prepareOutputDir: mock(async () => "/tmp/project/.demohunter/billing-overview"),
+      rename: mock(async () => {}),
+      renderOutputVariants: mock(async () => {}),
+      replayTimeline: mock(async ({ onBeforeRun }) => { await onBeforeRun?.(); }),
+      startScreencast: mock(async () => {}),
+      stopScreencast: mock(async () => {}),
+      writeGenerationOutput: mock(async () => ({
+        captionsSrtPath: "/tmp/staged/captions.srt",
+        captionsVttPath: "/tmp/staged/captions.vtt",
+        chaptersPath: "/tmp/staged/chapters.json",
+        outputDir: "/tmp/staged",
+        videoPath: "/tmp/staged/video.mp4",
+      })),
+    });
+
+    const expectedContextOptions = {
+      baseURL: "http://localhost:3000",
+      viewport: { height: 720, width: 1280 },
+      storageState: "/home/demo/.demohunter-sessions/app.json",
+    };
+    expect(browser.newContext).toHaveBeenCalledTimes(2);
+    expect(browser.newContext).toHaveBeenNthCalledWith(1, expectedContextOptions);
+    expect(browser.newContext).toHaveBeenNthCalledWith(2, expectedContextOptions);
+    expect(attachDebugCapture).toHaveBeenCalledTimes(2);
+    expect(attachDebugCapture.mock.calls.map(([input]) => input.redact)).toEqual([true, true]);
+    expect(generateResponsiveVariant.mock.calls[0]?.[0].loadedConfig.config.session).toEqual(session);
+  });
+
+  test("applies configured launch options to the browser and locale and time zone to both passes", async () => {
+    const browser = {
+      close: mock(async () => {}),
+      newContext: mock(async () => ({
+        close: mock(async () => {}),
+        newPage: mock(async () => ({ goto: mock(async () => {}) })),
+      })),
+    };
+    const launch = mock(async () => browser);
+
+    await generateTour({
+      loadedConfig: createLoadedConfig("/tmp/project", {
+        launch: { channel: "chrome", headless: false, locale: "sv-SE", timezoneId: "Europe/Stockholm" },
+      }),
+      tourFile: createTourFile("/tmp/project"),
+    }, {
+      attachDebugCapture: mock(() => createDebugCapture()),
+      collectTimeline: mock(async () => ({ entries: [], narrations: [] })),
+      installRecordingEffects: mock(async () => {}),
+      muxVideo: mock(async () => ({
+        mp4: { fileName: "video.mp4" as const, format: "mp4" as const, path: "/tmp/video.mp4" },
+      })),
+      playwright: {
+        chromium: { launch },
+        firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+        webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+      },
+      prepareOutputDir: mock(async () => "/tmp/project/.demohunter/billing-overview"),
+      replayTimeline: mock(async ({ onBeforeRun }) => { await onBeforeRun?.(); }),
+      startScreencast: mock(async () => {}),
+      stopScreencast: mock(async () => {}),
+      writeGenerationOutput: mock(async () => ({
+        captionsSrtPath: "/tmp/captions.srt",
+        captionsVttPath: "/tmp/captions.vtt",
+        outputDir: "/tmp/project/.demohunter/billing-overview",
+        videoPath: "/tmp/video.mp4",
+      })),
+    });
+
+    const expectedContextOptions = {
+      baseURL: "http://localhost:3000",
+      viewport: { height: 720, width: 1280 },
+      locale: "sv-SE",
+      timezoneId: "Europe/Stockholm",
+    };
+    expect(launch).toHaveBeenCalledWith({ channel: "chrome", headless: false });
+    expect(browser.newContext).toHaveBeenNthCalledWith(1, expectedContextOptions);
+    expect(browser.newContext).toHaveBeenNthCalledWith(2, expectedContextOptions);
+  });
+
+  test("stops the recording before authored teardown and keeps teardown events off the video timeline", async () => {
+    const calls: string[] = [];
+    const outputDir = "/tmp/project/.demohunter/billing-overview";
+    const chapterEvent = (title: string) => ({ chapterTitle: title, id: undefined, kind: "chapter" as const, outputDir, title });
+    const stopScreencast = mock(async () => {
+      calls.push("stop");
+    });
+    const writeGenerationOutput = mock(async () => ({
+      captionsSrtPath: `${outputDir}/captions.srt`,
+      captionsVttPath: `${outputDir}/captions.vtt`,
+      outputDir,
+      videoPath: `${outputDir}/video.mp4`,
+    }));
+    const timestamps = [1_000, 1_250];
+
+    await generateTour(
+      {
+        loadedConfig: createLoadedConfig("/tmp/project"),
+        tourFile: {
+          path: "/tmp/project/demos/billing.tour.ts",
+          tour: {
+            id: "billing-overview",
+            title: "Billing overview",
+            run: async ({ chapter }: { chapter: (title: string) => Promise<void> }) => {
+              calls.push("run");
+              await chapter("Visible");
+            },
+            // Teardown receives the full runtime at execution time.
+            teardown: async ({ chapter }: { chapter: (title: string) => Promise<void> }) => {
+              calls.push("teardown");
+              await chapter("Cleanup");
+            },
+          },
+        },
+      },
+      {
+        attachDebugCapture: mock(() => createDebugCapture()),
+        collectTimeline: mock(async () => ({
+          entries: [
+            { event: chapterEvent("Visible"), kind: "event" as const, order: 1 },
+            { event: chapterEvent("Cleanup"), kind: "event" as const, order: 2 },
+          ],
+          narrations: [],
+        })),
+        installRecordingEffects: mock(async () => {}),
+        muxVideo: mock(async () => ({
+          mp4: { fileName: "video.mp4" as const, format: "mp4" as const, path: `${outputDir}/video.mp4` },
+        })),
+        now: () => timestamps.shift() ?? 9_999,
+        playwright: {
+          chromium: {
+            launch: mock(async () => ({
+              close: mock(async () => {}),
+              newContext: mock(async () => ({
+                close: mock(async () => {}),
+                newPage: mock(async () => ({ goto: mock(async () => {}) })),
+              })),
+            })),
+          },
+          firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+          webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+        },
+        prepareOutputDir: mock(async () => outputDir),
+        showChapterOverlay: mock(async () => {}),
+        startScreencast: mock(async () => {
+          calls.push("start");
+        }),
+        stopScreencast,
+        writeGenerationOutput,
+      },
+    );
+
+    expect(calls).toEqual(["start", "run", "stop", "teardown"]);
+    expect(stopScreencast).toHaveBeenCalledTimes(1);
+    expect(writeGenerationOutput).toHaveBeenCalledWith(expect.objectContaining({
+      chapters: [{ startMs: 250, title: "Visible" }],
+    }));
+  });
+
   test("does not publish staged baseline artifacts when variant rendering fails", async () => {
     const page = { goto: mock(async () => {}) };
     const context = {

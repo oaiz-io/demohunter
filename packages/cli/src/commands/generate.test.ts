@@ -323,6 +323,101 @@ describe("generateCommand", () => {
     );
   });
 
+  test("stops before launching a browser when the session file is missing", async () => {
+    const cwd = await makeTempProject();
+    const generateTour = mock(async () => ({ outputDir: "", videoPath: "" }));
+
+    const error = await generateCommand(cwd, "demos/sample.tour.ts", {
+      generateTour,
+      loadConfig: async () => makeSessionConfig(cwd),
+      log: () => {},
+    }).catch((caught) => caught);
+
+    expect(error.message).toBe(
+      `Session file not found: ${path.join("sessions", "app.json")} (from session.storageState). Create it by signing in once in a browser window: demohunter session capture <sign-in URL>`,
+    );
+    expect(generateTour).not.toHaveBeenCalled();
+  });
+
+  test("prints the session source and live pass count before generating", async () => {
+    const cwd = await makeTempProject();
+    await writeSessionFile(cwd);
+    const messages: string[] = [];
+    const log = (message: string) => {
+      messages.push(message);
+    };
+    const generateTour = mock(async () => ({
+      outputDir: path.join(cwd, ".demohunter/sample-smoke"),
+      videoPath: path.join(cwd, ".demohunter/sample-smoke/video.mp4"),
+    }));
+    const smokeGenerate = mock(async () => ({ outputPath: path.join(cwd, ".demohunter/sample-smoke/smoke-run.json") }));
+
+    await generateCommand(cwd, "demos/sample.tour.ts", { generateTour, loadConfig: async () => makeSessionConfig(cwd), log });
+    await generateCommand(
+      cwd,
+      "demos/sample.tour.ts",
+      { formats: [{ preset: "square" }, { preset: "mobile" }] },
+      { generateTour, loadConfig: async () => makeSessionConfig(cwd, "env"), log },
+    );
+    await generateCommand(
+      cwd,
+      "demos/sample.tour.ts",
+      { dryRun: true },
+      { loadConfig: async () => makeSessionConfig(cwd), log, smokeGenerate },
+    );
+
+    const notices = messages.filter((message) => message.includes("Session:"));
+    expect(notices).toHaveLength(3);
+    expect(notices[0]).toContain(
+      "Session: loading storage state from session.storageState (config) into 2 browser passes against https://app.example.com. Live-account actions in this tour will run 2 times.",
+    );
+    expect(notices[1]).toContain("from DEMOHUNTER_STORAGE_STATE (env) into 4 browser passes");
+    expect(notices[2]).toContain("into 1 browser pass against https://app.example.com. Live-account actions in this tour will run 1 time.");
+    expect(messages.join("\n")).not.toContain("cookie-secret");
+  });
+
+  test("adds a session hint to tour failures but not to replay divergence", async () => {
+    const cwd = await makeTempProject();
+    await writeSessionFile(cwd);
+    const divergence = new Error("Recorded pass diverged at entry 3");
+    divergence.name = "ReplayTimelineError";
+
+    await expect(
+      generateCommand(cwd, "demos/sample.tour.ts", {
+        generateTour: async () => {
+          throw new Error("locator.waitFor: Timeout 15000ms exceeded.");
+        },
+        loadConfig: async () => makeSessionConfig(cwd),
+        log: () => {},
+      }),
+    ).rejects.toThrow(
+      "locator.waitFor: Timeout 15000ms exceeded.\nA session file was loaded (source: config). If the app showed a sign-in page, the session has expired or was revoked. Recreate the session file and retry.",
+    );
+    await expect(
+      generateCommand(cwd, "demos/sample.tour.ts", {
+        generateTour: async () => {
+          throw divergence;
+        },
+        loadConfig: async () => makeSessionConfig(cwd),
+        log: () => {},
+      }),
+    ).rejects.toBe(divergence);
+  });
+
+  test("does not add the session hint to errors raised before generation starts", async () => {
+    const cwd = await makeTempProject();
+    await writeSessionFile(cwd);
+
+    const error = await generateCommand(cwd, "demos/invalid.tour.ts", {
+      generateTour: async () => ({ outputDir: "", videoPath: "" }),
+      loadConfig: async () => makeSessionConfig(cwd),
+      log: () => {},
+    }).catch((caught) => caught);
+
+    expect(error.message).toStartWith("Tour file must default export");
+    expect(error.message).not.toContain("session");
+  });
+
   test("preserves generic page.goto timeouts instead of relabeling them as baseURL outages", async () => {
     const cwd = await makeTempProject();
 
@@ -360,6 +455,30 @@ async function makeTempProject(): Promise<string> {
     'export default { id: "sample-smoke", title: "Sample", beforeRecord: "later", async run() {} };\n',
   );
   return tempRoot;
+}
+
+function makeSessionConfig(cwd: string, source: "config" | "env" = "config") {
+  const loadedConfig = makeLoadedConfig(cwd);
+
+  return {
+    ...loadedConfig,
+    config: {
+      ...loadedConfig.config,
+      baseURL: "https://app.example.com",
+      session: { storageState: path.join(cwd, "sessions", "app.json"), source },
+    },
+  };
+}
+
+async function writeSessionFile(cwd: string): Promise<void> {
+  await mkdir(path.join(cwd, "sessions"), { recursive: true });
+  await writeFile(
+    path.join(cwd, "sessions", "app.json"),
+    JSON.stringify({
+      cookies: [{ name: "sid", value: "cookie-secret", domain: "app.example.com", path: "/", expires: -1 }],
+      origins: [],
+    }),
+  );
 }
 
 function makeLoadedConfig(cwd: string) {

@@ -35,7 +35,11 @@ Use `demohunter generate <tour-file> --dry-run` while fixing selectors or app st
 
 ## Debug Artifacts
 
-Failed collection, replay, and dry-run validation write debug artifacts under `.demohunter/<tour-id>/debug/`, including failure metadata, current page text when available, and a screenshot when Playwright can capture one.
+Failed collection, replay, and dry-run validation write debug artifacts under `.demohunter/<tour-id>/debug/`, including failure metadata, current page text when available, and a screenshot when Playwright can capture one. While a session file is loaded, page text is not written and URL queries are removed.
+
+## Expired Session
+
+If a tour with `session.storageState` fails in `beforeRecord` or shows a sign-in page, the session has expired or was revoked. Ask the user to run `demohunter session capture <sign-in-url>` and sign in again. Never sign in or type credentials on their behalf.
 
 ## Doctor
 

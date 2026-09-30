@@ -21,7 +21,7 @@ Lifecycle order:
 - `setup` runs before each pass.
 - `beforeRecord` runs after `setup` and before the recorded portion of full generation.
 - `run` is the first authored hook included in the final screencast.
-- `teardown` runs after `run`.
+- `teardown` runs after `run`, once the recording has stopped, so cleanup never appears in the video.
 
 ## Run Context
 
@@ -65,7 +65,8 @@ Useful option details:
 - Use `narrateWhile(...)` when narration should bridge navigation, clicking, typing, waits, generation, highlights, or other visible motion.
 - Use `sleep(ms)` inside `narrateWhile(...)` when a UI action should happen at a specific moment in the voiceover.
 - Use `typeText(...)` inside `narrateWhile(...)` when typed text should be visible; keep Playwright `.fill(...)` for setup, beforeRecord, or other non-visible prep.
-- Use `beforeRecord` for login, fixture creation, or navigation that should happen before the final video starts.
+- Use `beforeRecord` for login to a local test app, fixture creation, or navigation that should happen before the final video starts.
+- For third-party or live signed-in apps, use `session.storageState` instead of signing in inside the tour, and check the signed-in state in `beforeRecord`. Never type real credentials in a tour.
 - Only add `setup` or `teardown` when the flow genuinely needs shared preparation or cleanup.
 
 ## Config Awareness
@@ -81,8 +82,20 @@ Inspect `demohunter.config.ts` before editing:
 - Set `record.showActions: false` for polished videos when Playwright action labels or locator text would distract from the product UI.
 - `tts.provider` is either `openai` or `elevenlabs`; `tts.language` accepts ISO 639-1 language codes and can steer language/accent. ElevenLabs receives it as `language_code`; OpenAI receives it through voice instructions.
 - ElevenLabs voices are configured by voice ID and optional `voiceSettings`.
+- `session.storageState` (or `DEMOHUNTER_STORAGE_STATE`) loads a user-created Playwright storage-state file into both passes, so tours start signed in. The user creates it with `demohunter session capture`.
+- `launch` sets `channel` (Chromium only), `headless`, `locale`, and `timezoneId` for every pass. It accepts no other browser options.
 
 Treat config as an input to the tour. Do not duplicate config values inside the tour unless the repo already does that intentionally.
+
+## Signed-In And Live Apps
+
+Every pass performs real actions in the account: `setup`, `beforeRecord`, `run`, and `teardown` run in both passes and again for each responsive output format.
+
+- Make `setup` remove leftovers from earlier runs and make `teardown` remove what the tour created, so both passes see the same page.
+- `teardown` runs after the recording stops, so cleanup does not appear in the video.
+- Prefer `waitForStable({ state: "domcontentloaded" })` plus a locator wait; live apps may never reach `networkidle`.
+- Prefer composing over sending in messaging and email apps, and work in demo workspaces or test accounts.
+- Full guide: https://github.com/oaiz-io/demohunter/blob/main/docs/saas-apps.md
 
 ## Authoring Pattern
 

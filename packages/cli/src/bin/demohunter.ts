@@ -9,6 +9,8 @@ import { doctorCommand } from "../commands/doctor.js";
 import { generateCommand } from "../commands/generate.js";
 import type { GenerateCommandOptions } from "../commands/generate.js";
 import { initCommand } from "../commands/init.js";
+import { sessionCaptureCommand } from "../commands/session.js";
+import type { SessionCaptureInput } from "../commands/session.js";
 import { addSkillCommand, parseSkillTargets } from "../commands/skill.js";
 
 type AddSkillInput = {
@@ -24,6 +26,7 @@ type CliDependencies = {
   initCommand: (cwd: string, options?: { force?: boolean }) => Promise<void>;
   generateCommand: (cwd: string, tourPath: string, options?: GenerateCommandOptions) => Promise<void>;
   addSkillCommand: (cwd: string, input: AddSkillInput) => Promise<void>;
+  sessionCaptureCommand: (cwd: string, input: SessionCaptureInput) => Promise<void>;
 };
 
 const defaultDependencies: CliDependencies = {
@@ -32,6 +35,7 @@ const defaultDependencies: CliDependencies = {
   initCommand,
   generateCommand,
   addSkillCommand,
+  sessionCaptureCommand,
 };
 
 const HELP_TEXT = `demohunter - generate narrated demo videos from Playwright tours
@@ -43,6 +47,7 @@ Commands:
   init                     Scaffold a starter tour, config, and .gitignore entry
   generate <tour-file>     Run a tour and write portable assets to .demohunter/<tour-id>/
   doctor                   Check local prerequisites and project setup
+  session capture <url>    Open a browser, sign in by hand, and save the session file
   cache list               Show cached narration entries
   cache prune              Remove stale or corrupt cache entries
   cache clear              Delete every cached narration entry
@@ -56,6 +61,9 @@ generate flags:
   --cursor <preset>        Cursor rendering: none, highlight, smooth, or ripple
   --format <preset>        Repeatable output: standard, square, mobile, or gif
   --duration <seconds>     GIF duration in seconds (0.001 to 15)
+
+session capture flags:
+  --out <path>             Session file to write (default: session.storageState)
 
 add-skill flags:
   --target <name>          Repeatable. One of: claude, codex, both.
@@ -109,6 +117,10 @@ export async function runCli(
         throw new Error("Usage: demohunter doctor");
       }
       await dependencies.doctorCommand(cwd);
+      return;
+    }
+    case "session": {
+      await dependencies.sessionCaptureCommand(cwd, parseSessionCaptureArgs(rest));
       return;
     }
     case "add-skill": {
@@ -235,6 +247,44 @@ export function parseGenerateArgs(args: readonly string[]): {
   }
 
   return { options, tourPath };
+}
+
+const SESSION_CAPTURE_USAGE = "Usage: demohunter session capture <start-url> [--out <path>]";
+
+export function parseSessionCaptureArgs(args: readonly string[]): SessionCaptureInput {
+  const [subcommand, ...rest] = args;
+  let startUrl: string | undefined;
+  let out: string | undefined;
+
+  if (subcommand !== "capture") {
+    throw new Error(SESSION_CAPTURE_USAGE);
+  }
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index]!;
+
+    if (arg === "--out" || arg.startsWith("--out=")) {
+      const value = arg === "--out" ? rest[index + 1] : arg.slice("--out=".length);
+      if (out !== undefined || value === undefined || value === "" || value.startsWith("-")) {
+        throw new Error(SESSION_CAPTURE_USAGE);
+      }
+      out = value;
+      if (arg === "--out") index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("-") || startUrl !== undefined) {
+      throw new Error(SESSION_CAPTURE_USAGE);
+    }
+
+    startUrl = arg;
+  }
+
+  if (startUrl === undefined) {
+    throw new Error(SESSION_CAPTURE_USAGE);
+  }
+
+  return out === undefined ? { startUrl } : { startUrl, out };
 }
 
 function addOutputFormat(options: GenerateCommandOptions, value: string): void {

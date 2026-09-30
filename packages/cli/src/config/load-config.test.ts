@@ -480,6 +480,156 @@ describe("loadConfig", () => {
     }
   });
 
+  test("leaves session unset when neither config nor DEMOHUNTER_STORAGE_STATE provides one", async () => {
+    const cwd = await writeConfig('export default { baseURL: "http://localhost:3000" };');
+
+    const loaded = await loadConfig(cwd, {});
+
+    expect("session" in loaded.config).toBe(false);
+  });
+
+  test("resolves a relative session.storageState from the project root", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "https://www.notion.so",
+        session: { storageState: "../.demohunter-sessions/notion-demo.json" }
+      };
+    `);
+
+    const loaded = await loadConfig(cwd, {});
+
+    expect(loaded.config.session).toEqual({
+      storageState: path.resolve(cwd, "../.demohunter-sessions/notion-demo.json"),
+      source: "config",
+    });
+  });
+
+  test("lets DEMOHUNTER_STORAGE_STATE override the configured session path", async () => {
+    const configured = await writeConfig(`
+      export default {
+        baseURL: "https://app.slack.com",
+        session: { storageState: "../.demohunter-sessions/from-config.json" }
+      };
+    `);
+    const unconfigured = await writeConfig('export default { baseURL: "https://app.slack.com" };');
+
+    expect((await loadConfig(configured, { DEMOHUNTER_STORAGE_STATE: "/secrets/slack.json" })).config.session).toEqual({
+      storageState: "/secrets/slack.json",
+      source: "env",
+    });
+    expect((await loadConfig(unconfigured, { DEMOHUNTER_STORAGE_STATE: "../ci/slack.json" })).config.session).toEqual({
+      storageState: path.resolve(unconfigured, "../ci/slack.json"),
+      source: "env",
+    });
+    expect((await loadConfig(configured, { DEMOHUNTER_STORAGE_STATE: "  " })).config.session?.source).toBe("config");
+  });
+
+  test.each([
+    ["a string", '"../session.json"', "session must be an object with a storageState path"],
+    ["an array", '["../session.json"]', "session must be an object with a storageState path"],
+    ["an empty path", '{ storageState: "  " }', "session.storageState must be a non-empty path"],
+    ["a missing path", "{}", "session.storageState must be a non-empty path"],
+    ["an unexpanded home path", '{ storageState: "~/.demohunter-sessions/app.json" }', 'session.storageState starts with "~", which DemoHunter does not expand'],
+  ])("rejects session as %s", async (_label, session, message) => {
+    const cwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", session: ${session} };
+    `);
+
+    await expect(loadConfig(cwd, {})).rejects.toThrow(message);
+  });
+
+  test("rejects a DEMOHUNTER_STORAGE_STATE that starts with ~ instead of resolving it inside the project", async () => {
+    const cwd = await writeConfig('export default { baseURL: "http://localhost:4173" };');
+
+    await expect(loadConfig(cwd, { DEMOHUNTER_STORAGE_STATE: "~/.demohunter-sessions/app.json" })).rejects.toThrow(
+      'DEMOHUNTER_STORAGE_STATE starts with "~", which DemoHunter does not expand. Use an absolute path or a path relative to the project root.',
+    );
+  });
+
+  test("rejects session paths inside outputDir or cacheDir, including from the environment", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        cacheDir: "tmp/cache",
+        session: { storageState: ".demohunter/sessions/app.json" }
+      };
+    `);
+    const cacheCwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        cacheDir: "tmp/cache",
+        session: { storageState: "tmp/cache/app.json" }
+      };
+    `);
+    const envCwd = await writeConfig('export default { baseURL: "http://localhost:4173" };');
+
+    await expect(loadConfig(cwd, {})).rejects.toThrow(
+      `session.storageState must not point inside outputDir (${path.join(cwd, ".demohunter")})`,
+    );
+    await expect(loadConfig(cacheCwd, {})).rejects.toThrow(
+      `session.storageState must not point inside cacheDir (${path.join(cacheCwd, "tmp/cache")})`,
+    );
+    await expect(
+      loadConfig(envCwd, { DEMOHUNTER_STORAGE_STATE: path.join(envCwd, ".demohunter", "app.json") }),
+    ).rejects.toThrow("DEMOHUNTER_STORAGE_STATE must not point inside outputDir");
+  });
+
+  test("accepts a session directory whose name only shares a prefix with outputDir", async () => {
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "http://localhost:4173",
+        session: { storageState: ".demohunter-sessions/app.json" }
+      };
+    `);
+
+    expect((await loadConfig(cwd, {})).config.session?.storageState).toBe(
+      path.join(cwd, ".demohunter-sessions/app.json"),
+    );
+  });
+
+  test("resolves launch options only when they are authored", async () => {
+    const unset = await writeConfig('export default { baseURL: "http://localhost:4173" };');
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "https://mail.google.com",
+        launch: { channel: "chrome", headless: false, locale: "en-US", timezoneId: "Europe/Stockholm" }
+      };
+    `);
+
+    expect("launch" in (await loadConfig(unset, {})).config).toBe(false);
+    expect((await loadConfig(cwd, {})).config.launch).toEqual({
+      channel: "chrome",
+      headless: false,
+      locale: "en-US",
+      timezoneId: "Europe/Stockholm",
+    });
+  });
+
+  test.each([
+    ["a non-object block", '"chrome"', "launch must be an object"],
+    ["browser arguments", '{ args: ["--disable-blink-features=AutomationControlled"] }', "Unsupported launch option: args. Expected one of channel, headless, locale, timezoneId."],
+    ["a non-boolean headless", '{ headless: "false" }', "launch.headless must be a boolean"],
+    ["an empty channel", '{ channel: "" }', "launch.channel must be a non-empty string"],
+    ["an empty locale", '{ locale: " " }', "launch.locale must be a non-empty string"],
+    ["a non-string timezone", "{ timezoneId: 1 }", "launch.timezoneId must be a non-empty string"],
+  ])("rejects launch with %s", async (_label, launch, message) => {
+    const cwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", launch: ${launch} };
+    `);
+
+    await expect(loadConfig(cwd, {})).rejects.toThrow(message);
+  });
+
+  test("rejects launch.channel for non-Chromium browsers", async () => {
+    const cwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", browser: "firefox", launch: { channel: "chrome" } };
+    `);
+
+    await expect(loadConfig(cwd, {})).rejects.toThrow(
+      'launch.channel requires browser "chromium"; the configured browser is "firefox"',
+    );
+  });
+
   test("throws the exact missing-config error", async () => {
     const cwd = await makeTempProject();
 

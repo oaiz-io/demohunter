@@ -22,12 +22,13 @@ The open-source CLI and SDK are self-sufficient. They run against local, preview
 - GitHub pull request automation
 - Enterprise identity and support features
 - General-purpose screen recording
-- Application-specific authentication abstractions
+- Application-specific authentication abstractions, sign-in automation, and bot-detection evasion (loading a Playwright session file the user created is in scope)
 
 ## Constraints
 
 - **Tech stack:** Bun workspace, TypeScript 5+, ESM-first, Playwright `>=1.61`, and ffmpeg-backed media generation.
 - **Credentials:** OpenAI and ElevenLabs keys come from environment variables only. DemoHunter does not store them.
+- **Sessions:** Signed-in demos load a user-owned Playwright storage-state file (`session.storageState` or `DEMOHUNTER_STORAGE_STATE`). DemoHunter never signs in, types or stores credentials, or evades bot detection; `session capture` only saves a session the user signed into by hand.
 - **Output contract:** `.demohunter/` must remain portable and versioned.
 - **Reliability:** Narration caching must support offline regeneration and corrupt-cache recovery.
 - **Compatibility:** Existing config, CLI flags, and output structures must remain compatible unless a documented version boundary permits a change.

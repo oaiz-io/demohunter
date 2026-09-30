@@ -10,7 +10,7 @@ The OSS core is intentionally narrow:
 
 * it is a thin wrapper on top of Playwright
 * users keep writing normal Playwright-style browser automation
-* auth, session handling, and app-specific setup stay in user Playwright code
+* sign-in and app-specific setup stay in user Playwright code; DemoHunter can load a Playwright storage-state file that the user created by signing in by hand (for example with `demohunter session capture`), but it never signs in, types credentials, or evades bot detection
 * the OSS tool generates local files only
 * there is no built-in player, no plugin system, and no cloud dependency
 
@@ -45,7 +45,7 @@ The OSS core is intentionally narrow:
 * Browser-based video editing
 * Full cloud generation of private local apps
 * General-purpose screen recording outside scripted tours
-* Auth/session/bootstrap abstractions on top of Playwright
+* Sign-in automation, credential handling, or bot-detection evasion (loading a user-created session file, or saving one with `session capture` after the user signs in by hand, is in scope)
 
 ## Core user stories
 
@@ -197,7 +197,7 @@ Optional skill docs containing:
 * Must expose `holdPaddingMs` in config, default around `300`.
 * Must write generated files into a `.demohunter/` directory relative to the current working directory.
 * Must not require or provide a built-in playback UI in OSS.
-* Must not provide auth/session/bootstrap abstractions; users should do that directly with Playwright.
+* May load a Playwright storage-state file that the user created and owns (`session.storageState`); `session capture` only saves a session the user signed into by hand. Must not sign in, type or store credentials, or evade bot detection. Other bootstrap logic stays in user Playwright code.
 
 ### Narration
 

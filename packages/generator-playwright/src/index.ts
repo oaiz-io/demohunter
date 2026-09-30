@@ -1,3 +1,4 @@
+export { browserLaunchOptions } from "./browser-options.js";
 export { generateTour } from "./generate.js";
 export type { GenerateTourInput, GenerateTourResult } from "./generate.js";
 export { smokeGenerate } from "./smoke-generate.js";

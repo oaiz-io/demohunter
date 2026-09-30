@@ -176,5 +176,6 @@ Same shape for `examples/vite-demo`.
 ## Next steps
 
 - [Troubleshooting](./troubleshooting.md) — common first-run blockers.
+- [Signed-in apps](./saas-apps.md) — record apps behind a sign-in page with a session file.
 - [Agent skill](../packages/cli/skills/demohunter/) — `.tour.ts` authoring rules for AI agents.
 - [Contributing](../CONTRIBUTING.md) — repository setup and pull request guidance.

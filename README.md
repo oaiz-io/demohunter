@@ -78,6 +78,8 @@ npx demohunter generate demos/billing-overview.tour.ts
 
 Use `narrate()` for a static screen. Use `narrateWhile()` when visible actions must occur during the narration. Use Playwright directly for application setup, authentication, and assertions.
 
+To record a signed-in app such as Notion or Slack, sign in once by hand with `npx demohunter session capture <sign-in-url> --out <file>` and point `session.storageState` at that file. DemoHunter never signs in for you or stores passwords. Read [Signed-in apps](https://github.com/oaiz-io/demohunter/blob/main/docs/saas-apps.md) first: every pass performs real actions in the account.
+
 ## Output
 
 Each run writes portable assets to `.demohunter/<tour-id>/`:
@@ -101,6 +103,7 @@ npx demohunter generate <tour-file>
 npx demohunter generate <tour-file> --dry-run
 npx demohunter generate <tour-file> --format standard --format square
 npx demohunter doctor
+npx demohunter session capture <sign-in-url> [--out <file>]
 npx demohunter cache list|prune|clear
 npx demohunter add-skill [--target claude|codex|both]
 ```
@@ -112,6 +115,7 @@ Cookie-banner automation is off by default. Enable it for a supported vendor wit
 - [Documentation index](https://github.com/oaiz-io/demohunter/blob/main/docs/README.md)
 - [Getting started](https://github.com/oaiz-io/demohunter/blob/main/docs/getting-started.md)
 - [Troubleshooting](https://github.com/oaiz-io/demohunter/blob/main/docs/troubleshooting.md)
+- [Signed-in apps](https://github.com/oaiz-io/demohunter/blob/main/docs/saas-apps.md)
 - [DemoHunter agent skill](https://github.com/oaiz-io/demohunter/tree/main/packages/cli/skills/demohunter)
 
 ## Contributing and support
