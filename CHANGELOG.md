@@ -18,6 +18,7 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 
 ### Fixed
 
+- Replay no longer fails when a smooth-cursor click's layout-derived motion duration differs between passes, for example after a banner shifts the page. Every other event field is still matched exactly.
 - GitHub workflows now install the Chromium revision required by the lockfile's Playwright version.
 
 ## [0.1.0]

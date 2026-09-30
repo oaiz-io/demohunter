@@ -173,7 +173,7 @@ function createReplayRuntime(args: {
 
       const expectedEvent = expectedEntry.event;
 
-      if (!isDeepStrictEqual(actualEvent, expectedEvent)) {
+      if (!eventsMatch(actualEvent, expectedEvent)) {
         throw new ReplayTimelineError(
           `Recorded pass diverged at entry ${index}: expected ${describeEvent(expectedEvent)} but received ${describeEvent(actualEvent)}.`,
           {
@@ -320,6 +320,18 @@ function assertReplayComplete(entries: CollectedTimelineEntry[], nextExpectedInd
   );
 }
 
+// A smooth-cursor click's durationMs is derived from the on-screen distance to
+// its target, so it drifts whenever a live app's layout shifts between passes.
+// Pass 2 animates with its own measurement and nothing reads the collected
+// value, so it is advisory; every other field stays strict.
+function eventsMatch(actual: TourRuntimeEvent, expected: TourRuntimeEvent): boolean {
+  if (actual.kind === "click" && expected.kind === "click") {
+    return isDeepStrictEqual({ ...actual, durationMs: 0 }, { ...expected, durationMs: 0 });
+  }
+
+  return isDeepStrictEqual(actual, expected);
+}
+
 function describeEvent(event: TourRuntimeEvent): string {
   const chapter = event.chapterTitle === undefined ? "unscoped" : event.chapterTitle;
 
@@ -333,8 +345,11 @@ function describeEvent(event: TourRuntimeEvent): string {
       return `narration "${event.text}" in chapter "${chapter}"`;
     case "narration-sleep":
       return `narration sleep ${event.durationMs}ms in chapter "${chapter}"`;
-    case "click":
-      return `click after ${event.durationMs}ms cursor motion in chapter "${chapter}"`;
+    case "click": {
+      const { chapterTitle: _chapterTitle, durationMs: _durationMs, kind: _kind, ...options } = event;
+      const details = Object.keys(options).length === 0 ? "" : ` ${JSON.stringify(options)}`;
+      return `click${details} in chapter "${chapter}"`;
+    }
     default:
       return `${event.kind} event in chapter "${chapter}"`;
   }
