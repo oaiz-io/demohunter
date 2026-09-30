@@ -5,9 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import type { ResolvedSessionConfig } from "@demohunter/sdk";
 import * as playwright from "playwright";
 
 import { loadConfig } from "../config/load-config.js";
+import { describeSessionSource, readGitIgnoreStatus, readStorageStateFile } from "../config/session-file.js";
+import type { GitIgnoreStatus, StorageStateSummary } from "../config/session-file.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -56,6 +59,7 @@ type DoctorDependencies = {
   loadConfig: typeof loadConfig;
   log: (message: string) => void;
   playwright: Pick<typeof playwright, "chromium" | "firefox" | "webkit">;
+  readGitIgnoreStatus: typeof readGitIgnoreStatus;
 };
 
 const defaultDependencies: DoctorDependencies = {
@@ -67,6 +71,7 @@ const defaultDependencies: DoctorDependencies = {
   loadConfig,
   log: console.log,
   playwright,
+  readGitIgnoreStatus,
 };
 
 export async function doctorCommand(
@@ -155,6 +160,14 @@ export async function doctorCommand(
       await checkWritableDirectory(loadedConfig.config.cacheDir);
       return { message: `${loadedConfig.config.cacheDir} is writable` };
     });
+    if (loadedConfig.config.session !== undefined) {
+      await checkSession(checks, {
+        baseURL: loadedConfig.config.baseURL,
+        cwd,
+        readIgnoreStatus: resolvedDependencies.readGitIgnoreStatus,
+        session: loadedConfig.config.session,
+      });
+    }
   } else {
     checks.push(
       {
@@ -213,6 +226,105 @@ async function runCheck<T>(
     });
     return undefined;
   }
+}
+
+// Reports on the session file without ever printing cookie names or values.
+async function checkSession(
+  checks: DoctorCheck[],
+  { baseURL, cwd, readIgnoreStatus, session }: {
+    baseURL: string;
+    cwd: string;
+    readIgnoreStatus: typeof readGitIgnoreStatus;
+    session: ResolvedSessionConfig;
+  },
+): Promise<void> {
+  const state = await runCheck(checks, "session file", async () => {
+    const summary = await readStorageStateFile(session, cwd);
+    return {
+      message: `${describeSessionSource(session)} (${session.source}) is a Playwright storage-state file with ${plural(summary.cookies.length, "cookie")} and ${plural(summary.originCount, "origin")}`,
+      value: summary,
+    };
+  });
+
+  checks.push(describeGitIgnoreStatus(await readIgnoreStatus(session.storageState)));
+
+  if (state !== undefined) {
+    checks.push(describeCookieExpiry(state.cookies, baseURL, Date.now()));
+  }
+}
+
+function describeGitIgnoreStatus(status: GitIgnoreStatus): DoctorCheck {
+  const name = "session git status";
+
+  switch (status) {
+    case "ignored":
+      return { name, status: "pass", message: "The session file is ignored by git" };
+    case "outside-work-tree":
+      return { name, status: "pass", message: "The session file is outside any git work tree" };
+    case "not-ignored":
+      return {
+        name,
+        status: "warn",
+        message: "The session file is inside a git work tree and not ignored. It is a credential: add it to .gitignore or move it outside the repository.",
+      };
+    case "unknown":
+      return { name, status: "warn", message: "Could not check whether git ignores the session file" };
+  }
+}
+
+function describeCookieExpiry(
+  cookies: StorageStateSummary["cookies"],
+  baseURL: string,
+  nowMs: number,
+): DoctorCheck {
+  const name = "session cookies";
+  const host = URL.canParse(baseURL) ? new URL(baseURL).hostname : "";
+
+  if (host === "") {
+    return { name, status: "pass", message: "baseURL has no host name, so cookie expiry was not checked" };
+  }
+
+  const matching = cookies.filter((cookie) => {
+    const domain = cookie.domain.replace(/^\./, "").toLowerCase();
+    return host === domain || host.endsWith(`.${domain}`);
+  });
+
+  if (matching.length === 0) {
+    return {
+      name,
+      status: "warn",
+      message: `No cookies in the session file apply to ${host}. Check that baseURL is the app you signed in to.`,
+    };
+  }
+
+  // Playwright stores browser-session cookies with expires -1.
+  const unexpired = matching.filter((cookie) => cookie.expires < 0 || cookie.expires * 1000 > nowMs);
+
+  if (unexpired.length === 0) {
+    return {
+      name,
+      status: "warn",
+      message: `Every cookie for ${host} has expired (${plural(matching.length, "cookie")}). Recreate the session file.`,
+    };
+  }
+
+  const expiries = unexpired.filter((cookie) => cookie.expires >= 0).map((cookie) => cookie.expires);
+
+  if (expiries.length === 0) {
+    return { name, status: "pass", message: `${plural(unexpired.length, "cookie")} apply to ${host}; none has an expiry date` };
+  }
+
+  const earliest = new Date(Math.min(...expiries) * 1000).toISOString().slice(0, 10);
+
+  return {
+    name,
+    status: "pass",
+    message: `${plural(unexpired.length, "unexpired cookie")} for ${host}; the earliest expires on ${earliest}`,
+  };
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 async function checkBaseURL(baseURL: string, fetchImplementation: typeof fetch): Promise<void> {

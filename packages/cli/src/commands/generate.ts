@@ -12,6 +12,7 @@ import {
 } from "@demohunter/sdk";
 
 import { loadConfig } from "../config/load-config.js";
+import { SessionFileError, describeSessionSource, readStorageStateFile } from "../config/session-file.js";
 import { loadAuthoredModule } from "../utils/load-authored-module.js";
 
 type TourModule = {
@@ -75,8 +76,20 @@ export async function generateCommand(
     const onProgress = (event: GenerationProgressEvent) => {
       resolvedDependencies.log(formatProgress(event));
     };
+    const dryRun = options.dryRun === true || options.flowOnly === true;
+    const { session } = loadedConfig.config;
 
-    if (options.dryRun || options.flowOnly) {
+    if (session !== undefined) {
+      // Fail before launching a browser, and make the live-account cost visible.
+      await readStorageStateFile(session, cwd);
+      const passes = dryRun ? 1 : 2 * (1 + countResponsiveCaptures(loadedConfig.config));
+      resolvedDependencies.log(formatProgress({
+        phase: "launching-browser",
+        message: `Session: loading storage state from ${describeSessionSource(session)} (${session.source}) into ${passes} browser ${passes === 1 ? "pass" : "passes"} against ${loadedConfig.config.baseURL}. Live-account actions in this tour will run ${passes} ${passes === 1 ? "time" : "times"}.`,
+      }));
+    }
+
+    if (dryRun) {
       const result = await resolvedDependencies.smokeGenerate({
         loadedConfig,
         onProgress,
@@ -174,6 +187,11 @@ function formatProgress(event: GenerationProgressEvent): string {
   return `[${new Date().toISOString()}] ${event.message}`;
 }
 
+// Each responsive preset re-runs both passes at its own viewport.
+function countResponsiveCaptures(config: ResolvedDemoHunterConfig): number {
+  return config.output.formats.filter((format) => format.preset !== "gif" && format.layout === "responsive").length;
+}
+
 type TourLike = DemoHunterTour & {
   beforeRecord?: unknown;
   setup?: unknown;
@@ -266,6 +284,19 @@ function improveGenerateError(input: {
 
     return new Error(
       `DemoHunter could not reach baseURL ${baseURL}. Start your app yourself, confirm that URL is reachable, and then rerun "demohunter generate".`,
+      { cause: input.error },
+    );
+  }
+
+  const session = input.loadedConfig?.config.session;
+
+  if (
+    session !== undefined
+    && !(input.error instanceof SessionFileError)
+    && input.error.name !== "ReplayTimelineError"
+  ) {
+    return new Error(
+      `${message}\nA session file was loaded (source: ${session.source}). If the app showed a sign-in page, the session has expired or was revoked. Recreate the session file and retry.`,
       { cause: input.error },
     );
   }

@@ -4,6 +4,10 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- `session.storageState` in `demohunter.config.ts`, or `DEMOHUNTER_STORAGE_STATE`, loads a Playwright storage-state file you created into both passes, so tours can record signed-in apps. DemoHunter only reads the file. `demohunter doctor` checks it, `generate` reports how many passes run against the live account, and failure debug output skips page text and strips URL queries while a session is loaded.
+
 ### Changed
 
 - DemoHunter is now an OAIZ Labs open-source project maintained by OAIZ AB.

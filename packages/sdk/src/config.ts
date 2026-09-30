@@ -125,6 +125,23 @@ export type DemoHunterUserTTSConfig =
   | (Partial<Omit<OpenAITTSConfig, "provider">> & { provider?: "openai" })
   | (Partial<Omit<ElevenLabsTTSConfig, "provider">> & { provider: "elevenlabs" });
 
+export type SessionConfig = {
+  /**
+   * Path to a Playwright storage-state JSON file that you created and own, for
+   * example with `npx playwright open --save-storage=<file> <url>`. Relative
+   * paths resolve from the project root. DemoHunter only reads the file and
+   * loads it into both passes. It must not be inside outputDir or cacheDir.
+   */
+  storageState: string;
+};
+
+export type ResolvedSessionConfig = {
+  /** Absolute path. Never written to generated output. */
+  storageState: string;
+  /** `config` for session.storageState, `env` for DEMOHUNTER_STORAGE_STATE. */
+  source: "config" | "env";
+};
+
 export type DemoHunterUserConfig = {
   baseURL: string;
   outputDir?: string;
@@ -135,6 +152,8 @@ export type DemoHunterUserConfig = {
   record?: DemoHunterUserRecordConfig;
   output?: Partial<OutputConfig>;
   tts?: DemoHunterUserTTSConfig;
+  /** Start both passes signed in with a user-owned Playwright storage state. */
+  session?: SessionConfig;
 };
 
 export type ResolvedDemoHunterConfig = {
@@ -147,6 +166,7 @@ export type ResolvedDemoHunterConfig = {
   record: ResolvedRecordConfig;
   output: OutputConfig;
   tts: TTSConfig;
+  session?: ResolvedSessionConfig;
 };
 
 export const DEFAULT_VIEWPORT_CONFIG: ViewportConfig = {

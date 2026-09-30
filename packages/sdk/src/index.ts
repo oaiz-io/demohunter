@@ -34,6 +34,8 @@ export type {
   RecordFormat,
   ResolvedRecordConfig,
   ResolvedDemoHunterConfig,
+  ResolvedSessionConfig,
+  SessionConfig,
   TTSConfig,
   TTSProviderName,
   ViewportConfig,

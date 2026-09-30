@@ -338,6 +338,78 @@ describe("generateTour", () => {
     ]);
   });
 
+  test("loads the same session file into both passes and redacts their debug capture", async () => {
+    const page = { goto: mock(async () => {}) };
+    const context = {
+      close: mock(async () => {}),
+      newPage: mock(async () => page),
+    };
+    const browser = {
+      close: mock(async () => {}),
+      newContext: mock(async () => context),
+    };
+    const session = { storageState: "/home/demo/.demohunter-sessions/app.json", source: "env" as const };
+    const attachDebugCapture = mock(() => createDebugCapture());
+    const generateResponsiveVariant = mock(async () => ({
+      captionsSrtPath: "/tmp/mobile/captions.srt",
+      captionsVttPath: "/tmp/mobile/captions.vtt",
+      chaptersPath: "/tmp/mobile/chapters.json",
+      outputDir: "/tmp/mobile",
+      videoPath: "/tmp/mobile/video.mp4",
+    }));
+
+    await generateTour({
+      loadedConfig: createLoadedConfig("/tmp/project", {
+        output: { formats: [{ preset: "mobile", layout: "responsive" }] },
+        session,
+      }),
+      tourFile: createTourFile("/tmp/project"),
+    }, {
+      attachDebugCapture,
+      collectTimeline: mock(async ({ onBeforeRun }) => {
+        await onBeforeRun?.();
+        return { entries: [], narrations: [] };
+      }),
+      generateResponsiveVariant,
+      installRecordingEffects: mock(async () => {}),
+      mkdir: mock(async () => undefined),
+      mkdtemp: mock(async (prefix) => `${prefix}fixture`),
+      muxVideo: mock(async () => ({
+        mp4: { fileName: "video.mp4", format: "mp4", path: "/tmp/video.mp4" },
+      })),
+      playwright: {
+        chromium: { launch: mock(async () => browser) },
+        firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+        webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+      },
+      prepareOutputDir: mock(async () => "/tmp/project/.demohunter/billing-overview"),
+      rename: mock(async () => {}),
+      renderOutputVariants: mock(async () => {}),
+      replayTimeline: mock(async ({ onBeforeRun }) => { await onBeforeRun?.(); }),
+      startScreencast: mock(async () => {}),
+      stopScreencast: mock(async () => {}),
+      writeGenerationOutput: mock(async () => ({
+        captionsSrtPath: "/tmp/staged/captions.srt",
+        captionsVttPath: "/tmp/staged/captions.vtt",
+        chaptersPath: "/tmp/staged/chapters.json",
+        outputDir: "/tmp/staged",
+        videoPath: "/tmp/staged/video.mp4",
+      })),
+    });
+
+    const expectedContextOptions = {
+      baseURL: "http://localhost:3000",
+      viewport: { height: 720, width: 1280 },
+      storageState: "/home/demo/.demohunter-sessions/app.json",
+    };
+    expect(browser.newContext).toHaveBeenCalledTimes(2);
+    expect(browser.newContext).toHaveBeenNthCalledWith(1, expectedContextOptions);
+    expect(browser.newContext).toHaveBeenNthCalledWith(2, expectedContextOptions);
+    expect(attachDebugCapture).toHaveBeenCalledTimes(2);
+    expect(attachDebugCapture.mock.calls.map(([input]) => input.redact)).toEqual([true, true]);
+    expect(generateResponsiveVariant.mock.calls[0]?.[0].loadedConfig.config.session).toEqual(session);
+  });
+
   test("does not publish staged baseline artifacts when variant rendering fails", async () => {
     const page = { goto: mock(async () => {}) };
     const context = {

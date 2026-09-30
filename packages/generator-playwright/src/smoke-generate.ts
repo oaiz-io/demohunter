@@ -10,6 +10,7 @@ import {
 import * as playwright from "playwright";
 import type { BrowserType, Page } from "playwright";
 
+import { browserContextOptions } from "./browser-options.js";
 import { attachDebugCapture } from "./debug/failure-artifacts.js";
 import type { DebugCapture } from "./debug/failure-artifacts.js";
 import type { GenerationProgressEvent, GenerationProgressReporter, TourRuntimeEvent } from "./execute/generator-types.js";
@@ -88,10 +89,7 @@ export async function smokeGenerate(
   let lastRuntimeEvent: TourRuntimeEvent | undefined;
 
   try {
-    context = await browser.newContext({
-      baseURL: config.baseURL,
-      viewport: config.viewport,
-    });
+    context = await browser.newContext(browserContextOptions(config));
     const page = await context.newPage();
     const cookieMiddleware = resolvedDependencies.createCookieBannerMiddleware(
       config.record.cookieBanners ?? DEFAULT_COOKIE_BANNER_CONFIG,
@@ -101,6 +99,7 @@ export async function smokeGenerate(
     debugCapture = resolvedDependencies.attachDebugCapture({
       outputDir,
       page,
+      redact: config.session !== undefined,
     });
     const runtime = createSmokeTourRuntime({
       afterNavigation: async () => {

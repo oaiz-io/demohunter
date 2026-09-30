@@ -5,6 +5,7 @@ import type { DemoHunterRunContext, HighlightStyle, ResolvedDemoHunterConfig } f
 import * as playwright from "playwright";
 import type { BrowserType, Page } from "playwright";
 
+import { browserContextOptions } from "./browser-options.js";
 import { collectTimeline } from "./execute/collect-timeline.js";
 import type {
   CollectedTimeline,
@@ -132,10 +133,7 @@ export async function generateTour(
       await resolvedDependencies.mkdir(artifactOutputDir, { recursive: true });
     }
 
-    passOneContext = await browser.newContext({
-      baseURL: config.baseURL,
-      viewport: config.viewport,
-    });
+    passOneContext = await browser.newContext(browserContextOptions(config));
 
     const passOnePage = await passOneContext.newPage();
     report(onProgress, {
@@ -153,6 +151,7 @@ export async function generateTour(
             passOneDebug = resolvedDependencies.attachDebugCapture({
               outputDir,
               page: passOnePage,
+              redact: config.session !== undefined,
             });
           },
           onProgress,
@@ -171,10 +170,7 @@ export async function generateTour(
     await passOneContext.close();
     passOneContext = undefined;
 
-    passTwoContext = await browser.newContext({
-      baseURL: config.baseURL,
-      viewport: config.viewport,
-    });
+    passTwoContext = await browser.newContext(browserContextOptions(config));
 
     const showCursor = config.record.cursor === false
       ? false
@@ -214,6 +210,7 @@ export async function generateTour(
           passTwoDebug = resolvedDependencies.attachDebugCapture({
             outputDir,
             page: passTwoPage,
+            redact: config.session !== undefined,
           });
           recordingStartedAt = resolvedDependencies.now();
         },
