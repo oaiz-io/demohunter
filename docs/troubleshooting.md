@@ -60,6 +60,18 @@ When collection, replay, or dry-run validation fails, DemoHunter writes debug fi
 
 The directory includes `failure.json`, `body.txt` when page text is available, and `screenshot.png` when Playwright can capture the current page.
 
+While a session file is loaded, DemoHunter does not write `body.txt` and removes query strings and fragments from URLs in `failure.json`. The screenshot still shows the signed-in account.
+
+## `Session file not found` or the app shows its sign-in page
+
+`session.storageState` or `DEMOHUNTER_STORAGE_STATE` points to a missing file, or the saved session has expired or was revoked. Sign in again and replace the file:
+
+```sh
+npx demohunter session capture https://app.example.com/login
+```
+
+See [Signed-in apps](saas-apps.md) for storage and safety guidance.
+
 ## Validate the flow before narration
 
 Use dry-run mode while authoring selectors or app state:
@@ -78,7 +90,7 @@ Run:
 npx demohunter doctor
 ```
 
-This checks config loading, `ffmpeg`, `ffprobe`, Playwright browser launchability, `baseURL` reachability, output/cache writability, and whether `OPENAI_API_KEY` is available for uncached narration.
+This checks config loading, `ffmpeg`, `ffprobe`, Playwright browser launchability, `baseURL` reachability, output/cache writability, and whether `OPENAI_API_KEY` is available for uncached narration. With a session configured, it also checks the session file, whether git would commit it, and when its cookies expire.
 
 ## `Tour file must default export an object with string id/title and a run function`
 
