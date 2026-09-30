@@ -8,6 +8,7 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 
 - `session.storageState` in `demohunter.config.ts`, or `DEMOHUNTER_STORAGE_STATE`, loads a Playwright storage-state file you created into both passes, so tours can record signed-in apps. DemoHunter only reads the file. `demohunter doctor` checks it, `generate` reports how many passes run against the live account, and failure debug output skips page text and strips URL queries while a session is loaded.
 - `launch` in `demohunter.config.ts` sets `headless`, `locale`, `timezoneId`, and the Chromium `channel` for every pass. Arbitrary browser arguments are not accepted.
+- `demohunter session capture <start-url> [--out <path>]` opens a visible browser, lets you sign in by hand, and saves the session file with owner-only permissions when you press Enter. DemoHunter never types into the page.
 
 ### Changed
 

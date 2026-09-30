@@ -334,7 +334,7 @@ describe("generateCommand", () => {
     }).catch((caught) => caught);
 
     expect(error.message).toBe(
-      `Session file not found: ${path.join("sessions", "app.json")} (from session.storageState). Create it by signing in once in a browser window: npx playwright open --save-storage=${path.join("sessions", "app.json")} <sign-in URL>`,
+      `Session file not found: ${path.join("sessions", "app.json")} (from session.storageState). Create it by signing in once in a browser window: demohunter session capture <sign-in URL>`,
     );
     expect(generateTour).not.toHaveBeenCalled();
   });

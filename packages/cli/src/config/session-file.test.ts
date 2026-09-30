@@ -43,7 +43,7 @@ describe("readStorageStateFile", () => {
 
     expect(error).toBeInstanceOf(SessionFileError);
     expect(error.message).toBe(
-      `Session file not found: ${path.join("sessions", "app.json")} (from DEMOHUNTER_STORAGE_STATE). Create it by signing in once in a browser window: npx playwright open --save-storage=${path.join("sessions", "app.json")} <sign-in URL>`,
+      `Session file not found: ${path.join("sessions", "app.json")} (from DEMOHUNTER_STORAGE_STATE). Create it by signing in once in a browser window: demohunter session capture <sign-in URL>`,
     );
   });
 

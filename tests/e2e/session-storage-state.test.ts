@@ -46,7 +46,7 @@ describe("session storage state", () => {
     expect(result.stderr).toContain(
       `Session file not found: ${path.join("..", "sessions", "demo-state.json")} (from session.storageState).`,
     );
-    expect(result.stderr).toContain("--save-storage=");
+    expect(result.stderr).toContain("demohunter session capture <sign-in URL>");
     expect(result.stdout).not.toContain("Launching chromium");
   }, generationTimeoutMs);
 

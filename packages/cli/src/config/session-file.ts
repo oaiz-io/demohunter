@@ -40,7 +40,7 @@ export async function readStorageStateFile(session: ResolvedSessionConfig, cwd: 
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new SessionFileError(
-        `Session file not found: ${origin}. Create it by signing in once in a browser window: npx playwright open --save-storage=${displayPath} <sign-in URL>`,
+        `Session file not found: ${origin}. Create it by signing in once in a browser window: demohunter session capture <sign-in URL>`,
       );
     }
     throw new SessionFileError(`Could not read session file ${origin}: ${(error as NodeJS.ErrnoException).code ?? "unknown error"}`);

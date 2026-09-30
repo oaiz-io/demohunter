@@ -152,7 +152,7 @@ function resolveSessionConfig(
   return session;
 }
 
-function isPathInside(candidate: string, directory: string): boolean {
+export function isPathInside(candidate: string, directory: string): boolean {
   const relative = path.relative(directory, candidate);
 
   return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
