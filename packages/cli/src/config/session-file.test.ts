@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { SessionFileError, readGitIgnoreStatus, readStorageStateFile } from "./session-file.js";
+import { readGitIgnoreStatus, readStorageStateFile } from "./session-file.js";
 
 const execFileAsync = promisify(execFile);
 const tempRoots: string[] = [];
@@ -41,7 +41,6 @@ describe("readStorageStateFile", () => {
 
     const error = await readStorageStateFile({ storageState, source: "env" }, root).catch((caught) => caught);
 
-    expect(error).toBeInstanceOf(SessionFileError);
     expect(error.message).toBe(
       `Session file not found: ${path.join("sessions", "app.json")} (from DEMOHUNTER_STORAGE_STATE). Create it by signing in once in a browser window: demohunter session capture <sign-in URL>`,
     );

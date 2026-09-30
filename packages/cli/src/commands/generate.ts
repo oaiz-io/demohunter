@@ -12,7 +12,7 @@ import {
 } from "@demohunter/sdk";
 
 import { loadConfig } from "../config/load-config.js";
-import { SessionFileError, describeSessionSource, readStorageStateFile } from "../config/session-file.js";
+import { describeSessionSource, readStorageStateFile } from "../config/session-file.js";
 import { loadAuthoredModule } from "../utils/load-authored-module.js";
 
 type TourModule = {
@@ -59,6 +59,7 @@ export async function generateCommand(
   };
   const resolvedTourPath = path.resolve(cwd, tourPath);
   let loadedConfig: Awaited<ReturnType<typeof loadConfig>> | undefined;
+  let generating = false;
 
   try {
     resolvedDependencies.log(formatProgress({ phase: "loading-config", message: "Loading demohunter.config.ts" }));
@@ -89,6 +90,8 @@ export async function generateCommand(
       }));
     }
 
+    generating = true;
+
     if (dryRun) {
       const result = await resolvedDependencies.smokeGenerate({
         loadedConfig,
@@ -114,6 +117,7 @@ export async function generateCommand(
     throw improveGenerateError({
       cwd,
       error,
+      generating,
       loadedConfig,
     });
   }
@@ -229,6 +233,7 @@ function readTourDefaultExport(tourModule: unknown, tourPath: string): DemoHunte
 function improveGenerateError(input: {
   cwd: string;
   error: unknown;
+  generating: boolean;
   loadedConfig: Awaited<ReturnType<typeof loadConfig>> | undefined;
 }): Error {
   if (!(input.error instanceof Error)) {
@@ -290,11 +295,7 @@ function improveGenerateError(input: {
 
   const session = input.loadedConfig?.config.session;
 
-  if (
-    session !== undefined
-    && !(input.error instanceof SessionFileError)
-    && input.error.name !== "ReplayTimelineError"
-  ) {
+  if (input.generating && session !== undefined && input.error.name !== "ReplayTimelineError") {
     return new Error(
       `${message}\nA session file was loaded (source: ${session.source}). If the app showed a sign-in page, the session has expired or was revoked. Recreate the session file and retry.`,
       { cause: input.error },

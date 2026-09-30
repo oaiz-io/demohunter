@@ -14,14 +14,6 @@ export type StorageStateSummary = {
   originCount: number;
 };
 
-/** A session-file problem whose message already tells the user what to do. */
-export class SessionFileError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SessionFileError";
-  }
-}
-
 export function describeSessionSource(session: ResolvedSessionConfig): string {
   return session.source === "env" ? STORAGE_STATE_ENV : "session.storageState";
 }
@@ -39,18 +31,18 @@ export async function readStorageStateFile(session: ResolvedSessionConfig, cwd: 
     contents = await readFile(session.storageState, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new SessionFileError(
+      throw new Error(
         `Session file not found: ${origin}. Create it by signing in once in a browser window: demohunter session capture <sign-in URL>`,
       );
     }
-    throw new SessionFileError(`Could not read session file ${origin}: ${(error as NodeJS.ErrnoException).code ?? "unknown error"}`);
+    throw new Error(`Could not read session file ${origin}: ${(error as NodeJS.ErrnoException).code ?? "unknown error"}`);
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(contents);
   } catch {
-    throw new SessionFileError(`Session file ${origin} is not valid JSON. Recreate it and retry.`);
+    throw new Error(`Session file ${origin} is not valid JSON. Recreate it and retry.`);
   }
 
   if (
@@ -59,7 +51,7 @@ export async function readStorageStateFile(session: ResolvedSessionConfig, cwd: 
     || !Array.isArray((parsed as { cookies?: unknown }).cookies)
     || !Array.isArray((parsed as { origins?: unknown }).origins ?? [])
   ) {
-    throw new SessionFileError(
+    throw new Error(
       `Session file ${origin} is not a Playwright storage-state file (expected { "cookies": [...], "origins": [...] }). Recreate it and retry.`,
     );
   }

@@ -404,6 +404,20 @@ describe("generateCommand", () => {
     ).rejects.toBe(divergence);
   });
 
+  test("does not add the session hint to errors raised before generation starts", async () => {
+    const cwd = await makeTempProject();
+    await writeSessionFile(cwd);
+
+    const error = await generateCommand(cwd, "demos/invalid.tour.ts", {
+      generateTour: async () => ({ outputDir: "", videoPath: "" }),
+      loadConfig: async () => makeSessionConfig(cwd),
+      log: () => {},
+    }).catch((caught) => caught);
+
+    expect(error.message).toStartWith("Tour file must default export");
+    expect(error.message).not.toContain("session");
+  });
+
   test("preserves generic page.goto timeouts instead of relabeling them as baseURL outages", async () => {
     const cwd = await makeTempProject();
 
