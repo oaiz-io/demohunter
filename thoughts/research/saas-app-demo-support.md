@@ -285,3 +285,368 @@ A useful precedent: [Skyvern](https://github.com/Skyvern-AI/skyvern), an AGPL-3.
 **The gap, stated precisely.** No surveyed tool produces a **scripted, deterministic, re-runnable, narrated video, from code in the user's repository, of a real signed-in third-party SaaS app, entirely on the user's machine, without the tool ever holding the user's password.** Agent tools lack determinism and narration. Demo tools lack code and re-runnability. RPA lacks narration and is built on credential custody. DemoHunter already has everything except the session file and the live-account guardrails. That is why the proposal in Part 3 is small.
 
 "Computer use, almost, but through tour files" is the right description with one sharpening. The **authoring** can be agent-assisted: DemoHunter already ships an agent skill (`packages/cli/skills/demohunter/SKILL.md`), and an agent with Playwright MCP can explore Notion and draft the tour. The **recording** stays deterministic Playwright code. Keeping model-driven actions out of the recording pass is what makes the output reviewable, cacheable and re-generatable. It also avoids the prompt-injection exposure the computer-use vendors warn about.
+
+## Part 3 — Design proposal
+
+### Standing constraints (from the owner; not relitigated)
+
+- OSS stays local-first with no hosted dependency.
+- DemoHunter never stores credentials. Session material is user-provided and user-managed, following the TTS key boundary (`AGENTS.md:14`).
+- No built-in auth abstraction that captures or manages passwords.
+- `.demohunter/` stays portable (`AGENTS.md:15`).
+- The two-pass deterministic replay remains the engine and is leveraged, not bypassed.
+
+These constraints, together with the v1 requirement that "auth, session, and app bootstrap logic" stay in normal Playwright code (`.planning/milestones/v1.0-REQUIREMENTS.md:39`), set the design goal. **DemoHunter should load a session the user already has. It should not sign in.** Loading a Playwright storage-state file is a browser-context option, not an auth abstraction. It is the same primitive `@playwright/test` exposes as `use: { storageState }` ([playwright.dev/docs/auth](https://playwright.dev/docs/auth)). The proposal below needs one small documentation adjustment. `docs/phase_1_oss_core.md:13` and `:200` should say that DemoHunter *accepts* a Playwright storage-state path but does not *create or manage* sessions. The spirit of "no auth abstraction" is unchanged.
+
+### 3.1 Mechanism 1 — session file as config and context plumbing (core; recommended)
+
+**Shape.**
+
+```ts
+// packages/sdk/src/config.ts (sketch)
+export type SessionConfig = {
+  /**
+   * Path to a Playwright storage-state JSON file that the user created and owns
+   * (for example with `npx playwright open --save-storage=<file> <url>`).
+   * Relative paths resolve from the project root. DemoHunter only reads it.
+   */
+  storageState: string;
+};
+
+export type DemoHunterUserConfig = {
+  // ...existing fields
+  session?: SessionConfig;
+};
+
+export type ResolvedSessionConfig = {
+  /** Absolute path. Never written to output, manifest, captions, or debug artifacts. */
+  storageState: string;
+  source: "config" | "env";
+};
+
+export type ResolvedDemoHunterConfig = {
+  // ...existing fields
+  session?: ResolvedSessionConfig;
+};
+```
+
+```ts
+// demohunter.config.ts (user)
+export default {
+  baseURL: "https://www.notion.so",
+  session: { storageState: "../.demohunter-sessions/notion-demo.json" },
+};
+```
+
+**Environment override.** Set `DEMOHUNTER_STORAGE_STATE=/abs/path.json`. When present, it wins over `session.storageState`, and it enables a session without any config change. That serves CI, where a secret is materialized to a temporary file, and keeps the path out of the committed config when the user prefers. It is a path, not file contents, so the environment never carries the credential itself. This mirrors the TTS boundary: DemoHunter reads user-provided material from a location the user controls.
+
+**Why `session` and not `auth`.** DemoHunter does not authenticate. The name should say what the feature does: it starts both passes with a user-supplied browser session. `auth: { kind: "storageState" }` implies a family of auth kinds (password, OAuth, TOTP) that the constraints rule out. If another session source is ever justified, such as a profile directory (Part 3.2), it can become a sibling field under `session`.
+
+**Plumbing.**
+
+| Point | Change |
+| --- | --- |
+| `generate.ts:135-138` (Pass 1 context) | `browser.newContext({ baseURL, viewport, ...(config.session ? { storageState: config.session.storageState } : {}) })` |
+| `generate.ts:174-177` (Pass 2 context) | Same options, loaded from the **same file**, not from Pass 1's end state |
+| `smoke-generate.ts:91` | Same, so the smoke path and full generation agree |
+| Responsive variants (`generate.ts:324-336`) | No change needed. The variant call spreads `config`, so `session` propagates |
+| `collect-timeline.ts:67`, `replay-timeline.ts:94` | No change. The first `goto(baseURL)` is now authenticated because the context already carries cookies |
+
+**Both passes load the same file.** Both passes then start from byte-identical client state, which is what the strict matcher assumes (Part 1.2). Carrying Pass 1's end state forward would import whatever the app wrote during Pass 1, such as a last-visited page or dismissed tips, and make Pass 2 differ from Pass 1.
+
+**Known caveat: refresh-token rotation.** If a provider rotates a session cookie on use and revokes the previous value, Pass 2 loading the original file would be signed out. Whether Notion, Slack or Google do this for web sessions is **UNVERIFIED**. The design handles it only if it is observed: add `session.passTwo: "same-file" | "carry-forward"`. `carry-forward` would call `passOneContext.storageState()` in memory before `generate.ts:171` and pass the object to Pass 2, never writing it to disk. It stays out of the first slice.
+
+**Validation in `load-config.ts`** (next to `validateAuthoredRecordConfig`, `packages/cli/src/config/load-config.ts:36-37`):
+
+- `session` must be an object with a non-empty string `storageState`.
+- The path resolves against `projectRoot`, like `outputDir` and `cacheDir` (`load-config.ts:41-42`).
+- **Reject** a path inside `outputDir` or `cacheDir`. Session files must never be inside the portable tree.
+- Existence and parse checks run at `generate` time, not at config load, because `cache` commands also load config and do not need the file.
+
+**Guardrails in the CLI** (all read-only with respect to the session file):
+
+- **`demohunter doctor`** gains a `session` check alongside the existing checks (`packages/cli/src/commands/doctor.ts:137-158`):
+  - the file exists and parses as `{ cookies: [], origins: [] }`;
+  - it is not inside `outputDir` or `cacheDir`;
+  - when inside a git work tree, it is ignored (via `git check-ignore`; warn if not);
+  - cookies whose domain matches the `baseURL` host are present, and not all expired. It reports the earliest non-session expiry as a date, never the cookie names or values.
+- **`demohunter generate`** prints one notice before Pass 1 when a session is active: which source (`config` or `env`), and how many passes will run against the live account (`2 × (1 + responsive presets)`). The count makes the side-effect multiplication visible (Part 1.6).
+- **Error hints** in `improveGenerateError` (`packages/cli/src/commands/generate.ts:211`). When a session is active and a pass fails during `setup` or `beforeRecord`, add: "If the page shown in debug output is a sign-in page, the session file has expired or was revoked. Recreate it and retry." The debug capture already records the failing URL and title (`failure-artifacts.ts:88-99`).
+- **Debug capture under a session.** When `config.session` is set, `attachDebugCapture` (`generate.ts:153-156`, `:214-217`) should:
+  - skip `body.txt`;
+  - strip query strings and fragments from failed-request URLs and from the page URL in `failure.json`;
+  - keep the screenshot, because it is the most useful single artifact and stays on the user's disk.
+
+  The docs should say plainly that the screenshot shows account content.
+
+**Auth-file lifecycle and UX.**
+
+| Stage | How | DemoHunter's role |
+| --- | --- | --- |
+| Create | The user signs in once, by hand, in a headed browser: `npx playwright open --save-storage=<file> <sign-in URL>` works today (Part 2.3), or `demohunter session capture` later (Part 3.1a). 2FA, emailed codes and SSO all happen in that window, done by the human. | None in slice 1. It documents the command and recommends a location outside the repo (for example a sibling `.demohunter-sessions/` or a user config directory), with owner-only permissions. |
+| Use | `session.storageState` or `DEMOHUNTER_STORAGE_STATE`. Loaded into every pass's fresh context. | Read-only load |
+| Check | `demohunter doctor` | Reports existence, ignore status and expiry window |
+| Refresh | Re-run the create step. DemoHunter never writes back to the file in slice 1. | Hint on failure |
+| Expire | The first pass fails in `setup` or `beforeRecord`, before any TTS spend (Part 1.1). | Actionable hint |
+| Revoke | The user signs the session out from the provider's "active sessions" or "log out of all devices" settings, then deletes the file. | Documented, including that deleting the file alone does **not** revoke the server-side session |
+
+**Mechanism 1a — `demohunter session capture` (follow-on; recommended).** A thin wrapper so users don't need to know Playwright's CLI:
+
+```sh
+demohunter session capture --url https://www.notion.so/login --out ../.demohunter-sessions/notion-demo.json
+```
+
+It launches a **headed** browser, using `launch.channel` from Part 3.3 when configured, and navigates to `--url`. It waits until the user presses Enter in the terminal, then writes `context.storageState({ path, indexedDB: true })` with mode `0600`. It refuses `--out` paths inside `outputDir`, `cacheDir`, or a non-ignored location in the repo. DemoHunter never sees the password: it is typed into the browser, just as with `playwright open`. This is a device-flow-style handoff, the local equivalent of Operator's takeover or Browserbase's manual-MFA contexts (Part 2.1). It is still not "log in for you".
+
+**Alternative considered: an `authBeforeRecord`-style lifecycle hook.** Rejected. The only thing such a hook could add over existing `setup` and `beforeRecord` is running before context creation. That is exactly what a context option already provides, and a hook invites credential-typing code into tours. `beforeRecord` stays the place to *verify* signed-in state, for example by waiting for a signed-in-only control, not to create it.
+
+### 3.2 Mechanism 2 — persistent context or profile directory (evaluated; not recommended now)
+
+`launchPersistentContext(userDataDir)` returns a context bound to an on-disk profile.
+
+**Against:**
+
+- **It breaks the clean-context-per-pass property.** One profile shared by both passes means Pass 1's client-side mutations (local storage, IndexedDB, service-worker caches, dismissed tips) are present in Pass 2. Pass 2 then differs from Pass 1, which is the opposite of what replay needs.
+- **Structure.** The generator's lifecycle would change from one `launch()` plus two `newContext()` calls to two persistent launches. Responsive variants would multiply profile launches. A profile cannot be opened twice concurrently.
+- **The user's everyday profile is off-limits anyway.** Chrome 136 and later refuse remote debugging on the default data directory ([Chrome for Developers](https://developer.chrome.com/blog/remote-debugging-port)). The user would still create a DemoHunter-specific profile, which gives no convenience gain over a storage-state file.
+- **Credential-at-rest footprint.** A profile directory holds far more than a session: history, other sites' cookies, cached pages.
+
+**For:**
+
+- Service workers, cache storage and other profile state that storage-state omits.
+- Possibly a more natural fingerprint for Google (**UNVERIFIED**).
+
+**Refinement if it is ever needed:** `session.profileDir`, copied into a temporary directory for **each** pass and discarded afterwards. That keeps both passes identical and never mutates the user's profile. Whether a copied Chromium profile keeps its cookies readable across OS keychain encryption is **UNVERIFIED** and must be tested per platform before this is proposed. Revisit only if storage-state demonstrably fails for a target app.
+
+### 3.3 Mechanism 3 — launch posture and anti-detection (document; small config slice; no evasion)
+
+**Configuration to add (follow-on slice).** These are ordinary Playwright launch and context options, not evasion:
+
+```ts
+export type LaunchConfig = {
+  /** Chromium distribution: "chrome" | "msedge" | "chromium" (new headless). Chromium only. */
+  channel?: "chrome" | "msedge" | "chromium";
+  /** Default true, as today. false opens a visible window. */
+  headless?: boolean;
+};
+
+export type DemoHunterUserConfig = {
+  // ...
+  launch?: LaunchConfig;
+  /** Pinned per context so date labels and formats match across passes and machines. */
+  locale?: string;
+  timezoneId?: string;
+};
+```
+
+- `launch` is applied at `generate.ts:113`, `smoke-generate.ts:84` and `doctor.ts:138`. `locale` and `timezoneId` go into both `newContext` calls. Validation: `channel` only with `browser: "chromium"`. `locale` and `timezoneId` are strings, and Playwright validates their values.
+- `headless: false` must be validated with `page.screencast` before it is documented (**UNVERIFIED**). The viewport-sized screencast (`screencast.ts:37-40`) should be unaffected by window chrome, but that needs proof.
+
+**What DemoHunter should not do:**
+
+- No arbitrary `launch.args` passthrough in the first slice. That is the path to `--disable-blink-features=AutomationControlled` and similar flags; see Q2.
+- No stealth dependencies (patchright, Camoufox, nodriver; Part 2.3).
+- No `navigator.webdriver` shadowing in the recording-effects init script.
+- No automated Google sign-in, ever.
+
+**Risk register for detection:**
+
+| Target | Expected behaviour with session reuse | Residual risk | Mitigation |
+| --- | --- | --- | --- |
+| Notion | No known automated-browser block (**UNVERIFIED**) | "New device" notices; the broad anti-robot clause (Part 1.5) | Dedicated demo workspace, low volume |
+| Slack | No known block (**UNVERIFIED**) | Workspace admin session policies, SSO re-auth | Workspace owned by the user; re-capture on expiry |
+| Gmail | Sign-in itself blocked in automated browsers ([answer/7675428](https://support.google.com/accounts/answer/7675428)); reused sessions *may* be challenged (**UNVERIFIED**) | Account lock or challenge; "bypassing our systems" | Test account only; session created in a headed Playwright window where Google permits it, otherwise mark unsupported; never evasion |
+
+**Recording mechanism.** No change. `page.screencast` is protocol-side, not page-observable (Part 1.4). Moving to context `recordVideo` would neither reduce nor increase detection. The only page-observable DemoHunter artifact is the Pass 2 recording-effects runtime (`install-recording-effects.ts:17`), and it is needed for the cursor and highlights.
+
+### 3.4 Mechanism 4 — authoring affordances for live SaaS
+
+**4a. Replay strictness.** A generic `record.replayStrictness: "strict" | "tolerant"` is **rejected**. Replay does more than police determinism. The collected entry index is how Pass 2 finds each narration's audio duration and places it on the video timeline (`generate.ts:237-248`, `replay-timeline.ts:187-189`, `:205-224`). "Tolerating" an extra or missing event would misalign narration with action, and that is worse than failing.
+
+What **is** worth doing is narrow: **treat `click.durationMs` as advisory** during matching. Compare click events with `durationMs` excluded and animate with Pass 2's own measured duration. This is safe because:
+
+- nothing else consumes the collected click duration;
+- narration timestamps come from Pass 2's clock (`generate.ts:243-248`);
+- `narrateWhile` waits based on Pass 2's real elapsed time (`replay-timeline.ts:289-292`).
+
+It removes the one layout-sensitive mismatch (Part 1.2) and helps local apps too: a font loading late shifts a button by a few pixels. It should ship as a separate slice with tests covering durations inside and outside the 560–1680 px band, and should become default behaviour, not a flag, once proven.
+
+**4b. Popups and first-visit UI.** No new mechanism. Document the patterns:
+
+- dismiss tips in `setup` with plain Playwright;
+- create the session file *after* dismissing onboarding once, so the dismissal persists in local storage or on the server;
+- enable `record.cookieBanners` when the landing page shows consent banners (`authoring.md:79`).
+
+Add a SaaS section to the skill reference recommending `waitForStable({ state: "domcontentloaded" })` plus a locator wait instead of the `networkidle` default (Part 1.2).
+
+**4c. Side-effect safety.** DemoHunter cannot know which request "sends" a message, so a generic dry-run mode is **rejected**. The guardrails are the pass-count notice (Part 3.1), a teardown that stays off camera (4d), and documented per-app recipes:
+
+| App | Visible action | Safe default |
+| --- | --- | --- |
+| Notion | Create a page | Create under one dedicated parent page in a demo workspace. `setup` deletes any leftover pages with the tour's title (off camera, both passes). `teardown` moves the created page to trash. Seeding and cleanup may use Notion's public API from author code. |
+| Slack | Send a message | Post only to a private sandbox channel in a user-owned demo workspace. Prefer to demo composing, and stop before sending, unless sending is the point. Delete the sent message in `teardown` if workspace settings allow members to delete their own messages (**UNVERIFIED** default). Never post in a shared workspace. |
+| Gmail | Compose an email | Do not send. Compose, show, then discard the draft in `teardown`. If sending is essential, send to a second test account the user owns. |
+
+Advanced authors can block a send endpoint with `page.route(...)` in `setup`, but how each app's UI reacts to a failed send is unpredictable. The docs should mention it without recommending it.
+
+**4d. Keep `teardown` off camera (small generator change; recommended).** Today `teardown` runs while the screencast is still running (Part 1.3). Add an `onAfterRun` callback to `replayTimeline` that fires after `run` resolves and before `teardown`. `generate.ts` then stops the screencast there instead of after `replayTimeline` returns (`generate.ts:276-280`). This is a general improvement — cleanup should never be recorded — and it matters specifically for live-account cleanup. Pass 1 is unaffected.
+
+**4e. Redaction and masking.** Deferred. A `record.mask: string[]` (selectors blurred by the Pass 2 init script) is technically simple, but has real limits:
+
+- it only masks what the author thought to list;
+- masked content can leak through transitions, autocomplete popups and the tab title;
+- it would give a false sense of safety for Gmail.
+
+The primary control is **demo data in a demo account**, documented prominently. Narration and captions contain only author-written text (`generator-types.ts:39-43`), never page text, so the transcript side is already safe. Revisit masking after the first real-SaaS users report needs.
+
+### 3.5 Mechanism 5 — manifest and output provenance (evaluated; no change now)
+
+The generator writes manifest v1 (`write-generation-output.ts:105-178`). v2 exists as a schema but is not yet written (`packages/manifest/src/schema.ts:157-165`). Recording "recorded against a live third-party app with a session" would help a future Cloud label or gate content, but it has two problems:
+
+- **Anything identifying is sensitive:** the session path, a hash of the file (a correlatable fingerprint), cookie names, account email, workspace name, and even the `baseURL` host for private preview environments.
+- **Cloud ingestion does not need it yet.** Mode 1, hosted output, is the Cloud's first product (`docs/phase_2_cloud_offering.md:67-77`). Mode 3, cloud generation, is explicitly later, and even then targets "reachable preview/staging environments", not third-party SaaS (`docs/phase_2_cloud_offering.md:77-79`).
+
+**Recommendation:** no manifest change in these slices. When v2 becomes the written format, consider at most `capture: { sessionLoaded: boolean }`, and document permanently that paths, hashes, hosts and account identifiers are excluded. Separately, consider moving `debug/` out of the portable per-tour directory when manifest v2 lands, so `.demohunter/<tour>/` holds only manifest-listed artifacts.
+
+### 3.6 Recommended set and touch list
+
+**Recommended:** 3.1 (session plumbing and guardrails), 3.4d (teardown off camera), 3.3 (launch posture config), 3.1a (`session capture`), and 3.4a (advisory click duration). Documentation covers 3.4b, 3.4c and 3.4e.
+
+**Rejected or deferred:**
+
+- generic tolerant replay (3.4a) and a DemoHunter dry-run mode (3.4c) — rejected;
+- persistent profile (3.2), masking (3.4e) and manifest provenance (3.5) — deferred;
+- stealth tooling, arbitrary launch-args passthrough and automated sign-in — rejected.
+
+| Package / file | Change | Slice |
+| --- | --- | --- |
+| `packages/sdk/src/config.ts` | `SessionConfig`, `ResolvedSessionConfig`; `session?` on user and resolved config | 1 |
+| `packages/sdk/src/index.ts` | Export the new types | 1 |
+| `packages/sdk/src/config.test.ts` | Type-level and default tests | 1 |
+| `packages/cli/src/config/load-config.ts` (+ test) | Validate `session`; env override `DEMOHUNTER_STORAGE_STATE`; resolve path; reject paths inside `outputDir`/`cacheDir` | 1 |
+| `packages/generator-playwright/src/generate.ts` (+ test) | `storageState` in both `newContext` calls; session-aware debug-capture options; pass-count progress event | 1 |
+| `packages/generator-playwright/src/smoke-generate.ts` (+ test) | `storageState` in its context | 1 |
+| `packages/generator-playwright/src/debug/failure-artifacts.ts` (+ test) | `redact` option: skip `body.txt`, strip URL queries | 1 |
+| `packages/cli/src/commands/doctor.ts` (+ test) | `session` check | 1 |
+| `packages/cli/src/commands/generate.ts` (+ test) | Session notice; expired-session hint in `improveGenerateError` | 1 |
+| `tests/e2e/` | Local fixture server that gates a page behind a cookie; tour passes only with a session file; asserts no session path in any output file | 1 |
+| `docs/saas-apps.md` (new), `docs/getting-started.md`, `docs/troubleshooting.md`, `README.md` | SaaS guide: session creation, storage location, per-app recipes, terms summary, Gmail caveat | 1 |
+| `docs/phase_1_oss_core.md:13`, `:200` | "Accepts a Playwright storage-state path; does not create or manage sessions" | 1 |
+| `packages/cli/skills/demohunter/SKILL.md:21`, `references/authoring.md:60-68` | Agent guidance: use `session` config, never type credentials in tours, idempotent setup and teardown, `domcontentloaded` waits on SaaS | 1 |
+| `packages/generator-playwright/src/execute/replay-timeline.ts`, `generate.ts` | `onAfterRun`; stop screencast before `teardown` | 2 |
+| `packages/sdk/src/config.ts`, `load-config.ts`, `generate.ts`, `smoke-generate.ts`, `doctor.ts` | `launch.channel`, `launch.headless`, `locale`, `timezoneId` | 3 |
+| `packages/cli/src/bin/demohunter.ts:88-114`, new `packages/cli/src/commands/session.ts` | `demohunter session capture` | 4 |
+| `packages/generator-playwright/src/execute/replay-timeline.ts` (+ test) | Click `durationMs` excluded from matching | 5 |
+
+### 3.7 Worked example: a Notion page-create tour, end to end
+
+This example assumes slices 1 and 2. The selectors are **illustrative**. Notion's accessible names were not verified against the live UI in this research and must be taken from `npx playwright codegen` in the demo workspace.
+
+**One-time setup, by the user:**
+
+1. Create a free Notion workspace for demos and a parent page "Demo hub". Optionally create an internal integration and share "Demo hub" with it for API cleanup ([developers.notion.com](https://developers.notion.com/guides/get-started/personal-access-tokens)).
+2. Create the session by hand:
+
+   ```sh
+   npx playwright open --save-storage=../.demohunter-sessions/notion-demo.json https://www.notion.so/login
+   # sign in in the window (email code / password / SSO / 2FA), dismiss onboarding, close the window
+   chmod 600 ../.demohunter-sessions/notion-demo.json
+   ```
+
+3. Configure DemoHunter:
+
+   ```ts
+   // demohunter.config.ts
+   export default {
+     baseURL: "https://www.notion.so",
+     session: { storageState: "../.demohunter-sessions/notion-demo.json" },
+     viewport: { width: 1440, height: 900 },
+     record: { showActions: false },
+   };
+   ```
+
+4. Run `demohunter doctor`. The `session` check passes: the file exists, is outside the repo, and has cookies for `notion.so` expiring on a future date.
+
+**The tour:**
+
+```ts
+// demos/notion-launch-checklist.tour.ts
+import { defineTour } from "demohunter";
+
+const HUB_URL = process.env.NOTION_DEMO_HUB_URL ?? "";
+const TITLE = "Launch checklist";
+
+export default defineTour({
+  id: "notion-launch-checklist",
+  title: "Create a launch checklist in Notion",
+
+  async setup({ page }) {
+    // Off camera, both passes: remove leftovers from an earlier crashed run so
+    // the sidebar looks the same in Pass 1 and Pass 2. User code; may call the
+    // Notion public API with the user's own integration token.
+    await removeDemoPagesTitled(TITLE);
+    await page.goto(HUB_URL, { waitUntil: "domcontentloaded" });
+  },
+
+  async beforeRecord({ page }) {
+    // Proves the session is valid before any narration or recording.
+    await page.getByRole("heading", { name: "Demo hub" }).waitFor({ timeout: 15_000 });
+  },
+
+  async run({ page, chapter, step, narrate, narrateWhile, click, waitForStable }) {
+    await chapter("Create the page", { id: "create" });
+
+    await step("Add a sub-page", async () => {
+      await narrate("Everything for the launch lives under the demo hub.");
+      await narrateWhile("Add a new page right here.", async () => {
+        await click(page.getByRole("button", { name: "Add a page" })); // illustrative
+      });
+    });
+
+    await step("Name it", async () => {
+      await narrateWhile("Give it a title the whole team will recognise.", async ({ typeText }) => {
+        await typeText(page.getByPlaceholder("New page"), TITLE, { pace: "natural", seed: "title" });
+      });
+      await waitForStable({ state: "domcontentloaded" });
+    });
+
+    await chapter("Share it", { id: "share" });
+    await step("Open sharing", async () => {
+      await narrateWhile("One click opens sharing for the whole workspace.", async () => {
+        await click(page.getByRole("button", { name: "Share" }));
+      });
+    });
+  },
+
+  async teardown() {
+    // After slice 2 this runs after the screencast has stopped.
+    await removeDemoPagesTitled(TITLE);
+  },
+});
+
+async function removeDemoPagesTitled(title: string): Promise<void> {
+  // User-owned helper: archive child pages of the hub whose title matches,
+  // via the Notion public API and NOTION_TOKEN from the environment.
+}
+```
+
+**Generation:**
+
+```text
+$ demohunter generate demos/notion-launch-checklist.tour.ts
+session: loading user storage state (config) into 2 passes against https://www.notion.so
+         live-account actions in this tour will run 2 times
+Collecting timeline for notion-launch-checklist
+Resolving narration 1 … 5            (cached after the first run; offline reruns need no TTS key)
+Recording replay for notion-launch-checklist
+Wrote .demohunter/notion-launch-checklist/video.mp4
+```
+
+What makes this robust:
+
+- both passes start signed in with identical client state;
+- the page is created and removed in each pass, so the sidebar is the same at each click;
+- the one click whose position could shift (the "Share" button after the title renders) no longer fails replay after slice 5;
+- nothing session-related reaches `.demohunter/`.
+
+When the session expires, Pass 1 fails at the `beforeRecord` heading wait, before any TTS request. The CLI hint says to recreate the session file.
