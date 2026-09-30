@@ -24,6 +24,7 @@ export type {
   ElevenLabsVoiceSettings,
   HighlightStyle,
   GenerateOverrides,
+  LaunchConfig,
   OutputConfig,
   OutputFormatRequest,
   OutputLayout,

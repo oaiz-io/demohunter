@@ -142,12 +142,13 @@ describe("smokeGenerate", () => {
     });
   });
 
-  test("loads a configured session into the validation context and redacts debug capture", async () => {
+  test("loads a configured session and launch options into the validation browser and redacts debug capture", async () => {
     const cwd = await makeTempRoot();
     const newContext = mock(async () => ({
       close: mock(async () => {}),
       newPage: mock(async () => ({ goto: mock(async () => {}) })),
     }));
+    const launch = mock(async () => ({ close: mock(async () => {}), newContext }));
     const attachDebugCapture = mock(() => createDebugCapture());
 
     await smokeGenerate(
@@ -162,6 +163,7 @@ describe("smokeGenerate", () => {
             holdPaddingMs: 300,
             record: { format: "mp4" as const, showActions: true, showChapters: true },
             session: { storageState: "/home/demo/.demohunter-sessions/app.json", source: "config" },
+            launch: { channel: "chromium", headless: true, locale: "en-GB", timezoneId: "UTC" },
             tts: {
               provider: "openai",
               model: "gpt-4o-mini-tts",
@@ -182,17 +184,20 @@ describe("smokeGenerate", () => {
         attachDebugCapture,
         now: () => new Date("2026-04-10T00:00:00.000Z"),
         playwright: {
-          chromium: { launch: mock(async () => ({ close: mock(async () => {}), newContext })) },
+          chromium: { launch },
           firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
           webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
         },
       },
     );
 
+    expect(launch).toHaveBeenCalledWith({ channel: "chromium", headless: true });
     expect(newContext).toHaveBeenCalledWith({
       baseURL: "http://localhost:3000",
       viewport: { width: 1280, height: 720 },
       storageState: "/home/demo/.demohunter-sessions/app.json",
+      locale: "en-GB",
+      timezoneId: "UTC",
     });
     expect(attachDebugCapture).toHaveBeenCalledWith(expect.objectContaining({ redact: true }));
   });

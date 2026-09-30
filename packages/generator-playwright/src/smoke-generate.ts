@@ -10,7 +10,7 @@ import {
 import * as playwright from "playwright";
 import type { BrowserType, Page } from "playwright";
 
-import { browserContextOptions } from "./browser-options.js";
+import { browserContextOptions, browserLaunchOptions } from "./browser-options.js";
 import { attachDebugCapture } from "./debug/failure-artifacts.js";
 import type { DebugCapture } from "./debug/failure-artifacts.js";
 import type { GenerationProgressEvent, GenerationProgressReporter, TourRuntimeEvent } from "./execute/generator-types.js";
@@ -82,7 +82,7 @@ export async function smokeGenerate(
     phase: "launching-browser",
     message: `Launching ${config.browser}`,
   });
-  const browser = await browserType.launch();
+  const browser = await browserType.launch(browserLaunchOptions(config));
   let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   let primaryError: unknown;
   let debugCapture: DebugCapture | undefined;

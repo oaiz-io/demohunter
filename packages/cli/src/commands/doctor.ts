@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { browserLaunchOptions } from "@demohunter/generator-playwright";
 import type { ResolvedSessionConfig } from "@demohunter/sdk";
 import * as playwright from "playwright";
 
@@ -140,7 +141,9 @@ export async function doctorCommand(
 
   if (loadedConfig !== undefined) {
     await runCheck(checks, "playwright browser", async () => {
-      const browser = await resolvedDependencies.playwright[loadedConfig.config.browser].launch();
+      const browser = await resolvedDependencies.playwright[loadedConfig.config.browser].launch(
+        browserLaunchOptions(loadedConfig.config),
+      );
 
       try {
         return { message: `${loadedConfig.config.browser} launched successfully` };

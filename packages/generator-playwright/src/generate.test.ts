@@ -410,6 +410,56 @@ describe("generateTour", () => {
     expect(generateResponsiveVariant.mock.calls[0]?.[0].loadedConfig.config.session).toEqual(session);
   });
 
+  test("applies configured launch options to the browser and locale and time zone to both passes", async () => {
+    const browser = {
+      close: mock(async () => {}),
+      newContext: mock(async () => ({
+        close: mock(async () => {}),
+        newPage: mock(async () => ({ goto: mock(async () => {}) })),
+      })),
+    };
+    const launch = mock(async () => browser);
+
+    await generateTour({
+      loadedConfig: createLoadedConfig("/tmp/project", {
+        launch: { channel: "chrome", headless: false, locale: "sv-SE", timezoneId: "Europe/Stockholm" },
+      }),
+      tourFile: createTourFile("/tmp/project"),
+    }, {
+      attachDebugCapture: mock(() => createDebugCapture()),
+      collectTimeline: mock(async () => ({ entries: [], narrations: [] })),
+      installRecordingEffects: mock(async () => {}),
+      muxVideo: mock(async () => ({
+        mp4: { fileName: "video.mp4" as const, format: "mp4" as const, path: "/tmp/video.mp4" },
+      })),
+      playwright: {
+        chromium: { launch },
+        firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+        webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) },
+      },
+      prepareOutputDir: mock(async () => "/tmp/project/.demohunter/billing-overview"),
+      replayTimeline: mock(async ({ onBeforeRun }) => { await onBeforeRun?.(); }),
+      startScreencast: mock(async () => {}),
+      stopScreencast: mock(async () => {}),
+      writeGenerationOutput: mock(async () => ({
+        captionsSrtPath: "/tmp/captions.srt",
+        captionsVttPath: "/tmp/captions.vtt",
+        outputDir: "/tmp/project/.demohunter/billing-overview",
+        videoPath: "/tmp/video.mp4",
+      })),
+    });
+
+    const expectedContextOptions = {
+      baseURL: "http://localhost:3000",
+      viewport: { height: 720, width: 1280 },
+      locale: "sv-SE",
+      timezoneId: "Europe/Stockholm",
+    };
+    expect(launch).toHaveBeenCalledWith({ channel: "chrome", headless: false });
+    expect(browser.newContext).toHaveBeenNthCalledWith(1, expectedContextOptions);
+    expect(browser.newContext).toHaveBeenNthCalledWith(2, expectedContextOptions);
+  });
+
   test("stops the recording before authored teardown and keeps teardown events off the video timeline", async () => {
     const calls: string[] = [];
     const outputDir = "/tmp/project/.demohunter/billing-overview";

@@ -578,6 +578,49 @@ describe("loadConfig", () => {
     );
   });
 
+  test("resolves launch options only when they are authored", async () => {
+    const unset = await writeConfig('export default { baseURL: "http://localhost:4173" };');
+    const cwd = await writeConfig(`
+      export default {
+        baseURL: "https://mail.google.com",
+        launch: { channel: "chrome", headless: false, locale: "en-US", timezoneId: "Europe/Stockholm" }
+      };
+    `);
+
+    expect("launch" in (await loadConfig(unset, {})).config).toBe(false);
+    expect((await loadConfig(cwd, {})).config.launch).toEqual({
+      channel: "chrome",
+      headless: false,
+      locale: "en-US",
+      timezoneId: "Europe/Stockholm",
+    });
+  });
+
+  test.each([
+    ["a non-object block", '"chrome"', "launch must be an object"],
+    ["browser arguments", '{ args: ["--disable-blink-features=AutomationControlled"] }', "Unsupported launch option: args. Expected one of channel, headless, locale, timezoneId."],
+    ["a non-boolean headless", '{ headless: "false" }', "launch.headless must be a boolean"],
+    ["an empty channel", '{ channel: "" }', "launch.channel must be a non-empty string"],
+    ["an empty locale", '{ locale: " " }', "launch.locale must be a non-empty string"],
+    ["a non-string timezone", "{ timezoneId: 1 }", "launch.timezoneId must be a non-empty string"],
+  ])("rejects launch with %s", async (_label, launch, message) => {
+    const cwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", launch: ${launch} };
+    `);
+
+    await expect(loadConfig(cwd, {})).rejects.toThrow(message);
+  });
+
+  test("rejects launch.channel for non-Chromium browsers", async () => {
+    const cwd = await writeConfig(`
+      export default { baseURL: "http://localhost:4173", browser: "firefox", launch: { channel: "chrome" } };
+    `);
+
+    await expect(loadConfig(cwd, {})).rejects.toThrow(
+      'launch.channel requires browser "chromium"; the configured browser is "firefox"',
+    );
+  });
+
   test("throws the exact missing-config error", async () => {
     const cwd = await makeTempProject();
 

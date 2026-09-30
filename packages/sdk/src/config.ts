@@ -142,6 +142,25 @@ export type ResolvedSessionConfig = {
   source: "config" | "env";
 };
 
+/**
+ * Ordinary Playwright launch and context options. There is deliberately no
+ * pass-through for arbitrary browser arguments.
+ */
+export type LaunchConfig = {
+  /**
+   * Chromium distribution, for example "chrome" or "msedge" for an installed
+   * branded browser, or "chromium" for Playwright's new headless mode. Only
+   * valid with browser: "chromium".
+   */
+  channel?: string;
+  /** Default true. Set false to open a visible browser window. */
+  headless?: boolean;
+  /** Browser locale for every pass, for example "en-US". */
+  locale?: string;
+  /** Time zone for every pass, for example "Europe/Stockholm". */
+  timezoneId?: string;
+};
+
 export type DemoHunterUserConfig = {
   baseURL: string;
   outputDir?: string;
@@ -154,6 +173,7 @@ export type DemoHunterUserConfig = {
   tts?: DemoHunterUserTTSConfig;
   /** Start both passes signed in with a user-owned Playwright storage state. */
   session?: SessionConfig;
+  launch?: LaunchConfig;
 };
 
 export type ResolvedDemoHunterConfig = {
@@ -167,6 +187,7 @@ export type ResolvedDemoHunterConfig = {
   output: OutputConfig;
   tts: TTSConfig;
   session?: ResolvedSessionConfig;
+  launch?: LaunchConfig;
 };
 
 export const DEFAULT_VIEWPORT_CONFIG: ViewportConfig = {

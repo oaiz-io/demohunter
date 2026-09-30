@@ -38,6 +38,7 @@ export async function loadConfig(cwd: string, env: NodeJS.ProcessEnv = process.e
   validateAuthoredRecordConfig(authoredConfig.record);
   validateAuthoredOutputConfig(authoredConfig.output);
   validateAuthoredSessionConfig(authoredConfig.session);
+  validateAuthoredLaunchConfig(authoredConfig.launch, authoredConfig.browser ?? DEFAULT_DEMOHUNTER_CONFIG.browser);
 
   const outputDir = resolveProjectPath(projectRoot, authoredConfig.outputDir ?? DEFAULT_DEMOHUNTER_CONFIG.outputDir);
   const cacheDir = resolveProjectPath(projectRoot, authoredConfig.cacheDir ?? DEFAULT_DEMOHUNTER_CONFIG.cacheDir);
@@ -67,6 +68,7 @@ export async function loadConfig(cwd: string, env: NodeJS.ProcessEnv = process.e
     },
     tts: resolveTTSConfig(authoredConfig.tts),
     ...(session === undefined ? {} : { session }),
+    ...(authoredConfig.launch === undefined ? {} : { launch: { ...authoredConfig.launch } }),
   };
 
   return {
@@ -85,6 +87,39 @@ function validateAuthoredSessionConfig(session: DemoHunterUserConfig["session"])
   }
   if (typeof session.storageState !== "string" || session.storageState.trim().length === 0) {
     throw new Error("session.storageState must be a non-empty path to a Playwright storage-state file");
+  }
+}
+
+const LAUNCH_OPTIONS = ["channel", "headless", "locale", "timezoneId"] as const;
+
+function validateAuthoredLaunchConfig(
+  launch: DemoHunterUserConfig["launch"],
+  browser: ResolvedDemoHunterConfig["browser"],
+): void {
+  if (launch === undefined) {
+    return;
+  }
+  if (!isRecordObject(launch)) {
+    throw new Error("launch must be an object");
+  }
+
+  // Arbitrary browser arguments are intentionally unsupported.
+  for (const key of Object.keys(launch)) {
+    if (!(LAUNCH_OPTIONS as readonly string[]).includes(key)) {
+      throw new Error(`Unsupported launch option: ${key}. Expected one of ${LAUNCH_OPTIONS.join(", ")}.`);
+    }
+  }
+  for (const field of ["channel", "locale", "timezoneId"] as const) {
+    const value = launch[field];
+    if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) {
+      throw new Error(`launch.${field} must be a non-empty string`);
+    }
+  }
+  if (launch.headless !== undefined && typeof launch.headless !== "boolean") {
+    throw new Error("launch.headless must be a boolean");
+  }
+  if (launch.channel !== undefined && browser !== "chromium") {
+    throw new Error(`launch.channel requires browser "chromium"; the configured browser is "${browser}"`);
   }
 }
 

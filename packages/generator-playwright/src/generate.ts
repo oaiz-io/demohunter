@@ -5,7 +5,7 @@ import type { DemoHunterRunContext, HighlightStyle, ResolvedDemoHunterConfig } f
 import * as playwright from "playwright";
 import type { BrowserType, Page } from "playwright";
 
-import { browserContextOptions } from "./browser-options.js";
+import { browserContextOptions, browserLaunchOptions } from "./browser-options.js";
 import { collectTimeline } from "./execute/collect-timeline.js";
 import type {
   CollectedTimeline,
@@ -111,7 +111,7 @@ export async function generateTour(
     phase: "launching-browser",
     message: `Launching ${config.browser}`,
   });
-  const browser = await browserType.launch();
+  const browser = await browserType.launch(browserLaunchOptions(config));
   let passOneContext: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   let passTwoContext: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   let primaryError: unknown;

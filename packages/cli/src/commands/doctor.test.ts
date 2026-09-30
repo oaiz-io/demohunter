@@ -37,6 +37,28 @@ describe("doctorCommand", () => {
     expect(parsed.checks.map((check) => check.name)).toContain("baseURL");
   });
 
+  test("launches the browser check with the configured launch options", async () => {
+    const launch = mock(async () => ({ close: mock(async () => {}) }));
+    const loadedConfig = makeLoadedConfig("/tmp/project");
+
+    await doctorCommand("/tmp/project", {
+      checkCommand: mock(async () => {}),
+      fetch: mock(async () => new Response("ok", { status: 200 })) as never,
+      loadConfig: async () => ({
+        ...loadedConfig,
+        config: { ...loadedConfig.config, launch: { channel: "chrome", headless: false, locale: "en-US" } },
+      }),
+      log: mock(() => {}),
+      playwright: {
+        chromium: { launch } as never,
+        firefox: { launch: mock(async () => { throw new Error("unexpected browser"); }) } as never,
+        webkit: { launch: mock(async () => { throw new Error("unexpected browser"); }) } as never,
+      },
+    });
+
+    expect(launch).toHaveBeenCalledWith({ channel: "chrome", headless: false });
+  });
+
   test("warns without failing when the installed Playwright is older than 1.61", async () => {
     const log = mock(() => {});
 
