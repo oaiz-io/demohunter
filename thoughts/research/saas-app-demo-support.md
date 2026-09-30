@@ -15,7 +15,7 @@ The research below describes `main` @ `2fe22b4`, and its repository anchors poin
 - Session paths that start with `~` are rejected, because Node does not expand them.
 - The expired-session hint is added to any generation failure that has no more specific hint, except a replay divergence, and it does not mention debug output. In full generation, debug capture starts at `onBeforeRun`, so a failure in `setup` or `beforeRecord` writes no debug artifacts, contrary to the assumption in Part 3.1.
 - The sample terminal output in Part 3.7 is illustrative. The real notice is one line, such as `Session: loading storage state from session.storageState (config) into 2 browser passes against https://www.notion.so. Live-account actions in this tour will run 2 times.`
-- Headed generation (`launch.headless: false`) was checked on Linux under Xvfb with Playwright's Chromium build 1228. The video has the viewport's size, as in headless mode; headed Chromium also draws classic scrollbars. This settles the headed-mode row of Part 4.3.
+- Headed generation (`launch.headless: false`) was checked on Linux under Xvfb with Playwright's Chromium build 1228. The video has the viewport's size, as in headless mode; headed Chromium also draws classic scrollbars. This answers the headed-mode row of Part 4.3 for Linux; macOS and Windows were not checked.
 - Still open: acceptance criterion 10 (three consecutive Notion generations) and the rest of the Part 4.3 validation matrix. Both need a maintainer with demo accounts.
 
 ## Executive summary
