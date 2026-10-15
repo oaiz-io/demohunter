@@ -60,7 +60,15 @@ export async function projectFrame(
   const task = queue
     .catch(() => {})
     .then(async () => {
-      const frame = await renderReplayFrame(dir, { outputMs: ms });
+      // An agent may change the project mid-render; retry on the new revision.
+      let frame: Awaited<ReturnType<typeof renderReplayFrame>> | undefined;
+      for (let attempt = 0; !frame; attempt++)
+        try {
+          frame = await renderReplayFrame(dir, { outputMs: ms });
+        } catch (error) {
+          if (attempt >= 2 || (error as { status?: number }).status !== 409)
+            throw error;
+        }
       await mkdir(folder, { recursive: true });
       // Thumbnails for older revisions are disposable.
       for (const name of await readdir(folder).catch(() => [] as string[]))

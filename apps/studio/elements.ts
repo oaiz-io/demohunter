@@ -229,8 +229,30 @@ export function indexEvents(events: CaptureEvent[]): {
     if (event.type === 2 && event.data.node)
       visit(event.data.node, undefined, time);
     if (event.type === 3 && event.data.source === 0) {
-      for (const addition of event.data.adds ?? [])
+      for (const addition of event.data.adds ?? []) {
         visit(addition.node, refs.get(key(addition.parentId)), time);
+        // rrweb adds text nodes separately from their element; give the
+        // element (and its ancestors) the text it shows.
+        if (addition.node.type === 3) {
+          const text = (addition.node.textContent ?? "").trim();
+          let record = known.get(key(addition.parentId));
+          // Only text that arrives with the element; later text changes are
+          // replay state, not the element's identity.
+          while (text && record && record.firstSeenMs === time) {
+            if (record.text.length < 1000) {
+              record.text = `${record.text} ${text}`
+                .trim()
+                .replace(/\s+/g, " ")
+                .slice(0, 1000);
+              if (record.name === record.tag)
+                record.name = record.text.slice(0, 70);
+            }
+            record = record.parentRef
+              ? elements.find((e) => e.ref === record!.parentRef)
+              : undefined;
+          }
+        }
+      }
       for (const removal of event.data.removes ?? []) {
         const removed = known.get(key(removal.id));
         if (removed) removed.lastSeenMs = time;

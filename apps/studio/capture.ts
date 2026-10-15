@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as playwright from "playwright";
@@ -61,7 +61,13 @@ export async function captureReplay(
   >();
   const pending = new Set<Promise<void>>();
   const { config } = input.loadedConfig;
-  const browser = await playwright[config.browser].launch();
+  let browser: Awaited<ReturnType<(typeof playwright)["chromium"]["launch"]>>;
+  try {
+    browser = await playwright[config.browser].launch();
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
   let startedAt: number | undefined;
   let recording = false;
   let eventCount = 0;
@@ -344,6 +350,11 @@ export async function captureReplay(
       await writeJson(path.join(dir, "studio.json"), format);
     }
     return dir;
+  } catch (error) {
+    // A failed capture must not leave a half-written project behind: the
+    // destination has to be new, so a leftover would block the retry.
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    throw error;
   } finally {
     await browser.close();
   }

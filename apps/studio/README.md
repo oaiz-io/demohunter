@@ -11,7 +11,7 @@ bun install
 bun run studio
 ```
 
-The library scans the current workspace for saved captures and .tour.ts source files. Search, filter open comments/stale audio, preview actual first-frame thumbnails, open a recording and return to the library. New captures appear automatically. Choose another workspace with `bun run studio library /path/to/repo`. The service defaults to localhost:4310; --host and --port support private development previews.
+The library scans the current repository for saved captures and .tour.ts source files, links each recording to its tour, and shows the branch, open notes, agent changes, audio to update and tours changed after recording. Tours that are not recorded yet have **Record**, which runs the normal capture command (the app at the tour's baseURL must be running). The sidebar groups demos by repository folder and checks Chromium, FFmpeg, speech keys and the optional flite voice. Search, filter open comments/stale audio, preview actual first-frame thumbnails, open a recording and return to the library. New captures appear automatically. Choose another workspace with `bun run studio library /path/to/repo`. The service defaults to localhost:4310; --host and --port support private development previews.
 
 ```sh
 bun run studio demo
@@ -24,11 +24,13 @@ bun run studio list
 
 ## Work with your agent
 
-The preview is the main workspace. Click a paused frame to select an element, or use **Comment** (`C`) to point and leave feedback. Comments open first; **Script** (`S`) opens the narration. Each comment has **Copy for agent** with the element reference, timestamp and relevant files. Paste it into your preferred agent and review its changes live. `V` returns to selection and Escape clears it.
+Studio is where you see and point; your agent (Claude Code, Codex or another MCP client) does the editing. Press `C` and click anything to add a **note**: it keeps the element and the moment. Click an element to get the selection toolbar: **Note**, **Copy for agent**, **Edit** (text, hide, zoom, highlight, fade-in) and **Inspect**, which opens the Element panel with a ready hand-off. `V` returns to selection, `⌘F` finds and replaces text, `⌘⇧C` copies the selection for your agent, Escape clears it.
 
-**Scenes** opens navigation and element search on demand. The selected element's manual edits and source details stay collapsed until needed. **More options** holds precise timing, the detailed timeline, undo and keyboard help. Focus expands the canvas; choosing a commenting or script action brings the sidebar back.
+**Connect agent** shows the exact `claude mcp add …` and `codex mcp add …` commands (or JSON for other clients) for a server bound to this one recording, plus the prompt to start with. No agent settings are changed automatically.
 
-Select an element or use the searchable element list. Copy its stable link or full context, attach a comment, then paste it into your agent. **Connect your agent** shows the exact executable and arguments for a project-bound stdio MCP server. No agent settings are changed automatically.
+While an agent works, Studio shows it from real activity records only: the title bar pill, a target outline on the canvas (a light scan while it reads, a marching outline while it edits, a short settle when it is done, red when a call fails), stripes on the scene it changes and a checklist of tool calls in the related note. Your playhead and selection never move unless you turn on **Follow agent** or press **Show on canvas**. Notes show their state: open, agent working, agent replied, resolved.
+
+The **Agent** panel groups tracked agent changes into turns (one MCP session without a long pause) with a readable change list. **Keep** marks a turn as reviewed in this browser only; **Undo turn** undoes the newest turn in one locked step and refuses to overwrite later direct-file edits. The header shows the git branch and how many project files changed.
 
 ```sh
 bun run studio mcp .demohunter/replays/my-demo
@@ -36,7 +38,7 @@ bun run studio resolve .demohunter/replays/my-demo '<copied-element-link>'
 bun run studio contract
 ```
 
-An MCP agent can inspect selection/HTML/styles, edit elements, clips/camera/highlights/animations, handle comments, edit/regenerate narration, render screenshots and undo. The editor shows who is inspecting/editing and highlights the target subtly; Show element is explicit so activity cannot hijack your playhead. Agent activity lists recent actual tool operations. Direct file changes refresh too, but cannot be attributed to an agent automatically.
+An MCP agent can inspect selection/HTML/styles, edit elements, clips/camera/highlights/animations, handle comments, edit/regenerate narration, render screenshots and undo. Direct file changes refresh too, but cannot be attributed to an agent automatically.
 
 The [agent skill](../../.agents/skills/demohunter-replay/SKILL.md) and each new project's AGENTS.md explain file editing. The browser holds the last valid preview through partial writes. UI/MCP edits check revisions. Narration cards autosave and preserve same-field conflicts for an explicit choice.
 

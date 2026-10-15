@@ -3,101 +3,158 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>DemoHunter Studio · Library</title>
+    <title>DemoHunter Studio · Demos</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 20'%3E%3Cpath d='M6 1h19l-5 18H1z' fill='white' stroke='%23111' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M8.5 7h11l-1.6 6h-11z' fill='%23ffe53d'/%3E%3C/svg%3E"
+    />
     <link rel="stylesheet" href="/library.css" />
     <script defer src="/library.js"></script>
   </head>
   <body>
-    <header>
-      <a class="brand" href="/"
-        ><span class="logo-mark">▱</span> DemoHunter <span>Studio</span></a
-      >
-      <div class="header-actions">
-        <details class="workspace-menu">
-          <summary>Workspace ⌄</summary>
-          <div>
-            <code id="workspace"></code
-            ><button id="refresh">Refresh recordings</button
-            ><a
-              href="https://github.com/oaiz-io/demohunter"
-              target="_blank"
-              rel="noreferrer"
-              >Open source ↗</a
-            >
+    <header class="title-bar">
+      <div class="crumbs">
+        <a class="brand" href="/" aria-label="DemoHunter Studio"
+          ><svg viewBox="0 0 26 20" aria-hidden="true">
+            <path class="logo-frame" d="M6 1h19l-5 18H1z" />
+            <path class="logo-mark" d="M8.5 7h11l-1.6 6h-11z" /></svg
+        ></a>
+        <details class="repo-switcher">
+          <summary>
+            <strong id="repo-name">Workspace</strong
+            ><span id="repo-owner" class="muted"></span
+            ><svg class="chev" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </summary>
+          <div class="popover">
+            <span class="micro-label">Workspace</span>
+            <code id="workspace"></code>
+            <button id="refresh">Scan again</button>
+            <span class="micro-label">Open another repository</span>
+            <code>bun run studio library /path/to/repo</code>
+            <button id="copy-open">Copy command</button>
           </div>
         </details>
-        <button id="capture-help">＋ New recording</button>
+        <span id="branch" class="chip mono" hidden></span>
+        <span id="scan-status" class="muted small"></span>
+      </div>
+      <div class="actions">
+        <a id="agent-presence" class="presence" hidden
+          ><span class="presence-avatar"
+            ><svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 20l1-5L16 4l4 4L9 19z" /></svg></span
+          ><strong id="agent-name"></strong
+          ><span id="agent-where" class="muted"></span
+        ></a>
+        <button id="record-open" class="button primary">
+          <i class="rec"></i>Record a tour
+        </button>
       </div>
     </header>
-    <div class="shell">
-      <main>
-        <div class="intro">
-          <div>
-            <h1 id="view-title">Recordings</h1>
-            <p id="view-description">Your local workspace.</p>
-          </div>
+    <div class="body">
+      <aside class="sidebar">
+        <nav class="nav">
+          <button data-filter="all" class="active">
+            <i class="mark ink"></i><span>All demos</span
+            ><span class="count" id="count-all"></span></button
+          ><button data-filter="attention">
+            <i class="mark note"></i><span>Needs attention</span
+            ><span class="count" id="count-attention"></span></button
+          ><button data-filter="agent">
+            <i class="mark agent"></i><span>Agent changes</span
+            ><span class="count" id="count-agent"></span>
+          </button>
+        </nav>
+        <div class="folders">
+          <span class="micro-label">Folders in repo</span>
+          <div id="folders"></div>
         </div>
-        <div id="error" role="alert" hidden></div>
-        <div class="toolbar">
-          <div class="views">
-            <button class="active" data-view="recordings">
-              Recordings <span id="recording-count">0</span></button
-            ><button data-view="tours">
-              Source tours <span id="tour-count">0</span>
-            </button>
-          </div>
-          <details class="filters">
-            <summary>Filter</summary>
-            <div>
-              <button data-filter="all" class="active">All recordings</button
-              ><button data-filter="review">Open comments</button
-              ><button data-filter="audio">Audio to update</button>
-            </div>
+        <div class="sidebar-foot">
+          <details class="machine" id="machine">
+            <summary>
+              <i id="machine-dot" class="dot"></i
+              ><span id="machine-summary">Checking this machine…</span>
+            </summary>
+            <ul id="machine-list"></ul>
           </details>
-          <input
-            id="search"
-            type="search"
-            aria-label="Search library"
-            placeholder="Search recordings or files…"
-          /><select id="sort" aria-label="Sort recordings">
-            <option value="recent">Recently edited</option>
-            <option value="title">Title</option>
-          </select>
+          <span class="muted small"
+            >Local service · <span id="service"></span
+          ></span>
         </div>
-        <p id="result-count" class="result-count"></p>
+      </aside>
+      <main>
+        <div class="main-head">
+          <h1 id="view-title">Demos</h1>
+          <label class="search"
+            ><svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6" />
+              <path d="M15 15l5 5" /></svg
+            ><input
+              id="search"
+              type="search"
+              aria-label="Search demos"
+              placeholder="Search demos, paths, titles"
+            /><kbd>⌘K</kbd></label
+          >
+        </div>
+        <div id="error" class="error" role="alert" hidden></div>
         <div id="recordings" class="grid"></div>
-        <div id="tours" hidden></div>
+        <section id="tours-section" class="tours" hidden>
+          <div class="section-head">
+            <strong id="tours-title">Not recorded yet</strong>
+          </div>
+          <div id="tours"></div>
+        </section>
         <div id="empty" class="empty" hidden>
-          <span>▣</span>
-          <h2>No recordings yet.</h2>
+          <h2>No demos yet.</h2>
           <p>
-            No recordings found. Capture a tour from this workspace, or place an
-            existing replay folder anywhere inside it.
+            Add a .tour.ts file to this repository, or try the sample to see
+            Studio work.
           </p>
-          <code>bun run studio capture demos/example.tour.ts</code>
+          <code>bun run studio demo</code>
         </div>
-        <footer>
-          <span id="scan-status">Discovering local files…</span
-          ><span>Saved on your filesystem</span>
-        </footer>
       </main>
     </div>
-    <dialog id="capture-dialog">
-      <button id="close-dialog" class="close" aria-label="Close">×</button
-      ><span class="eyebrow">NEW RECORDING</span>
-      <h2>Capture a recording</h2>
-      <p>
-        Use your terminal or agent to capture an existing .tour.ts file. Studio
-        discovers the saved recording automatically. Capture commands run your
-        tour code; the library only reads files.
-      </p>
-      <pre id="capture-command">
-bun run studio capture demos/example.tour.ts</pre>
-      <button id="copy-command">Copy command</button>
-      <h3>Try an example</h3>
-      <p>Try the narrated invoice walkthrough:</p>
-      <code>bun run studio demo</code>
+    <dialog id="record-dialog" class="dialog">
+      <div class="dialog-head">
+        <i class="rec live"></i>
+        <h2 id="record-title">Record a tour</h2>
+        <button id="record-close" class="icon-button" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+      <code id="record-source" class="mono muted lead"></code>
+      <div id="record-pick" class="pick"></div>
+      <ul id="record-steps" class="steps" hidden>
+        <li data-step="timeline">
+          <i></i><span>Pass 1 · Run the tour and collect the timeline</span
+          ><small></small>
+        </li>
+        <li data-step="record">
+          <i></i><span>Pass 2 · Record the DOM</span><small></small>
+        </li>
+        <li data-step="bundle">
+          <i></i><span>Bundle assets and index elements</span><small></small>
+        </li>
+      </ul>
+      <p id="record-error" class="record-error" hidden></p>
+      <p id="record-dest" class="mono muted lead"></p>
+      <div class="dialog-foot">
+        <code id="record-command" class="mono muted"
+          >bun run studio capture …</code
+        >
+        <div class="buttons">
+          <button id="record-copy" class="button secondary">Copy command</button
+          ><button id="record-start" class="button primary">Record</button
+          ><button id="record-stop" class="button secondary" hidden>
+            Stop
+          </button>
+        </div>
+      </div>
     </dialog>
-    <div id="toast" role="status" hidden>Copied</div>
+    <div id="toast" class="toast" role="status" hidden>Copied</div>
   </body>
 </html>

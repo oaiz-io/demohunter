@@ -159,3 +159,21 @@ test("git status reports branch and changed files, and tolerates non-repositorie
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("a failed capture removes its new folder so a retry can use the same path", async () => {
+  const { root } = await projectFixture();
+  try {
+    const { captureReplay } = await import("./capture.js");
+    const { existsSync } = await import("node:fs");
+    const target = path.join(root, "new-capture");
+    await expect(
+      captureReplay({
+        projectDir: target,
+        loadedConfig: { config: { browser: "not-a-browser" } },
+      } as any),
+    ).rejects.toThrow();
+    expect(existsSync(target)).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

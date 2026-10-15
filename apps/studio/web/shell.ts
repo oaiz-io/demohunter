@@ -6,8 +6,15 @@ export function initializeShell() {
     help = $<HTMLDialogElement>("#help-dialog"),
     drawer = $("#scene-drawer");
   $("#timeline-toggle").onclick = () => {
-    $("#timeline-detail").hidden = !$("#timeline-detail").hidden;
+    drawer.showPopover();
+    $<HTMLDetailsElement>("#element-details").open = true;
+    $("#element-search").focus();
   };
+  for (const button of document.querySelectorAll<HTMLButtonElement>(
+    "[data-back]",
+  ))
+    button.onclick = () =>
+      $<HTMLButtonElement>(`[data-tab="${button.dataset.back}"]`).click();
   $("#help-open").onclick = () => help.showModal();
   $("#help-close").onclick = () => help.close();
   $("#back-comments").onclick = () =>

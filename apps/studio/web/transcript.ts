@@ -1,10 +1,12 @@
 import { projectUrl } from "./transport.js";
 import {
   audioIsCurrent,
+  clipDuration,
   narrationStart,
   type ReplayBundle,
   type NarrationSegment,
 } from "../model.js";
+import { estimateSpeechMs } from "./timeline.js";
 
 export type ScriptPatch = Partial<
   Pick<
@@ -64,6 +66,15 @@ export class TranscriptEditor {
     private root: HTMLElement,
     private hooks: Hooks,
   ) {}
+  private active?: string;
+  /** The segment of the scene under the playhead is expanded; others are
+   * compact excerpts. */
+  setActive(id: string | undefined): void {
+    if (id === this.active) return;
+    this.active = id;
+    for (const [segment, card] of this.cards)
+      card.classList.toggle("active", segment === id);
+  }
   get dirtyCount(): number {
     return this.drafts.size;
   }
@@ -100,20 +111,56 @@ export class TranscriptEditor {
           );
       }
       const ready = audioIsCurrent(bundle.project, values);
+      const index = bundle.narration.segments.indexOf(segment);
+      card.querySelector<HTMLElement>(".segment-number")!.textContent = String(
+        index + 1,
+      ).padStart(2, "0");
       const badge = card.querySelector<HTMLElement>(".status-tag")!;
-      badge.textContent = !segment.audio
-        ? "DRAFT"
+      const state = !segment.audio
+        ? "draft"
         : !ready
-          ? "AUDIO STALE"
+          ? "stale"
           : segment.audio.origin === "local-demo"
-            ? "SAMPLE VOICE"
-            : "READY";
-      badge.classList.toggle("stale", !!segment.audio && !ready);
-      badge.classList.toggle("ready", !!segment.audio && ready);
+            ? "sample"
+            : "current";
+      badge.textContent = {
+        draft: "Draft",
+        stale: "Stale",
+        sample: "Sample voice",
+        current: "Current",
+      }[state];
+      badge.className = `status-tag tag ${state}`;
+      card.dataset.state = state;
       card.querySelector<HTMLElement>(".segment-time")!.textContent =
         start === undefined ? "Scene removed" : clock(start);
+      const words = values.text.trim().split(/\s+/).filter(Boolean).length;
       card.querySelector<HTMLElement>(".segment-words")!.textContent =
-        `${values.text.trim().split(/\s+/).filter(Boolean).length} words${segment.audio && ready ? ` · ${(segment.audio.durationMs / 1000).toFixed(1)}s audio` : ""}`;
+        `${words} words`;
+      // Fit meter: speech length against the time left in its scene.
+      const clip = bundle.edits.clips.find((c) => c.id === values.clipId);
+      const room = clip ? clipDuration(clip) - values.offsetMs : 0;
+      const speech =
+        segment.audio && ready
+          ? segment.audio.durationMs
+          : estimateSpeechMs(values.text);
+      const meter = card.querySelector<HTMLElement>(".fit-meter")!;
+      meter.hidden = !clip || !values.text.trim();
+      const bar = meter.querySelector<HTMLElement>(".fit-bar")!;
+      bar.classList.toggle("over", speech > room);
+      bar.querySelector<HTMLElement>("i")!.style.width =
+        `${Math.min(100, (speech / Math.max(1, room)) * 100)}%`;
+      meter.querySelector<HTMLElement>(".fit-numbers")!.textContent =
+        `${segment.audio && ready ? "" : "≈ "}${(speech / 1000).toFixed(1)} s speech · ${(room / 1000).toFixed(1)} s scene`;
+      const verdict = meter.querySelector<HTMLElement>(".fit-verdict")!;
+      verdict.className = `fit-verdict ${speech > room ? "over" : "fits"}`;
+      verdict.textContent =
+        speech > room
+          ? `Over by ${((speech - room) / 1000).toFixed(1)} s · fit adds a hold`
+          : "Fits";
+      card.querySelector<HTMLElement>(".stale-reason")!.hidden =
+        state !== "stale";
+      card.querySelector<HTMLButtonElement>(".segment-generate")!.className =
+        `segment-generate button small ${state === "current" || state === "sample" ? "secondary" : "primary"}`;
       const status = card.querySelector<HTMLElement>(".segment-status")!;
       status.textContent = draft?.error
         ? "Needs review"
@@ -121,9 +168,11 @@ export class TranscriptEditor {
           ? "Saving…"
           : draft
             ? "Unsaved"
-            : "Saved";
+            : "";
       status.classList.toggle("conflict", !!draft?.error);
       card.classList.toggle("dirty", !!draft);
+      card.classList.toggle("active", segment.id === this.active);
+      card.querySelector<HTMLElement>(".segment-save")!.hidden = !draft;
       const conflict = card.querySelector<HTMLElement>(".segment-conflict")!;
       conflict.hidden = !draft?.error;
       conflict.querySelector("p")!.textContent = draft?.error ?? "";
@@ -178,7 +227,7 @@ export class TranscriptEditor {
         }
       }
     document.querySelector("#transcript-meta")!.textContent =
-      `${bundle.narration.segments.length} segments · ${bundle.narration.segments.reduce((n, s) => n + s.text.trim().split(/\s+/).filter(Boolean).length, 0)} words`;
+      `${bundle.edits.clips.length} scenes · ${bundle.narration.segments.reduce((n, s) => n + s.text.trim().split(/\s+/).filter(Boolean).length, 0)} words · ${(bundle.edits.clips.reduce((n, c) => n + clipDuration(c), 0) / 1000).toFixed(1)} s`;
     this.hooks.dirty(this.drafts.size);
   }
   private patch(id: string, patch: ScriptPatch): void {
@@ -240,27 +289,50 @@ export class TranscriptEditor {
     const card = el("div", "narration-card");
     card.dataset.id = id;
     const top = el("div", "card-top"),
+      number = el("span", "segment-number"),
       title = el("input", "narration-title"),
-      badge = el("span", "status-tag");
+      badge = el("span", "status-tag tag");
     title.setAttribute("aria-label", `Title for ${id}`);
     title.oninput = () => this.patch(id, { title: title.value });
-    top.append(title, badge);
+    top.append(number, title, badge);
     const textarea = el("textarea", "script-text");
-    textarea.rows = 4;
+    textarea.rows = 3;
     textarea.setAttribute("aria-label", `Script for ${id}`);
     textarea.oninput = () => this.patch(id, { text: textarea.value });
     const canvas = el("canvas", "waveform");
-    canvas.width = 560;
-    canvas.height = 46;
+    canvas.width = 640;
+    canvas.height = 56;
     canvas.hidden = true;
-    const info = el("div", "segment-info");
+    const meter = el("div", "fit-meter");
+    const bar = el("div", "fit-bar");
+    bar.append(el("i"));
+    const fitText = el("div", "fit-text");
+    fitText.append(el("span", "mono fit-numbers"), el("span", "fit-verdict"));
+    meter.append(bar, fitText);
+    const info = el("div", "segment-info sr-only");
     info.append(el("span", "segment-time"), el("span", "segment-words"));
+    const reason = el(
+      "p",
+      "stale-reason hint",
+      "The text or voice changed after this audio was made.",
+    );
     const tools = el("div", "segment-tools"),
-      preview = el("button", "segment-preview", "▷ Preview"),
-      generate = el("button", "segment-generate", "↻ Audio"),
-      save = el("button", "segment-save quiet", "Save"),
+      generate = el(
+        "button",
+        "segment-generate button small primary",
+        "Regenerate",
+      ),
+      preview = el(
+        "button",
+        "segment-preview button secondary small",
+        "▷ Preview scene",
+      ),
+      spacer = el("span", "spacer"),
+      status = el("span", "segment-status"),
+      save = el("button", "segment-save quiet small-text", "Save"),
       remove = el("button", "quiet", "×");
     remove.setAttribute("aria-label", `Remove ${id}`);
+    remove.title = "Remove segment";
     preview.onclick = () => {
       const segment = this.bundle!.narration.segments.find((s) => s.id === id);
       const time = segment && narrationStart(this.bundle!.edits, segment);
@@ -279,10 +351,8 @@ export class TranscriptEditor {
           this.render(this.bundle!);
         })
         .catch(this.hooks.error);
-    tools.append(preview, generate, save, remove);
-    const status = el("span", "segment-status", "Saved");
     const details = el("details", "segment-settings");
-    details.append(el("summary", undefined, "Timing & voice override"));
+    details.append(el("summary", "button secondary small", "Voice…"));
     const form = el("div", "voice-form");
     const clipLabel = el("label", undefined, "Scene"),
       clips = el("select", "segment-clip");
@@ -304,11 +374,13 @@ export class TranscriptEditor {
     voiceLabel.append(voice);
     form.append(clipLabel, offsetLabel, voiceLabel);
     details.append(form);
+    tools.append(generate, preview, details, spacer, status, save, remove);
     const conflict = el("div", "segment-conflict");
     conflict.hidden = true;
     conflict.append(el("p"));
-    const keep = el("button", undefined, "Keep my changes"),
-      discard = el("button", "quiet", "Use file version");
+    const row = el("div", "button-row");
+    const keep = el("button", "button primary small", "Keep my changes"),
+      discard = el("button", "button secondary small", "Use file version");
     keep.onclick = () => void this.save(id, true).catch(this.hooks.error);
     discard.onclick = () => {
       const d = this.drafts.get(id);
@@ -316,36 +388,42 @@ export class TranscriptEditor {
       this.drafts.delete(id);
       this.render(this.bundle!);
     };
-    conflict.append(keep, discard);
-    card.append(top, textarea, canvas, info, tools, status, details, conflict);
+    row.append(keep, discard);
+    conflict.append(row);
+    card.append(top, textarea, canvas, meter, reason, info, tools, conflict);
     return card;
+  }
+  /** Decoded first channel, shared with the timeline voice lane. */
+  waveform(audioPath: string): Promise<Float32Array> {
+    let decoded = this.waveforms.get(audioPath);
+    if (!decoded) {
+      decoded = fetch(projectUrl(`/files/${audioPath}`))
+        .then((res) => {
+          if (!res.ok) throw new Error("Missing audio");
+          return res.arrayBuffer();
+        })
+        .then(async (bytes) => {
+          this.audioContext ??= new AudioContext();
+          return (
+            await this.audioContext.decodeAudioData(bytes)
+          ).getChannelData(0);
+        });
+      decoded.catch(() => this.waveforms.delete(audioPath));
+      this.waveforms.set(audioPath, decoded);
+    }
+    return decoded;
   }
   private async drawWaveform(
     canvas: HTMLCanvasElement,
     audioPath: string,
   ): Promise<void> {
     try {
-      let decoded = this.waveforms.get(audioPath);
-      if (!decoded) {
-        decoded = fetch(projectUrl(`/files/${audioPath}`))
-          .then((res) => {
-            if (!res.ok) throw new Error("Missing audio");
-            return res.arrayBuffer();
-          })
-          .then(async (bytes) => {
-            this.audioContext ??= new AudioContext();
-            return (
-              await this.audioContext.decodeAudioData(bytes)
-            ).getChannelData(0);
-          });
-        this.waveforms.set(audioPath, decoded);
-      }
-      const data = await decoded;
+      const data = await this.waveform(audioPath);
       if (canvas.dataset.path !== audioPath) return;
       const ctx = canvas.getContext("2d")!;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#7ba497";
-      const bars = 110,
+      ctx.fillStyle = "#3d3d3d";
+      const bars = Math.floor(canvas.width / 8),
         step = Math.max(1, Math.floor(data.length / bars));
       for (let i = 0; i < bars; i++) {
         let peak = 0;
@@ -355,8 +433,13 @@ export class TranscriptEditor {
           j += 3
         )
           peak = Math.max(peak, Math.abs(data[j]!));
-        const height = Math.max(2, Math.min(42, peak * 110));
-        ctx.fillRect(i * 5, (46 - height) / 2, 2, height);
+        const height = Math.max(
+          4,
+          Math.min(canvas.height - 8, peak * canvas.height * 2.2),
+        );
+        ctx.beginPath();
+        ctx.roundRect(i * 8 + 2, (canvas.height - height) / 2, 4, height, 2);
+        ctx.fill();
       }
     } catch {
       canvas.hidden = true;
