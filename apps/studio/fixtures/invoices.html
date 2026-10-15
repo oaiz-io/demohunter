@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Northstar · Invoices</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #fbfcfe;
+        color: #263348;
+        font-size: 15px;
+      }
+      .app {
+        display: grid;
+        grid-template-columns: 176px 1fr;
+        min-height: 720px;
+      }
+      .sidebar {
+        padding: 30px 20px;
+        background: #fff;
+        border-right: 1px solid #e7ebf2;
+      }
+      .brand {
+        font-size: 20px;
+        letter-spacing: -0.8px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .brand b {
+        width: 25px;
+        height: 25px;
+        border-radius: 7px;
+        background: #5478f4;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-size: 17px;
+      }
+      .workspace-name {
+        font-size: 11px;
+        color: #8b98ae;
+        margin-top: 27px;
+        border: 1px solid #e8edf5;
+        padding: 11px 9px;
+        border-radius: 6px;
+      }
+      .nav {
+        display: grid;
+        gap: 9px;
+        margin-top: 29px;
+      }
+      .nav span {
+        padding: 12px 10px;
+        color: #8997ad;
+        font-size: 12px;
+      }
+      .nav .active {
+        background: #eef3ff;
+        color: #5477d9;
+        border-radius: 6px;
+        font-weight: 600;
+      }
+      .sidebar-bottom {
+        margin-top: 270px;
+        font-size: 11px;
+        color: #a4afc0;
+      }
+      .main {
+        min-width: 0;
+      }
+      .topbar {
+        height: 62px;
+        border-bottom: 1px solid #e7ecf4;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 32px;
+        background: #fff;
+        color: #97a4b8;
+        font-size: 11px;
+      }
+      .topbar .account {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .avatar {
+        display: grid;
+        place-items: center;
+        width: 29px;
+        height: 29px;
+        border-radius: 50%;
+        background: #eef1fb;
+        color: #8b9dcd;
+        font-size: 10px;
+      }
+      .content {
+        padding: 26px 30px 20px;
+      }
+      .eyebrow {
+        font-size: 10px;
+        color: #9cabc0;
+        letter-spacing: 1.3px;
+      }
+      .page-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 12px;
+      }
+      .page-heading h1 {
+        font-size: 28px;
+        font-weight: 600;
+        letter-spacing: -1px;
+        margin: 0;
+      }
+      .subtitle {
+        font-size: 12px;
+        line-height: 1.8;
+        color: #65748b;
+        margin-top: 10px;
+      }
+      button {
+        border: 1px solid #dfe7f2;
+        border-radius: 6px;
+        background: #fff;
+        color: #7a8ca8;
+        font-size: 11px;
+        padding: 10px 13px;
+        cursor: pointer;
+      }
+      .primary {
+        background: #5679ee;
+        color: #fff;
+        border-color: #5679ee;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 15px;
+        margin-top: 23px;
+      }
+      .stat {
+        border: 1px solid #e6ecf4;
+        border-radius: 8px;
+        background: #fff;
+        padding: 16px;
+      }
+      .stat-label {
+        font-size: 11px;
+        color: #74849d;
+      }
+      .stat-value {
+        font-size: 27px;
+        font-weight: 550;
+        letter-spacing: -0.6px;
+        margin-top: 13px;
+        color: #485c7a;
+      }
+      .stat-note {
+        font-size: 9px;
+        color: #78869e;
+        margin-top: 9px;
+      }
+      .green {
+        color: #6ca48a;
+      }
+      .toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 22px 0 14px;
+        font-size: 11px;
+        color: #7888a2;
+      }
+      .filters {
+        display: flex;
+        gap: 17px;
+      }
+      .filters .selected {
+        color: #6580c3;
+        font-weight: 600;
+      }
+      .table {
+        border: 1px solid #e5ebf4;
+        border-radius: 8px;
+        background: #fff;
+        overflow: hidden;
+      }
+      .table-head,
+      .row {
+        display: grid;
+        grid-template-columns: 1.4fr 1fr 1fr 1fr 1.1fr;
+        align-items: center;
+        padding: 14px 18px;
+        gap: 12px;
+      }
+      .table-head {
+        background: #f9fbfe;
+        color: #6f8099;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+      }
+      .row {
+        border-top: 1px solid #edf1f7;
+        min-height: 64px;
+        font-size: 11px;
+        color: #576b86;
+      }
+      .row strong {
+        display: block;
+        font-size: 12px;
+        color: #354f75;
+        font-weight: 550;
+        margin-bottom: 5px;
+      }
+      .row .amount {
+        font-variant-numeric: tabular-nums;
+        color: #6a7c99;
+      }
+      .status {
+        font-size: 9px;
+        padding: 6px 8px;
+        display: inline-block;
+        border-radius: 4px;
+        width: fit-content;
+        background: #fff6e9;
+        color: #bf9c67;
+      }
+      .status.paid,
+      .status.approved {
+        background: #edf7f1;
+        color: #7fa58f;
+      }
+      .row .review {
+        font-size: 10px;
+        color: #6481c1;
+        background: #f3f6ff;
+        border-color: #e1e8fa;
+        justify-self: start;
+        padding: 8px 10px;
+      }
+      .footnote {
+        font-size: 10px;
+        color: #74849c;
+        margin-top: 16px;
+      }
+      .breadcrumbs {
+        font-size: 11px;
+        color: #9facc0;
+        margin-bottom: 22px;
+      }
+      .breadcrumbs span {
+        color: #7287a7;
+      }
+      .invoice-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 22px;
+        margin-top: 24px;
+      }
+      .invoice-document {
+        padding: 20px;
+        border: 1px solid #e4ebf5;
+        background: #fff;
+        border-radius: 8px;
+      }
+      .document-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #edf1f8;
+      }
+      .document-brand {
+        font-weight: 600;
+        font-size: 18px;
+        color: #6e83a7;
+      }
+      .small-label {
+        color: #abb7ca;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      .client-name {
+        font-size: 15px;
+        font-weight: 550;
+        color: #3d587e;
+        margin-top: 9px;
+      }
+      .client-address {
+        font-size: 10px;
+        color: #73849d;
+        line-height: 1.8;
+        margin-top: 6px;
+      }
+      .document-meta {
+        display: flex;
+        gap: 34px;
+        padding: 16px 0;
+      }
+      .meta-value {
+        margin-top: 7px;
+        font-size: 11px;
+        color: #91a2bd;
+      }
+      .line-items {
+        border-top: 1px solid #eaf0f7;
+        margin-top: 5px;
+      }
+      .line-head,
+      .line-item {
+        display: grid;
+        grid-template-columns: 1fr 50px 75px 85px;
+        gap: 12px;
+        font-size: 10px;
+        padding: 13px 0;
+        color: #6b7d98;
+      }
+      .line-item {
+        font-size: 11px;
+        color: #5b7294;
+        border-top: 1px solid #edf2f8;
+        line-height: 1.7;
+      }
+      .line-item strong {
+        font-weight: 550;
+        color: #728bad;
+      }
+      .totals {
+        margin-left: auto;
+        width: 210px;
+        padding-top: 18px;
+      }
+      .totals-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 11px;
+        color: #637994;
+        margin: 8px 0;
+      }
+      .total-final {
+        border-top: 1px solid #e8eef7;
+        padding-top: 10px;
+        margin-top: 13px;
+      }
+      .total-final strong {
+        color: #536e98;
+        font-size: 22px;
+        letter-spacing: -0.5px;
+      }
+      .payment-note {
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid #edf2f8;
+        color: #6c809e;
+        font-size: 10px;
+        line-height: 1.8;
+      }
+      .approval-card {
+        border: 1px solid #e1e9f5;
+        background: #fff;
+        border-radius: 8px;
+        padding: 20px;
+        height: fit-content;
+      }
+      .approval-card h2 {
+        font-size: 13px;
+        font-weight: 550;
+        color: #7a90b0;
+        margin: 0 0 17px;
+      }
+      .approval-detail {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 10px;
+        color: #697d99;
+        margin: 14px 0;
+      }
+      .approval-card button {
+        width: 100%;
+        margin-top: 15px;
+      }
+      .activity {
+        font-size: 10px;
+        color: #7185a3;
+        line-height: 1.9;
+        margin-top: 24px;
+      }
+      .activity strong {
+        color: #8a9ebd;
+        font-weight: 500;
+      }
+      .success-banner {
+        padding: 17px 20px;
+        border: 1px solid #d5eadc;
+        background: #f0f9f3;
+        border-radius: 7px;
+        color: #356e49;
+        font-size: 12px;
+        margin: 22px 0 0;
+        line-height: 1.8;
+      }
+      .tax-detail {
+        border: 1px solid #e3ebfa;
+        background: #f8faff;
+        border-radius: 5px;
+        padding: 13px;
+        margin-top: 15px;
+        font-size: 11px;
+        line-height: 1.8;
+        color: #4c6994;
+      }
+      .breakdown-button {
+        font-size: 9px;
+        border: 0;
+        padding: 5px 0;
+        margin-left: auto;
+        display: block;
+        color: #8da1c5;
+      }
+      .approved-label {
+        font-size: 10px;
+        color: #7ba38a;
+        margin-top: 16px;
+        line-height: 1.8;
+      }
+      .muted {
+        color: #7d8ca3;
+      }
+
+      .success-banner {
+        position: fixed;
+        left: 206px;
+        right: 30px;
+        bottom: 18px;
+        box-shadow: 0 6px 24px #203d2c16;
+        z-index: 5;
+      }
+
+      .breakdown-button {
+        outline: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" id="product-sidebar">
+        <div class="brand"><b>n</b> northstar</div>
+        <div class="workspace-name">Acme workspace &nbsp;⌄</div>
+        <nav class="nav">
+          <span>◇ &nbsp; Overview</span><span>↗ &nbsp; Transactions</span
+          ><span class="active">▤ &nbsp; Invoices</span
+          ><span>◉ &nbsp; Customers</span><span>▧ &nbsp; Reports</span>
+        </nav>
+        <div class="sidebar-bottom">⚙ &nbsp; Workspace settings</div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <span>WORKSPACE / FINANCE</span>
+          <div class="account">
+            Team workspace <span class="avatar">JD</span>
+          </div>
+        </header>
+        <div class="content" id="content">
+          <div class="eyebrow">ACCOUNTS RECEIVABLE</div>
+          <div class="page-heading">
+            <h1 id="page-title">Invoices</h1>
+            <button class="primary">＋ Create invoice</button>
+          </div>
+          <p class="subtitle" id="overview-description">
+            A clear view of what is paid, what is pending, and what needs your
+            attention.
+          </p>
+          <div class="stats" id="invoice-summary">
+            <div class="stat">
+              <div class="stat-label">Outstanding</div>
+              <div class="stat-value">€18,420.00</div>
+              <div class="stat-note">4 invoices this month</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Paid this month</div>
+              <div class="stat-value">€12,800.00</div>
+              <div class="stat-note green">↗ 12.4% from last month</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Awaiting approval</div>
+              <div class="stat-value">1 invoice</div>
+              <div class="stat-note">Ready for your review</div>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="filters">
+              <span class="selected">All invoices</span
+              ><span>Awaiting approval</span><span>Paid</span>
+            </div>
+            <span>October 2026 &nbsp;⌄</span>
+          </div>
+          <div class="table" id="invoice-table">
+            <div class="table-head">
+              <span>Customer / Invoice</span><span>Amount</span
+              ><span>Due date</span><span>Status</span><span>Action</span>
+            </div>
+            <div class="row" id="acme-invoice-row">
+              <div>
+                <strong>Acme Studio</strong
+                ><span class="muted">INV-2026-0042</span>
+              </div>
+              <span class="amount">€2,640.00</span><span>20 Oct 2026</span
+              ><span class="status">Awaiting approval</span
+              ><button
+                class="review"
+                id="review-invoice"
+                data-demohunter-name="Review invoice button"
+              >
+                Review invoice →
+              </button>
+            </div>
+            <div class="row">
+              <div>
+                <strong>Forma Collective</strong
+                ><span class="muted">INV-2026-0041</span>
+              </div>
+              <span class="amount">€7,200.00</span><span>22 Oct 2026</span
+              ><span class="status">Sent</span><span>View invoice →</span>
+            </div>
+            <div class="row">
+              <div>
+                <strong>Linear Workshop</strong
+                ><span class="muted">INV-2026-0040</span>
+              </div>
+              <span class="amount">€1,980.00</span><span>25 Oct 2026</span
+              ><span class="status">Sent</span><span>View invoice →</span>
+            </div>
+            <div class="row">
+              <div>
+                <strong>North &amp; Co.</strong
+                ><span class="muted">INV-2026-0039</span>
+              </div>
+              <span class="amount">€6,600.00</span><span>28 Oct 2026</span
+              ><span class="status">Sent</span><span>View invoice →</span>
+            </div>
+          </div>
+          <div class="footnote">Showing 4 invoices · All amounts in EUR</div>
+        </div>
+      </main>
+    </div>
+    <script>
+      const details = `<div class="breadcrumbs">Invoices &nbsp;/&nbsp; <span>INV-2026-0042</span></div><div class="page-heading"><h1 id="invoice-title">Invoice INV-2026-0042</h1><span class="status" id="invoice-status">Awaiting approval</span></div><div class="subtitle">Review the details, then approve this invoice for sending.</div><div class="invoice-layout"><section class="invoice-document" id="invoice-document"><div class="document-header"><div><div class="small-label">BILL TO</div><div class="client-name" id="customer-name" data-demohunter-name="Customer name" data-demohunter-source="apps/studio/fixtures/invoices.html">Acme Studio</div><div class="client-address">finance@acmestudio.example<br>12 Studio Lane, Berlin</div></div><div class="document-brand">northstar</div></div><div class="document-meta"><div><div class="small-label">ISSUED</div><div class="meta-value">15 October 2026</div></div><div><div class="small-label">DUE DATE</div><div class="meta-value">20 October 2026</div></div><div><div class="small-label">REFERENCE</div><div class="meta-value">Product design / October</div></div></div><div class="line-items"><div class="line-head"><span>Description</span><span>Qty</span><span>Rate</span><span>Amount</span></div><div class="line-item"><div><strong>Product design consulting</strong><br>Research, design review, and delivery</div><span>16 h</span><span>€150.00</span><span>€2,400.00</span></div></div><div class="totals" id="invoice-totals"><div class="totals-row"><span>Subtotal</span><span>€2,400.00</span></div><div class="totals-row"><span>Tax (10%)</span><span>€240.00</span></div><div class="totals-row total-final"><span>Total due</span><strong id="invoice-total" data-demohunter-name="Invoice total" data-demohunter-source="apps/studio/fixtures/invoices.html">€2,640.00</strong></div><button class="breakdown-button" id="show-breakdown">Show calculation ↓</button></div><div id="tax-detail"></div><div class="payment-note">Payment by bank transfer · Please include the invoice number as a reference.<br>Thank you for working with us.</div></section><aside><div class="approval-card" id="approval-panel"><h2>Approval details</h2><div class="approval-detail"><span>Created by</span><span>Jamie Davis</span></div><div class="approval-detail"><span>Reviewer</span><span>You</span></div><div class="approval-detail"><span>Currency</span><span>EUR</span></div><button class="primary" id="approve-invoice" data-demohunter-name="Approve invoice button" data-demohunter-source="apps/studio/fixtures/invoices.html">Approve invoice</button><div id="approval-result"></div></div><div class="activity" id="invoice-activity"><strong>ACTIVITY</strong><br>◦ Draft created · Today, 09:12<br>◦ Sent for review · Today, 09:18</div></aside></div><div id="approval-banner"></div>`;
+      document.querySelector("#review-invoice").onclick = () => {
+        document.querySelector("#content").innerHTML = details;
+        document.querySelector("#show-breakdown").onclick = () => {
+          document.querySelector("#tax-detail").innerHTML =
+            '<div class="tax-detail" id="calculation-explainer">16 hours × €150 = €2,400 subtotal. Add €240 tax for a total of €2,640.</div>';
+          document.querySelector("#show-breakdown").textContent =
+            "Calculation shown ✓";
+        };
+        document.querySelector("#approve-invoice").onclick = () => {
+          const status = document.querySelector("#invoice-status");
+          status.textContent = "Approved";
+          status.className = "status approved";
+          document.querySelector("#approve-invoice").textContent = "Approved ✓";
+          document.querySelector("#approve-invoice").disabled = true;
+          document.querySelector("#approval-result").innerHTML =
+            '<div class="approved-label">Approved by you<br>Ready to send to the customer.</div>';
+          document.querySelector("#approval-banner").innerHTML =
+            '<div class="success-banner" id="success-message" data-demohunter-name="Approval confirmation">✓ Invoice approved. The invoice is ready to send, and the approval has been added to its activity log.</div>';
+          document.querySelector("#invoice-activity").innerHTML =
+            '<strong>ACTIVITY</strong><br>◦ Draft created · Today, 09:12<br>◦ Sent for review · Today, 09:18<br>◦ <span id="approval-event">Approved by you · Just now</span>';
+        };
+      };
+    </script>
+  </body>
+</html>

@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>DemoHunter Studio</title>
+    <link rel="stylesheet" href="/files/assets/rrweb.css" />
+    <link rel="stylesheet" href="/style.css" />
+    <script defer src="/files/assets/rrweb.js"></script>
+    <script defer src="/app.js"></script>
+  </head>
+  <body>
+    <svg class="svg-defs" aria-hidden="true">
+      <symbol id="i-select" viewBox="0 0 24 24">
+        <path d="M7 3l13 9-6 1-3 7z" />
+      </symbol>
+      <symbol id="i-comment" viewBox="0 0 24 24">
+        <path d="M5 5h14v11H9l-4 4z" />
+      </symbol>
+      <symbol id="i-scenes" viewBox="0 0 24 24">
+        <path d="M4 4h16v16H4z M4 9h16 M9 9v11" />
+      </symbol>
+      <symbol id="i-focus" viewBox="0 0 24 24">
+        <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
+      </symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24">
+        <path d="M15 5l-7 7 7 7" />
+      </symbol>
+      <symbol id="i-code" viewBox="0 0 24 24">
+        <path d="M8 7l-5 5 5 5m8-10l5 5-5 5m-3-13l-2 16" />
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </symbol>
+      <symbol id="i-help" viewBox="0 0 24 24">
+        <path d="M9 8a3 3 0 116 0c0 2-3 2-3 5m0 3v1" />
+      </symbol>
+      <symbol id="i-agent" viewBox="0 0 24 24">
+        <path d="M8 4h8v4h4v8h-4v4H8v-4H4V8h4z" />
+      </symbol>
+      <symbol id="i-more" viewBox="0 0 24 24">
+        <path d="M5 12h.01M12 12h.01M19 12h.01" />
+      </symbol>
+    </svg>
+    <header class="app-header">
+      <a
+        href="#studio-library"
+        class="library-back"
+        aria-label="Back to library"
+        title="Back to library"
+        ><svg class="icon" aria-hidden="true"><use href="#i-arrow" /></svg></a
+      ><a class="wordmark" href="/" aria-label="DemoHunter Studio"
+        ><span class="logo-mark">▱</span></a
+      ><span class="header-divider">/</span>
+      <h1 id="project-title">Loading recording…</h1>
+      <span class="live-status" id="live-status">Connecting…</span>
+      <div class="header-right">
+        <button id="connect-agent" class="agent-connect">
+          <svg class="icon" aria-hidden="true"><use href="#i-agent" /></svg
+          ><span>Connect agent</span></button
+        ><button id="export-open" class="primary">Export</button>
+        <details id="project-menu" class="project-menu">
+          <summary aria-label="More options" title="More options">
+            <svg class="icon" aria-hidden="true"><use href="#i-more" /></svg>
+          </summary>
+          <div class="menu-content">
+            <button id="undo" disabled>↶ Undo last edit <kbd>⌘Z</kbd></button
+            ><button data-tab="timing">Timing & effects</button
+            ><button id="timeline-toggle">Detailed timeline</button
+            ><button id="help-open">Keyboard shortcuts</button>
+            <details class="project-files">
+              <summary>Project files</summary>
+              <button id="copy-project-path">Copy project path</button
+              ><code>edits.json · narration.json</code
+              ><code id="file-revision"></code>
+            </details>
+          </div>
+        </details>
+      </div>
+    </header>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <main class="workspace">
+      <aside class="outline" id="scene-drawer" popover>
+        <div class="drawer-heading">
+          <strong>Scenes</strong
+          ><button
+            popovertarget="scene-drawer"
+            popovertargetaction="hide"
+            aria-label="Close scenes"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <div class="sr-only">
+          <strong id="outline-title"></strong><span id="outline-meta"></span
+          ><span id="scene-count"></span>
+        </div>
+        <div id="scene-list" class="scene-list"></div>
+        <details class="element-details">
+          <summary>Find an element <span id="element-count"></span></summary>
+          <div class="element-search-wrap">
+            <input
+              id="element-search"
+              aria-label="Find a captured element"
+              placeholder="Search elements…"
+            />
+          </div>
+          <div id="element-tree" class="element-tree"></div>
+        </details>
+      </aside>
+      <section class="editor">
+        <div class="canvas-top">
+          <button id="scenes-toggle" class="quiet" popovertarget="scene-drawer">
+            <svg class="icon" aria-hidden="true"><use href="#i-scenes" /></svg>
+            Scenes</button
+          ><span id="canvas-instruction">Click anything to select it</span
+          ><button id="focus-preview" class="quiet" title="Expand preview">
+            <svg class="icon" aria-hidden="true"><use href="#i-focus" /></svg
+            ><span>Focus</span>
+          </button>
+        </div>
+        <div class="canvas-wrap">
+          <div id="stage" class="stage">
+            <div id="viewport">
+              <div id="camera">
+                <div id="replay"></div>
+                <div id="effects"></div>
+                <div id="agent-target" hidden></div>
+                <div id="comment-pins"></div>
+                <div id="selection-box" hidden></div>
+                <div id="hover-box" hidden></div>
+              </div>
+              <div id="select-layer" hidden></div>
+            </div>
+            <div id="stage-loading">Loading recording…</div>
+            <div class="canvas-label" id="viewport-label"></div>
+          </div>
+          <div class="canvas-tools" role="toolbar" aria-label="Canvas tools">
+            <button
+              id="inspect-toggle"
+              aria-pressed="true"
+              title="Select element (V)"
+              aria-label="Select element"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-select" />
+              </svg></button
+            ><button
+              id="tool-comment"
+              aria-pressed="false"
+              title="Comment on an element (C)"
+              aria-label="Comment on an element"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-comment" />
+              </svg></button
+            ><span></span
+            ><button
+              id="tool-script"
+              title="Edit script (S)"
+              aria-label="Edit script"
+            >
+              <svg class="icon" aria-hidden="true"><use href="#i-code" /></svg>
+            </button>
+          </div>
+          <div id="agent-activity" class="agent-activity" hidden>
+            <span class="agent-beacon"></span
+            ><span class="agent-activity-label"></span
+            ><button>Show element</button>
+          </div>
+        </div>
+        <div class="caption-strip">
+          <p id="current-caption">Your recording, ready to refine.</p>
+          <span id="audio-state" class="status-tag">Draft</span>
+        </div>
+        <div class="playback">
+          <div class="transport">
+            <button
+              id="restart"
+              class="icon-button"
+              aria-label="Restart"
+              title="Restart"
+            >
+              ↶</button
+            ><button id="play" class="play-button" aria-label="Play">▶</button
+            ><span id="time" class="time">00:00 / 00:00</span
+            ><input
+              id="scrubber"
+              type="range"
+              min="0"
+              max="100"
+              value="0"
+              step="10"
+              aria-label="Seek playback"
+            /><select id="speed" aria-label="Playback speed">
+              <option value="0.75">0.75×</option>
+              <option value="1" selected>1×</option>
+              <option value="1.5">1.5×</option>
+              <option value="2">2×</option>
+            </select>
+          </div>
+          <div class="timeline">
+            <div id="clip-track" class="track-content"></div>
+            <div id="timeline-detail" hidden>
+              <span id="duration-label"></span>
+              <div id="voice-track" class="track-content voice-track"></div>
+            </div>
+          </div>
+          <footer class="file-footer">
+            <span id="save-indicator">Saved locally</span
+            ><span class="key-hint">Space to play · C to comment</span>
+          </footer>
+        </div>
+      </section>
+      <aside class="inspector">
+        <nav class="tabs" aria-label="Editing panels">
+          <button
+            data-tab="comments"
+            class="active"
+            role="tab"
+            aria-selected="true"
+          >
+            Comments
+            <span id="comment-count" class="count-badge">0</span></button
+          ><button data-tab="narration" role="tab" aria-selected="false">
+            Script</button
+          ><button
+            id="element-tab"
+            data-tab="selection"
+            role="tab"
+            aria-selected="false"
+            hidden
+          >
+            Element
+          </button>
+        </nav>
+        <section id="panel-comments" class="panel">
+          <div class="new-comment">
+            <div id="comment-anchor" class="comment-anchor">
+              At the current playhead
+            </div>
+            <textarea
+              id="new-comment"
+              rows="3"
+              placeholder="What would you like to change?"
+              aria-label="New comment"
+            ></textarea>
+            <div class="comment-compose-footer">
+              <label
+                ><input type="checkbox" id="attach-comment" checked /> Attach
+                selection</label
+              ><button id="add-comment" class="primary">Save comment</button>
+            </div>
+          </div>
+          <div class="comment-filter">
+            <span id="comment-summary">No open comments</span
+            ><button id="toggle-resolved" class="quiet">Show resolved</button>
+          </div>
+          <div id="comments-list"></div>
+          <div id="comments-empty" class="review-empty">
+            <span class="review-symbol"
+              ><svg class="icon"><use href="#i-comment" /></svg
+            ></span>
+            <h2>Point. Comment. Refine.</h2>
+            <p>
+              Leave a note on the recording, then let your agent take it from
+              there.
+            </p>
+            <span class="hint">Your agent can read and resolve comments.</span>
+          </div>
+        </section>
+        <section id="panel-narration" class="panel" hidden>
+          <div class="panel-heading"><h2>Script</h2></div>
+          <div class="transcript-summary">
+            <span id="transcript-meta"></span
+            ><button id="add-segment" class="quiet">＋ Segment</button>
+          </div>
+          <div id="narration-list"></div>
+          <div class="narration-actions">
+            <button id="save-narration" class="wide quiet">
+              Save all script changes</button
+            ><button id="regenerate" class="primary wide">
+              ↻ Regenerate all audio
+            </button>
+          </div>
+          <p id="narration-job" role="status"></p>
+          <details class="voice-details">
+            <summary>Voice settings</summary>
+            <div class="voice-form">
+              <label
+                >Provider<select id="tts-provider">
+                  <option value="openai">OpenAI</option>
+                  <option value="elevenlabs">ElevenLabs</option>
+                </select></label
+              ><label
+                >Voice<input
+                  id="tts-voice"
+                  placeholder="Voice name or ID" /></label
+              ><label>Model<input id="tts-model" /></label
+              ><label
+                >Language<input
+                  id="tts-language"
+                  placeholder="Optional, e.g. en" /></label
+              ><label class="full"
+                >Direction<textarea id="tts-instructions" rows="3"></textarea>
+              </label>
+            </div>
+            <button id="save-voice" class="wide">Save voice settings</button>
+            <button id="discard-voice" class="wide quiet">
+              Use file settings
+            </button>
+            <p class="hint">
+              Credentials come from your environment. Sample narration uses a
+              local demo voice.
+            </p>
+            <pre id="voice-settings" hidden></pre>
+          </details>
+        </section>
+        <section id="panel-selection" class="panel" hidden>
+          <div class="panel-heading"><h2>Selected element</h2></div>
+          <div id="selection-empty" class="empty-state">
+            <div class="selection-illustration"><span></span><i>⌖</i></div>
+            <h3>Every element has an address.</h3>
+            <p>
+              Choose something in the capture or the element list. Your agent
+              gets its HTML, edit location, and timeline position.
+            </p>
+            <button id="select-start">⌖ Select an element</button>
+          </div>
+          <div id="selection-detail" hidden>
+            <div class="selection-name">
+              <span id="selected-tag"></span>
+            </div>
+
+            <button id="comment-element" class="primary wide">
+              Comment on this element
+            </button>
+            <div class="reference-actions">
+              <button id="copy-element-link">Copy link</button
+              ><button
+                id="copy-agent-context"
+                title="Copy source files, IDs, and current time"
+              >
+                Copy for agent
+              </button>
+            </div>
+            <details class="manual-edits">
+              <summary>Edit by hand</summary>
+              <label class="field-label" for="selection-text">Content</label
+              ><textarea id="selection-text" rows="4"></textarea>
+              <div class="button-row">
+                <button id="apply-element" class="primary">Apply text</button
+                ><button id="hide-element">Hide</button
+                ><button id="reset-element" class="quiet">Reset</button>
+              </div>
+              <div class="divider"></div>
+              <div class="field-label">PRESENTATION</div>
+              <div class="button-row">
+                <button id="add-zoom">＋ Zoom</button
+                ><button id="add-highlight">＋ Highlight</button
+                ><button id="add-animation">＋ Animate</button>
+              </div>
+              <p class="hint">
+                Effects start at the playhead. Refine them here or through your
+                agent.
+              </p>
+            </details>
+            <details class="source-details">
+              <summary>Source &amp; element identity</summary>
+              <code id="selected-id"></code
+              ><code id="selected-selector" class="selector"></code>
+              <div id="source-locations"></div>
+              <button id="show-source" class="wide">View captured HTML</button>
+              <pre id="source-html" hidden></pre>
+            </details>
+          </div>
+        </section>
+        <section id="panel-timing" class="panel" hidden>
+          <div class="panel-heading">
+            <button id="back-comments" class="quiet">← Comments</button>
+            <h2>Timing & effects</h2>
+          </div>
+          <div id="timing-list"></div>
+          <details>
+            <summary>Effects</summary>
+            <div id="effects-list"></div>
+          </details>
+          <button id="save-timing" class="primary wide">Save timing</button>
+          <p class="hint">
+            Narration follows its scene. Absolute effect times stay where you
+            placed them.
+          </p>
+        </section>
+      </aside>
+    </main>
+    <dialog id="export-dialog">
+      <button id="export-close" class="dialog-close" aria-label="Close export">
+        ×
+      </button>
+      <div class="section-eyebrow"></div>
+      <h2>Export recording</h2>
+      <p>
+        Render the current saved edits into an MP4 with captions and a
+        checksummed manifest. This runs locally and never revisits the source
+        app.
+      </p>
+      <label class="field-label"
+        >Frame rate
+        <select id="export-fps">
+          <option value="24">24 fps</option>
+          <option value="12">12 fps · faster for static demos</option>
+          <option value="30">30 fps</option>
+        </select></label
+      >
+      <p>
+        <label
+          ><input type="checkbox" id="export-strict" /> Require current audio
+          for every narration segment</label
+        >
+      </p>
+      <button id="export-start" class="primary wide">
+        Export saved recording
+      </button>
+      <p id="export-status" role="status"></p>
+      <div id="export-downloads" hidden>
+        <a id="export-video">Download MP4 ↗</a> ·
+        <a id="export-captions">Captions</a> ·
+        <a id="export-manifest">Manifest</a>
+      </div>
+      <p class="hint">
+        Edits made during rendering cancel the export to keep the result
+        consistent. Previewing and agent inspection can continue.
+      </p>
+    </dialog>
+    <dialog id="agent-dialog">
+      <button
+        id="close-agent"
+        class="dialog-close"
+        aria-label="Close agent setup"
+      >
+        ×
+      </button>
+      <div class="agent-dialog-icon">⌘</div>
+      <div class="section-eyebrow"></div>
+      <h2>Connect your agent</h2>
+      <p>
+        Connect any MCP-capable agent to this project. It can inspect your
+        selection, follow element links, edit the recording, and work through
+        comments. The app never calls a language model.
+      </p>
+      <div class="connection-label">
+        <strong>Local stdio server</strong><span class="local-label">MCP</span>
+      </div>
+      <pre id="agent-config"></pre>
+      <div class="button-row">
+        <button id="copy-agent-config" class="primary">
+          Copy connection config</button
+        ><button id="copy-agent-command">Copy launch command</button>
+      </div>
+      <p class="hint">
+        Add a local stdio MCP server in your agent using the command and
+        arguments above. No settings are changed automatically.
+      </p>
+      <details>
+        <summary>Recent agent activity</summary>
+        <ul id="agent-activity-list"></ul>
+      </details>
+      <div class="agent-capabilities">
+        <span>Selection</span><span>HTML &amp; sources</span
+        ><span>Comments</span><span>Animations</span><span>Narration</span
+        ><span>Undo</span>
+      </div>
+      <details>
+        <summary>Prefer editing files directly?</summary>
+        <p>
+          Read the project’s AGENTS.md, then edit edits.json, narration.json,
+          comments.json, or overrides.css. Valid changes appear here
+          automatically.
+        </p>
+        <code id="agent-project-path"></code>
+      </details>
+    </dialog>
+    <dialog id="help-dialog">
+      <button id="help-close" class="dialog-close" aria-label="Close shortcuts">
+        ×
+      </button>
+      <h2>Keyboard shortcuts</h2>
+      <dl class="shortcuts">
+        <dt>Select an element</dt>
+        <dd>V</dd>
+        <dt>Comment on an element</dt>
+        <dd>C</dd>
+        <dt>Edit the script</dt>
+        <dd>S</dd>
+        <dt>Play / pause</dt>
+        <dd>Space</dd>
+        <dt>Seek one second</dt>
+        <dd>← / →</dd>
+        <dt>Clear selection</dt>
+        <dd>Esc</dd>
+        <dt>Undo</dt>
+        <dd>⌘ / Ctrl Z</dd>
+      </dl>
+      <p class="hint">
+        Select something, leave a comment, then copy the context to your agent.
+      </p>
+    </dialog>
+  </body>
+</html>

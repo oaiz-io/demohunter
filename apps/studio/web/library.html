@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>DemoHunter Studio · Library</title>
+    <link rel="stylesheet" href="/library.css" />
+    <script defer src="/library.js"></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/"
+        ><span class="logo-mark">▱</span> DemoHunter <span>Studio</span></a
+      >
+      <div class="header-actions">
+        <details class="workspace-menu">
+          <summary>Workspace ⌄</summary>
+          <div>
+            <code id="workspace"></code
+            ><button id="refresh">Refresh recordings</button
+            ><a
+              href="https://github.com/oaiz-io/demohunter"
+              target="_blank"
+              rel="noreferrer"
+              >Open source ↗</a
+            >
+          </div>
+        </details>
+        <button id="capture-help">＋ New recording</button>
+      </div>
+    </header>
+    <div class="shell">
+      <main>
+        <div class="intro">
+          <div>
+            <h1 id="view-title">Recordings</h1>
+            <p id="view-description">Your local workspace.</p>
+          </div>
+        </div>
+        <div id="error" role="alert" hidden></div>
+        <div class="toolbar">
+          <div class="views">
+            <button class="active" data-view="recordings">
+              Recordings <span id="recording-count">0</span></button
+            ><button data-view="tours">
+              Source tours <span id="tour-count">0</span>
+            </button>
+          </div>
+          <details class="filters">
+            <summary>Filter</summary>
+            <div>
+              <button data-filter="all" class="active">All recordings</button
+              ><button data-filter="review">Open comments</button
+              ><button data-filter="audio">Audio to update</button>
+            </div>
+          </details>
+          <input
+            id="search"
+            type="search"
+            aria-label="Search library"
+            placeholder="Search recordings or files…"
+          /><select id="sort" aria-label="Sort recordings">
+            <option value="recent">Recently edited</option>
+            <option value="title">Title</option>
+          </select>
+        </div>
+        <p id="result-count" class="result-count"></p>
+        <div id="recordings" class="grid"></div>
+        <div id="tours" hidden></div>
+        <div id="empty" class="empty" hidden>
+          <span>▣</span>
+          <h2>No recordings yet.</h2>
+          <p>
+            No recordings found. Capture a tour from this workspace, or place an
+            existing replay folder anywhere inside it.
+          </p>
+          <code>bun run studio capture demos/example.tour.ts</code>
+        </div>
+        <footer>
+          <span id="scan-status">Discovering local files…</span
+          ><span>Saved on your filesystem</span>
+        </footer>
+      </main>
+    </div>
+    <dialog id="capture-dialog">
+      <button id="close-dialog" class="close" aria-label="Close">×</button
+      ><span class="eyebrow">NEW RECORDING</span>
+      <h2>Capture a recording</h2>
+      <p>
+        Use your terminal or agent to capture an existing .tour.ts file. Studio
+        discovers the saved recording automatically. Capture commands run your
+        tour code; the library only reads files.
+      </p>
+      <pre id="capture-command">
+bun run studio capture demos/example.tour.ts</pre>
+      <button id="copy-command">Copy command</button>
+      <h3>Try an example</h3>
+      <p>Try the narrated invoice walkthrough:</p>
+      <code>bun run studio demo</code>
+    </dialog>
+    <div id="toast" role="status" hidden>Copied</div>
+  </body>
+</html>

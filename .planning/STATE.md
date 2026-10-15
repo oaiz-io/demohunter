@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: milestone_complete
 stopped_at: v1.0 archived; no active milestone
-last_updated: "2026-09-02T16:10:00+02:00"
-last_activity: 2026-09-02 -- Quick task 260902-m9p shipped in PR #25
+last_updated: "2026-10-15"
+last_activity: 2026-10-15 -- Quick task 261015-er8 completed local-first Studio application, library, protocol and CI export
 progress:
   total_phases: 6
   completed_phases: 6
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: none — milestone archived
 Plan: none
 Status: v1.0 complete
-Last activity: 2026-09-02 -- Quick task 260902-m9p shipped in PR #25
+Last activity: 2026-10-15 -- Quick task 261015-fpz simplified Studio around preview, comments and external agents; verified real interaction and rendered video
 Progress: [██████████] 100%
 
 ## Performance Metrics
@@ -43,6 +43,10 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
+| 2026-10-15 | 261015-fpz | Simplify Studio around preview and comments | Paper-inspired canvas-first editor, contextual controls, simpler library, comment-to-agent handoff and updated skill. Fixed blank renderer/posters and library back navigation. Full suite: 312 passed, 2 skipped; build/typechecks passed. |
+| 2026-10-15 | 261015-er8 | Productize local-first Studio | Promoted apps/studio with recording library, versioned format/schemas, real MCP activity, isolated project routes and UI/CI MP4 export. Full suite 312 passed, 2 skipped; final Studio suite 17 passed. |
+| 2026-10-15 | 261015-dey | Build agent-native replay Studio | Added real MCP, stable element links/HTML provenance, comments, animations, revision-checked undo, conflict-safe narration editor and realistic narrated invoice capture. Replay: 13 passed; build/typecheck and affected E2E reruns passed. |
+| 2026-10-15 | 261015-cqj | Prototype editable DOM replay and live file editor | Added isolated real DOM capture, local playback/editor, agent-editable project files and skill, narration regeneration/cache reuse, and source-independent math demo. Full suite: 303 passed, 2 skipped. |
 | 2026-09-02 | 260902-m9p | Align documentation and licensing with OAIZ Labs | Named OAIZ AB in license and package metadata, moved public links to `oaiz-io`, shortened the README, separated current docs from historical plans, and added contribution and security guidance. |
 | 2026-06-12 | 260612-jackson | Generate DemoHunter GitHub demo | Added a root DemoHunter tour for the GitHub README and example source flow, regenerated it with ElevenLabs Bella narration, and exported a 1.10x `video-1.10x.mp4` at 25.08 seconds. |
 | 2026-06-12 | 260612-frj | Implement automatic ElevenLabs narration continuity | Added automatic adjacent narration context for compatible ElevenLabs clips, serialized `previous_text` and `next_text`, skipped unsupported `eleven_v3` stitching, and verified with focused tests, typecheck, and full verification. |

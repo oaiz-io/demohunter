@@ -4,9 +4,12 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "apps/*"
   ],
   "scripts": {
+    "replay": "bun apps/studio/cli.ts",
+    "test:replay": "bun test apps/studio",
     "build:internals": "bun x tsc -b tsconfig.json --pretty false",
     "build:cli": "bun run --cwd packages/cli build",
     "build": "bun run build:internals && bun run build:cli",
@@ -14,10 +17,13 @@
     "install:global": "bun run --cwd packages/cli link:global",
     "test:e2e": "bun test tests/e2e",
     "test:unit": "bun test packages",
-    "verify": "bun run build && bun run test",
+    "verify": "bun run build && bun run typecheck:studio && bun run test",
     "typecheck": "bun x tsc -b tsconfig.json --pretty false && bun run --cwd packages/cli typecheck",
     "test": "bun test",
-    "uninstall:global": "bun run --cwd packages/cli unlink:global"
+    "uninstall:global": "bun run --cwd packages/cli unlink:global",
+    "studio": "bun apps/studio/cli.ts",
+    "test:studio": "bun test apps/studio",
+    "typecheck:studio": "bun x tsc -p apps/studio/tsconfig.json"
   },
   "devDependencies": {
     "demohunter": "workspace:*",

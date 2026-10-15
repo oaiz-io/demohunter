@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "clips": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "sourceStartMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "sourceEndMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "rate": {
+            "default": 1,
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 10
+          },
+          "holdMs": {
+            "default": 0,
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": ["id", "sourceStartMs", "sourceEndMs"],
+        "additionalProperties": false
+      }
+    },
+    "elements": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "nodeId": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1
+              },
+              "documentId": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false
+          },
+          "text": {
+            "type": "string"
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "style": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["id", "target"],
+        "additionalProperties": false
+      }
+    },
+    "camera": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "startMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "endMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "nodeId": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1
+              },
+              "documentId": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "startMs", "endMs", "scale"],
+        "additionalProperties": false
+      }
+    },
+    "highlights": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "startMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "endMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "nodeId": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1
+              },
+              "documentId": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false
+          },
+          "color": {
+            "default": "#a3e635",
+            "type": "string"
+          },
+          "padding": {
+            "default": 8,
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": ["id", "startMs", "endMs", "target"],
+        "additionalProperties": false
+      }
+    },
+    "animations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "nodeId": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1
+              },
+              "documentId": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false
+          },
+          "startMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "endMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "from": {
+            "type": "object",
+            "properties": {
+              "opacity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "scale": {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 10
+              },
+              "rotate": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          },
+          "to": {
+            "type": "object",
+            "properties": {
+              "opacity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "scale": {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 10
+              },
+              "rotate": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          },
+          "easing": {
+            "default": "ease-in-out",
+            "type": "string",
+            "enum": ["linear", "ease-in-out"]
+          },
+          "fill": {
+            "default": "none",
+            "type": "string",
+            "enum": ["none", "forwards"]
+          }
+        },
+        "required": ["id", "target", "startMs", "endMs", "from", "to"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["clips"],
+  "additionalProperties": false
+}

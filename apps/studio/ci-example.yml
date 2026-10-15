@@ -1,0 +1,21 @@
+# Copy/adapt into your repository's workflow. This is documentation, not an
+# automatically enabled publishing workflow. Commit a portable capture to
+# recordings/example/ for export without the original source app.
+name: Export saved DemoHunter recording
+on: workflow_dispatch
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: bun run --cwd packages/cli playwright install --with-deps chromium
+      # Optional fresh capture: start your app, configure baseURL, then run:
+      # bun run studio capture demos/example.tour.ts --project recordings/new
+      # Optional provider synthesis (keys only from workflow secrets):
+      # bun run studio narrate recordings/example --fit
+      - run: bun run studio export recordings/example --output artifacts/demo --fps 24 --strict-audio
+      # Upload artifacts/demo/ using your existing artifact/publishing step.
+      # The directory contains video.mp4, captions.vtt, captions.json, manifest.json.

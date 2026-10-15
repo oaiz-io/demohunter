@@ -1,0 +1,16 @@
+{
+  "name": "@demohunter/studio",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "@demohunter/generator-playwright": "workspace:*",
+    "@demohunter/sdk": "workspace:*",
+    "esbuild": "0.27.7",
+    "rrweb": "2.1.7",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1"
+  }
+}
