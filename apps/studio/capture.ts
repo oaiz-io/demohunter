@@ -43,6 +43,9 @@ export async function captureReplay(
   input: SmokeGenerateInput & {
     projectDir: string;
     configureContext?: (context: BrowserContext) => Promise<void>;
+    /** Coarse progress: pass 1 collects the timeline, pass 2 records the
+     * DOM, then assets are bundled and elements indexed. */
+    onProgress?: (step: "timeline" | "record" | "bundle") => void;
   },
 ): Promise<string> {
   const dir = path.resolve(input.projectDir);
@@ -114,6 +117,7 @@ export async function captureReplay(
     });
     first.on("response", collectAsset);
     await input.configureContext?.(first);
+    input.onProgress?.("timeline");
     const timeline = await collectTimeline({
       loadedConfig: input.loadedConfig,
       page: await first.newPage(),
@@ -168,6 +172,7 @@ export async function captureReplay(
       content: `${await readFile(rrwebPath, "utf8")}\n;(${armRecorder.toString()})();`,
     });
     const page = await context.newPage();
+    input.onProgress?.("record");
     await replayTimeline({
       loadedConfig: input.loadedConfig,
       page,
@@ -222,6 +227,7 @@ export async function captureReplay(
     if (!events.some((event) => event.type === 2))
       throw new Error("No DOM snapshot was captured.");
 
+    input.onProgress?.("bundle");
     const replacements = [...assets].sort(([a], [b]) => b.length - a.length);
     const rewrite = (text: string): string =>
       replacements.reduce(
@@ -330,7 +336,11 @@ export async function captureReplay(
           input.loadedConfig.projectRoot,
           input.loadedConfig.configPath,
         ),
+        tourSha256: await readFile(input.tourFile.path)
+          .then((bytes) => createHash("sha256").update(bytes).digest("hex"))
+          .catch(() => undefined),
       };
+      if (!format.source.tourSha256) delete format.source.tourSha256;
       await writeJson(path.join(dir, "studio.json"), format);
     }
     return dir;

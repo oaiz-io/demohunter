@@ -15,6 +15,9 @@ import { ReplayWorkspace, readOptional } from "./workspace.js";
 import { readActivity } from "./activity.js";
 import { contract } from "./contract.js";
 import { historySummary } from "./storage.js";
+import { gitStatus } from "./git.js";
+import { fontFile } from "./fonts.js";
+import { projectFrame } from "./poster.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const mime: Record<string, string> = {
@@ -124,6 +127,19 @@ export async function createReplayHandler(
         return send(res, appJs, "text/javascript");
       if (req.method === "GET" && url.pathname === "/style.css")
         return send(res, css, "text/css");
+      if (req.method === "GET" && url.pathname.startsWith("/fonts/")) {
+        const font = fontFile(url.pathname.slice("/fonts/".length));
+        if (!font) return json(res, { error: "Not found" }, 404);
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return send(res, await font, "font/woff2");
+      }
+      if (req.method === "GET" && url.pathname === "/api/frame") {
+        const t = Number(url.searchParams.get("t") ?? 0);
+        if (!Number.isFinite(t) || t < 0)
+          return json(res, { error: "Invalid frame time" }, 400);
+        res.setHeader("Cache-Control", "private, max-age=3600");
+        return send(res, await projectFrame(dir, t), "image/png");
+      }
       if (req.method === "GET" && url.pathname === "/api/contract")
         return json(res, contract);
       if (req.method === "GET" && url.pathname === "/api/activity")
@@ -134,6 +150,7 @@ export async function createReplayHandler(
         return json(res, {
           index: workspace.index,
           projectDir: dir,
+          git: await gitStatus(dir, 0),
           connection: {
             command: process.execPath,
             args: [path.join(here, "cli.ts"), "mcp", dir],
@@ -159,13 +176,16 @@ export async function createReplayHandler(
         );
       if (req.method === "GET" && url.pathname === "/api/status") {
         try {
+          const history = await historySummary(dir);
           return json(res, {
             revision: (await loadBundle(dir)).revision,
             narrating,
             narrationMessage,
             narrationError,
             command: await readOptional(dir, "preview-command.json"),
-            historyCount: (await historySummary(dir)).length,
+            historyCount: history.length,
+            history: history.slice(0, 50),
+            git: await gitStatus(dir),
             activity: await readActivity(dir),
             export: exportState,
           });
@@ -329,11 +349,15 @@ export async function createReplayHandler(
       }
       if (req.method === "POST" && url.pathname === "/api/undo") {
         const value = z
-          .object({ revision: z.string() })
+          .object({
+            revision: z.string(),
+            steps: z.number().int().min(1).max(50).default(1),
+          })
           .strict()
           .parse(await body(req));
         return json(res, {
-          revision: (await workspace.undo(value.revision)).revision,
+          revision: (await workspace.undo(value.revision, value.steps))
+            .revision,
         });
       }
       if (req.method === "POST" && url.pathname === "/api/save") {
@@ -472,6 +496,7 @@ export async function serveReplay(
     projectDir: dir,
     close: async () => {
       await replay.close();
+      server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };

@@ -3,9 +3,12 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@modelcontextprotocol/server": "2.3.1",
     "@demohunter/generator-playwright": "workspace:*",
     "@demohunter/sdk": "workspace:*",
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource-variable/literata": "5.3.0",
+    "@modelcontextprotocol/server": "2.3.1",
     "esbuild": "0.27.7",
     "rrweb": "2.1.7",
     "zod": "^4.1.11"

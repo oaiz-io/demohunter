@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import {
   readFile,
@@ -86,13 +87,206 @@ export async function withProjectLock<T>(
     await unlink(file);
   }
 }
+/** Who is writing. MCP tool calls run inside this context; UI and CLI writes
+ * have none and are recorded as the local person ("You"). */
+export type MutationAuthor = {
+  actor: string;
+  sessionId: string;
+  tool: string;
+  elementRef?: string;
+  threadId?: string;
+  segmentId?: string;
+};
+export const mutationAuthor = new AsyncLocalStorage<MutationAuthor>();
+export type HistoryChange = {
+  kind:
+    | "text"
+    | "style"
+    | "hidden"
+    | "element"
+    | "camera"
+    | "highlight"
+    | "animation"
+    | "clip"
+    | "narration"
+    | "voice"
+    | "comment"
+    | "reply"
+    | "status"
+    | "css"
+    | "project";
+  label: string;
+  file: string;
+  ref?: string;
+  before?: string;
+  after?: string;
+};
 type HistoryEntry = {
   id: string;
   description: string;
   createdAt: string;
   afterRevision: string;
   before: ReplayBundle;
+  author?: MutationAuthor;
+  changes?: HistoryChange[];
 };
+const short = (value: unknown) => {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text === undefined
+    ? undefined
+    : text.length > 160
+      ? `${text.slice(0, 157)}…`
+      : text;
+};
+/** A compact, human-readable list of what one tracked mutation changed. */
+export function describeChanges(
+  before: ReplayBundle,
+  after: ReplayBundle,
+): HistoryChange[] {
+  const changes: HistoryChange[] = [];
+  const beforeElements = new Map(before.edits.elements.map((e) => [e.id, e]));
+  for (const edit of after.edits.elements) {
+    const old = beforeElements.get(edit.id);
+    const ref = edit.target.ref;
+    if (edit.text !== old?.text && edit.text !== undefined)
+      changes.push({
+        kind: "text",
+        label: "Text",
+        file: "edits.json",
+        ref,
+        before: short(old?.text),
+        after: short(edit.text),
+      });
+    const styleKeys = new Set([
+      ...Object.keys(old?.style ?? {}),
+      ...Object.keys(edit.style ?? {}),
+    ]);
+    const styles = [...styleKeys]
+      .filter((k) => old?.style?.[k] !== edit.style?.[k])
+      .map(
+        (k) =>
+          `${k} ${old?.style?.[k] ? `${old.style[k]} → ` : ""}${edit.style?.[k] ?? "removed"}`,
+      );
+    if (styles.length)
+      changes.push({
+        kind: "style",
+        label: "Style",
+        file: "edits.json",
+        ref,
+        after: short(styles.join(" · ")),
+      });
+    if (!!edit.hidden !== !!old?.hidden)
+      changes.push({
+        kind: "hidden",
+        label: edit.hidden ? "Hidden" : "Shown",
+        file: "edits.json",
+        ref,
+      });
+  }
+  for (const old of before.edits.elements)
+    if (!after.edits.elements.some((e) => e.id === old.id))
+      changes.push({
+        kind: "element",
+        label: "Edit removed",
+        file: "edits.json",
+        ref: old.target.ref,
+      });
+  for (const [kind, label, a, b] of [
+    ["camera", "Zoom", before.edits.camera, after.edits.camera],
+    ["highlight", "Highlight", before.edits.highlights, after.edits.highlights],
+    [
+      "animation",
+      "Animation",
+      before.edits.animations ?? [],
+      after.edits.animations ?? [],
+    ],
+  ] as const) {
+    const old = new Map<string, unknown>(a.map((e) => [e.id, e]));
+    for (const effect of b as { id: string; target?: { ref?: string } }[])
+      if (JSON.stringify(old.get(effect.id)) !== JSON.stringify(effect))
+        changes.push({
+          kind,
+          label: old.has(effect.id) ? `${label} changed` : `${label} added`,
+          file: "edits.json",
+          ref: effect.target?.ref,
+        });
+    for (const effect of a as { id: string; target?: { ref?: string } }[])
+      if (!(b as { id: string }[]).some((e) => e.id === effect.id))
+        changes.push({
+          kind,
+          label: `${label} removed`,
+          file: "edits.json",
+          ref: effect.target?.ref,
+        });
+  }
+  if (JSON.stringify(before.edits.clips) !== JSON.stringify(after.edits.clips))
+    changes.push({ kind: "clip", label: "Scene timing", file: "edits.json" });
+  const oldSegments = new Map(before.narration.segments.map((s) => [s.id, s]));
+  for (const segment of after.narration.segments) {
+    const old = oldSegments.get(segment.id);
+    if (old?.text !== segment.text)
+      changes.push({
+        kind: "narration",
+        label: old ? "Script" : "Segment added",
+        file: "narration.json",
+        before: short(old?.text),
+        after: short(segment.text),
+      });
+    else if (JSON.stringify(old?.audio) !== JSON.stringify(segment.audio))
+      changes.push({
+        kind: "voice",
+        label: "Audio",
+        file: "narration.json",
+      });
+  }
+  for (const old of before.narration.segments)
+    if (!after.narration.segments.some((s) => s.id === old.id))
+      changes.push({
+        kind: "narration",
+        label: "Segment removed",
+        file: "narration.json",
+        before: short(old.text),
+      });
+  const oldThreads = new Map(before.comments.threads.map((t) => [t.id, t]));
+  for (const thread of after.comments.threads) {
+    const old = oldThreads.get(thread.id);
+    if (!old)
+      changes.push({
+        kind: "comment",
+        label: "Note added",
+        file: "comments.json",
+        ref: thread.elementRef,
+        after: short(thread.body),
+      });
+    else {
+      for (const reply of thread.replies.slice(old.replies.length))
+        changes.push({
+          kind: "reply",
+          label: "Reply",
+          file: "comments.json",
+          ref: thread.elementRef,
+          after: short(reply.body),
+        });
+      if (old.status !== thread.status)
+        changes.push({
+          kind: "status",
+          label:
+            thread.status === "resolved" ? "Note resolved" : "Note reopened",
+          file: "comments.json",
+          ref: thread.elementRef,
+        });
+    }
+  }
+  if (before.css !== after.css)
+    changes.push({ kind: "css", label: "Page styles", file: "overrides.css" });
+  if (JSON.stringify(before.project) !== JSON.stringify(after.project))
+    changes.push({
+      kind: "project",
+      label: "Project settings",
+      file: "project.json",
+    });
+  return changes;
+}
 async function readHistory(dir: string): Promise<HistoryEntry[]> {
   try {
     const history = JSON.parse(
@@ -146,12 +340,15 @@ export async function mutateProject(
     await persistBundle(dir, valid, before);
     const after = await loadBundle(dir);
     if (before.revision !== after.revision) {
+      const author = mutationAuthor.getStore();
       history.push({
         id: `change-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         description,
         createdAt: new Date().toISOString(),
         afterRevision: after.revision,
         before,
+        ...(author ? { author: { ...author } } : {}),
+        changes: describeChanges(before, after),
       });
       await mkdir(path.join(dir, ".history"), { recursive: true });
       await writeJson(
@@ -162,30 +359,45 @@ export async function mutateProject(
     return after;
   });
 }
+/** Undo the newest tracked changes. `steps` > 1 undoes a whole agent turn in
+ * one locked operation; it still refuses to overwrite direct-file edits. */
 export async function undoProject(
   dir: string,
   expectedRevision: string,
+  steps = 1,
 ): Promise<ReplayBundle> {
+  if (!Number.isInteger(steps) || steps < 1 || steps > 50)
+    throw new Error("Undo steps must be an integer from 1 to 50.");
   return withProjectLock(dir, async () => {
-    const current = await loadBundle(dir);
+    let current = await loadBundle(dir);
     if (current.revision !== expectedRevision)
       throw new RevisionConflict(
         "The project changed. Read the latest revision before undoing.",
       );
     const history = await readHistory(dir);
-    const entry = history.at(-1);
-    if (!entry) throw new Error("Nothing to undo yet.");
-    if (entry.afterRevision !== current.revision)
-      throw new RevisionConflict(
-        "Files changed outside the editor or MCP since this action. Undo would overwrite those edits; restore them explicitly instead.",
+    if (history.length < steps)
+      throw new Error(
+        history.length
+          ? "Not enough tracked changes to undo."
+          : "Nothing to undo yet.",
       );
-    await persistBundle(dir, validateBundle(entry.before), current);
-    history.pop();
-    const result = await loadBundle(dir);
-    if (history.length)
-      history[history.length - 1]!.afterRevision = result.revision;
+    for (let i = 0; i < steps; i++) {
+      const entry = history.at(-1)!;
+      if (entry.afterRevision !== current.revision) {
+        // Keep history consistent with the steps already undone.
+        if (i) await writeJson(path.join(dir, ".history/edits.json"), history);
+        throw new RevisionConflict(
+          "Files changed outside the editor or MCP since this action. Undo would overwrite those edits; restore them explicitly instead.",
+        );
+      }
+      await persistBundle(dir, validateBundle(entry.before), current);
+      history.pop();
+      current = await loadBundle(dir);
+      if (history.length)
+        history[history.length - 1]!.afterRevision = current.revision;
+    }
     await writeJson(path.join(dir, ".history/edits.json"), history);
-    return result;
+    return current;
   });
 }
 export async function safeFile(dir: string, relative: string): Promise<string> {

@@ -150,6 +150,8 @@ export async function main(args: string[]): Promise<void> {
       loadedConfig,
       tourFile: { path: target, tour },
       projectDir: dir,
+      // Machine-readable progress for the library's record dialog.
+      onProgress: (step) => console.error(`studio:step ${step}`),
     });
     console.log(
       `Captured editable replay: ${dir}\nPreview: bun run replay open ${JSON.stringify(dir)}`,

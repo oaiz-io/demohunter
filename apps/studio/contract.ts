@@ -23,7 +23,16 @@ export const formatSchema = z
       })
       .strict(),
     source: z
-      .object({ tour: z.string(), config: z.string().optional() })
+      .object({
+        tour: z.string(),
+        config: z.string().optional(),
+        /** SHA-256 of the tour file when captured; lets a library show that
+         * the source tour changed after recording. Optional and additive. */
+        tourSha256: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+      })
       .strict()
       .optional(),
   })

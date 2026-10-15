@@ -13,7 +13,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import { ReplayWorkspace } from "./workspace.js";
 import { editsSchema, narrationSchema } from "./model.js";
-import { loadBundle } from "./storage.js";
+import { loadBundle, mutationAuthor } from "./storage.js";
 import { regenerateNarration } from "./narration.js";
 import { renderReplayFrame } from "./render.js";
 
@@ -41,15 +41,38 @@ export function createReplayMcp(workspace: ReplayWorkspace): McpServer {
     write = false,
   ) {
     const callback = async (args: unknown): Promise<CallToolResult> => {
+      const actor = server.server.getClientVersion()?.name ?? "MCP agent";
       const finish = await trackActivity(
         workspace.dir,
         sessionId,
-        server.server.getClientVersion()?.name ?? "MCP agent",
+        actor,
         name,
         args,
       );
       try {
-        const output = await handler(schema.parse(args));
+        const input = schema.parse(args);
+        const hints = args as {
+          elementRef?: string;
+          threadId?: string;
+          segment?: { id?: string };
+          animation?: { target?: { ref?: string } };
+          item?: { value?: { target?: { ref?: string } } };
+        };
+        // Attribute tracked history entries to this agent session.
+        const output = await mutationAuthor.run(
+          {
+            actor: actor.slice(0, 100),
+            sessionId,
+            tool: name,
+            elementRef:
+              hints?.elementRef ??
+              hints?.animation?.target?.ref ??
+              hints?.item?.value?.target?.ref,
+            threadId: hints?.threadId,
+            segmentId: hints?.segment?.id,
+          },
+          () => handler(input),
+        );
         await finish();
         return {
           content: [
@@ -454,7 +477,7 @@ export function createReplayMcp(workspace: ReplayWorkspace): McpServer {
       elementRef: ref.optional(),
       timeMs: time,
       body: z.string().min(1),
-      author: z.string().default("Agent"),
+      author: z.string().optional(),
     }),
     (input) => workspace.addComment(input),
     true,
@@ -466,7 +489,7 @@ export function createReplayMcp(workspace: ReplayWorkspace): McpServer {
       expectedRevision: revision,
       threadId: ref,
       reply: z.string().min(1),
-      author: z.string().default("Agent"),
+      author: z.string().optional(),
     }),
     (input) => workspace.commentAction(input),
     true,

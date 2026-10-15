@@ -13,6 +13,7 @@ import { elementUri, parseReference, previewLink } from "./links.js";
 import {
   loadBundle,
   mutateProject,
+  mutationAuthor,
   writeJson,
   historySummary,
   undoProject,
@@ -236,7 +237,7 @@ export class ReplayWorkspace {
           elementRef: input.elementRef,
           timeMs: input.timeMs,
           body: input.body,
-          author: input.author ?? "You",
+          author: input.author ?? mutationAuthor.getStore()?.actor ?? "You",
           status: "open",
           createdAt: now,
           updatedAt: now,
@@ -266,7 +267,7 @@ export class ReplayWorkspace {
           thread.replies.push({
             id: `reply-${randomUUID()}`,
             body: input.reply,
-            author: input.author ?? "You",
+            author: input.author ?? mutationAuthor.getStore()?.actor ?? "You",
             createdAt: new Date().toISOString(),
           });
         thread.updatedAt = new Date().toISOString();
@@ -293,8 +294,8 @@ export class ReplayWorkspace {
   history() {
     return historySummary(this.dir);
   }
-  undo(revision: string) {
-    return undoProject(this.dir, revision);
+  undo(revision: string, steps = 1) {
+    return undoProject(this.dir, revision, steps);
   }
 }
 export async function readOptional<T>(
