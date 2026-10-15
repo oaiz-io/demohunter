@@ -8,12 +8,6 @@ import { LocalLibrary } from "./library.js";
 import { createReplayHandler } from "./server.js";
 import { contract } from "./contract.js";
 import { fontFile } from "./fonts.js";
-import {
-  machineCheck,
-  recordJobs,
-  startRecording,
-  stopRecording,
-} from "./machine.js";
 export async function serveLibrary(
   root: string,
   options: { port?: number; host?: string } = {},
@@ -49,14 +43,6 @@ export async function serveLibrary(
       res.writeHead(status, { "Content-Type": type });
       res.end(data);
     };
-    const readBody = async () => {
-      let raw = "";
-      for await (const chunk of req) {
-        raw += chunk;
-        if (raw.length > 100_000) throw new Error("Request too large");
-      }
-      return JSON.parse(raw || "{}");
-    };
     try {
       if (req.method === "POST" && !url.pathname.startsWith("/projects/")) {
         // Library write endpoints may only be called from this app.
@@ -80,29 +66,6 @@ export async function serveLibrary(
             404,
           );
         return send(await font, "font/woff2");
-      }
-      if (req.method === "GET" && url.pathname === "/api/machine")
-        return send(JSON.stringify(await machineCheck()), "application/json");
-      if (req.method === "GET" && url.pathname === "/api/record")
-        return send(JSON.stringify(recordJobs()), "application/json");
-      if (req.method === "POST" && url.pathname === "/api/record") {
-        const { tour } = (await readBody()) as { tour?: unknown };
-        const scan = await library.scan();
-        if (
-          typeof tour !== "string" ||
-          !scan.tours.some((t) => t.path === tour)
-        )
-          throw new Error("Choose a tour found in this workspace.");
-        return send(
-          JSON.stringify(await startRecording(library.root, tour)),
-          "application/json",
-          202,
-        );
-      }
-      if (req.method === "POST" && url.pathname === "/api/record/stop") {
-        const { id } = (await readBody()) as { id?: unknown };
-        if (typeof id !== "string") throw new Error("Missing job id");
-        return send(JSON.stringify(stopRecording(id)), "application/json");
       }
       if (req.method === "GET" && url.pathname === "/")
         return send(html, "text/html");

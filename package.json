@@ -8,8 +8,6 @@
     "apps/*"
   ],
   "scripts": {
-    "replay": "bun apps/studio/cli.ts",
-    "test:replay": "bun test apps/studio",
     "build:internals": "bun x tsc -b tsconfig.json --pretty false",
     "build:cli": "bun run --cwd packages/cli build",
     "build": "bun run build:internals && bun run build:cli",

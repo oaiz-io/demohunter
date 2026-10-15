@@ -142,3 +142,6 @@ examples/nextjs-demo/next-env.d.ts
 .demohunter/replays/
 
 .demohunter/exports/
+.demohunter/cache/
+.playwright-mcp/
+.planning/HANDOFF.json

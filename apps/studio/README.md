@@ -11,26 +11,27 @@ bun install
 bun run studio
 ```
 
-The library scans the current repository for saved captures and .tour.ts source files, links each recording to its tour, and shows the branch, open notes, agent changes, audio to update and tours changed after recording. Tours that are not recorded yet have **Record**, which runs the normal capture command (the app at the tour's baseURL must be running). The sidebar groups demos by repository folder and checks Chromium, FFmpeg, speech keys and the optional flite voice. Search, filter open comments/stale audio, preview actual first-frame thumbnails, open a recording and return to the library. New captures appear automatically. Choose another workspace with `bun run studio library /path/to/repo`. The service defaults to localhost:4310; --host and --port support private development previews.
+The library scans the current repository for saved captures and .tour.ts source files and links each recording to its tour. It shows the repository name, branch and one card per recording with a first-frame thumbnail, duration, path, last edit and one status: open notes, or a tour changed after capture. Search by title or path, open a recording and return to the library. Test and fixture captures are left out. Studio does not record: make and re-record demos with the CLI below; new captures appear automatically. Choose another workspace with `bun run studio /path/to/repo`. There is one way to open Studio; open a demo from the library. The service defaults to localhost:4310; --host and --port support private development previews.
 
 ```sh
 bun run studio demo
 bun run studio capture demos/example.tour.ts --project .demohunter/replays/my-demo
-bun run studio open .demohunter/replays/my-demo
 bun run studio list
 ```
 
-`demo` creates a realistic four-scene invoice workflow with local sample speech when FFmpeg flite is available; --sample fractions creates a math lesson. Captures stop the built-in source app before playback. Capture uses DemoHunter's current two-pass tour runtime and rrweb; it does not record pixels or invoke a speech provider. The capture destination must be new. Existing `bun run replay` commands and experiments/replay/cli.ts remain aliases.
+`demo` creates a realistic four-scene invoice workflow with local sample speech when FFmpeg flite is available; --sample fractions creates a math lesson. Captures stop the built-in source app before playback. Capture uses DemoHunter's current two-pass tour runtime and rrweb; it does not record pixels or invoke a speech provider. The capture destination must be new.
 
 ## Work with your agent
 
-Studio is where you see and point; your agent (Claude Code, Codex or another MCP client) does the editing. Press `C` and click anything to add a **note**: it keeps the element and the moment. Click an element to get the selection toolbar: **Note**, **Copy for agent**, **Edit** (text, hide, zoom, highlight, fade-in) and **Inspect**, which opens the Element panel with a ready hand-off. `V` returns to selection, `⌘F` finds and replaces text, `⌘⇧C` copies the selection for your agent, Escape clears it.
+Studio is where you see and point; your agent (Claude Code, Codex or another MCP client) does the editing. Press `C` and click anything to add a **note**: it keeps the element and the moment. Click an element to get the selection toolbar: **Note** and **Copy for agent** (the element's reference, files and moment, ready to paste). `V` returns to selection, `⌘⇧C` copies the selection for your agent, Escape clears it. The editor has three panels: Notes, Script and Agent. Edits to the recording itself happen in code or through your agent.
 
 **Connect agent** shows the exact `claude mcp add …` and `codex mcp add …` commands (or JSON for other clients) for a server bound to this one recording, plus the prompt to start with. No agent settings are changed automatically.
 
-While an agent works, Studio shows it from real activity records only: the title bar pill, a target outline on the canvas (a light scan while it reads, a marching outline while it edits, a short settle when it is done, red when a call fails), stripes on the scene it changes and a checklist of tool calls in the related note. Your playhead and selection never move unless you turn on **Follow agent** or press **Show on canvas**. Notes show their state: open, agent working, agent replied, resolved.
+Each note shows its stable comment ID. Click the ID to copy it, use **Copy link** to copy a link to that exact note, or use **Copy for agent** to copy the note, replies, ID, link and element context. Double-click the note text to copy the same agent context. These actions stay available after replies and resolution. Canvas, timeline and note-card pins open the matching note. Your agent can pass a copied link or comment ID to MCP `resolve_reference`.
 
-The **Agent** panel groups tracked agent changes into turns (one MCP session without a long pause) with a readable change list. **Keep** marks a turn as reviewed in this browser only; **Undo turn** undoes the newest turn in one locked step and refuses to overwrite later direct-file edits. The header shows the git branch and how many project files changed.
+While an agent works, Studio shows it from real activity records only: the title bar pill, a target outline on the canvas (a light scan while it reads, a marching outline while it edits, a short settle when it is done, red when a call fails), stripes on the scene it changes and a checklist of tool calls in the related note. Your playhead and selection never move unless you press **Show on canvas**. Notes show their state: open, agent working, agent replied, resolved.
+
+The **Agent** panel groups tracked agent changes into turns (one MCP session without a long pause) with a readable change list. **Undo turn** undoes the newest turn in one locked step and refuses to overwrite later direct-file edits.
 
 ```sh
 bun run studio mcp .demohunter/replays/my-demo
@@ -44,7 +45,9 @@ The [agent skill](../../.agents/skills/demohunter-replay/SKILL.md) and each new 
 
 ## Narration and export
 
-Edit transcript cards, preview scenes, inspect real waveforms, change timing/voice, and regenerate a segment or all speech. Old speech is marked stale and suppressed. Provider settings live in project.json; API keys come from OPENAI_API_KEY/ELEVENLABS_API_KEY in the service environment only. Synthesis reuses DemoHunter's validated cache; complete cache hits work offline. Sample flite audio is clearly labeled.
+Edit transcript cards, see real waveforms, and regenerate a segment or all speech. Voice settings and timing live in project.json and narration.json (or go through your agent). Old speech is marked stale and suppressed. Provider settings live in project.json; API keys come from OPENAI_API_KEY/ELEVENLABS_API_KEY in the service environment only. Synthesis reuses DemoHunter's validated cache; complete cache hits work offline. Sample flite audio is clearly labeled.
+
+Playback waits for active speech to load before advancing the timeline. Small audio timing differences use a gradual speed correction; timeline seeks reposition speech once. Removed or stale speech stops immediately. If the browser blocks audio, click Play again to retry.
 
 ```sh
 bun run studio narrate .demohunter/replays/my-demo --fit
@@ -52,7 +55,7 @@ bun run studio export .demohunter/replays/my-demo \
   --output .demohunter/exports/my-demo --fps 24 --strict-audio
 ```
 
-Or choose **Export video** in the editor. Both routes render the saved replay through the same player and produce video.mp4, captions.vtt, captions.json and a checksummed manifest.json. The source app is not revisited. Current speech is mixed; stale/draft speech is omitted unless --strict-audio makes that an error. Captions still carry the current script. Export refuses existing destinations and cancels if project content changes mid-render. Preview and agent inspection can continue. Exporting frames takes time; ordinary editing/preview does not encode video.
+Or choose **Export video** in the editor (24 fps; missing speech is left silent). Both routes render the saved replay through the same player and produce video.mp4, captions.vtt, captions.json and a checksummed manifest.json. The source app is not revisited. Current speech is mixed; stale/draft speech is omitted unless --strict-audio makes that an error. Captions still carry the current script. Export refuses existing destinations and cancels if project content changes mid-render. Preview and agent inspection can continue. Exporting frames takes time; ordinary editing/preview does not encode video.
 
 [CI example](ci-example.yml) documents capture → optional narration → export. CI can export a committed portable capture without running its original app. Upload/publish artifacts using your own pipeline; Studio never publishes automatically.
 

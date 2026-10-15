@@ -15,7 +15,6 @@ import { ReplayWorkspace, readOptional } from "./workspace.js";
 import { readActivity } from "./activity.js";
 import { contract } from "./contract.js";
 import { historySummary } from "./storage.js";
-import { gitStatus } from "./git.js";
 import { fontFile } from "./fonts.js";
 import { projectFrame } from "./poster.js";
 
@@ -150,7 +149,6 @@ export async function createReplayHandler(
         return json(res, {
           index: workspace.index,
           projectDir: dir,
-          git: await gitStatus(dir, 0),
           connection: {
             command: process.execPath,
             args: [path.join(here, "cli.ts"), "mcp", dir],
@@ -158,11 +156,6 @@ export async function createReplayHandler(
           sourceBoundary:
             "Captured HTML is a recording artifact. Original source locations are available only when explicitly annotated by the app.",
         });
-      if (req.method === "GET" && url.pathname === "/api/source")
-        return json(
-          res,
-          await workspace.html(url.searchParams.get("ref") ?? ""),
-        );
       if (req.method === "GET" && url.pathname === "/api/history")
         return json(res, await workspace.history());
       if (req.method === "GET" && url.pathname === "/api/events")
@@ -185,7 +178,6 @@ export async function createReplayHandler(
             command: await readOptional(dir, "preview-command.json"),
             historyCount: history.length,
             history: history.slice(0, 50),
-            git: await gitStatus(dir),
             activity: await readActivity(dir),
             export: exportState,
           });

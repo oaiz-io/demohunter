@@ -85,6 +85,39 @@ test("history attributes agent writes, lists readable changes and undoes a whole
   }
 });
 
+test("undo cannot cross an external edit between tracked changes, even across separate requests", async () => {
+  const { root, dir } = await projectFixture();
+  try {
+    let current = await loadBundle(dir);
+    await mutateProject(dir, current.revision, "First agent edit", (d) => {
+      d.narration.segments[0]!.text = "First agent script";
+    });
+    const external = await loadBundle(dir);
+    external.project.title = "Keep this direct file edit";
+    await writeJson(path.join(dir, "project.json"), external.project);
+    current = await loadBundle(dir);
+    await mutateProject(dir, current.revision, "Second agent edit", (d) => {
+      d.narration.segments[0]!.text = "Second agent script";
+    });
+    current = await loadBundle(dir);
+    const history = await historySummary(dir);
+    await expect(undoProject(dir, current.revision, 2)).rejects.toThrow(
+      "outside",
+    );
+    expect((await loadBundle(dir)).revision).toBe(current.revision);
+    expect(await historySummary(dir)).toEqual(history);
+    const once = await undoProject(dir, current.revision);
+    expect(once.project.title).toBe("Keep this direct file edit");
+    expect(once.narration.segments[0]!.text).toBe("First agent script");
+    await expect(undoProject(dir, once.revision)).rejects.toThrow("outside");
+    expect((await loadBundle(dir)).project.title).toBe(
+      "Keep this direct file edit",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("library links recordings to tours and notices a changed tour", async () => {
   const { root, dir } = await projectFixture();
   try {

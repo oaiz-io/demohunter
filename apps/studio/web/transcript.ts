@@ -6,20 +6,8 @@ import {
   type ReplayBundle,
   type NarrationSegment,
 } from "../model.js";
-import { estimateSpeechMs } from "./timeline.js";
 
-export type ScriptPatch = Partial<
-  Pick<
-    NarrationSegment,
-    | "text"
-    | "title"
-    | "clipId"
-    | "offsetMs"
-    | "voice"
-    | "instructions"
-    | "language"
-  >
->;
+export type ScriptPatch = Partial<Pick<NarrationSegment, "text" | "title">>;
 type Draft = {
   base: NarrationSegment;
   patch: ScriptPatch;
@@ -35,7 +23,6 @@ type Hooks = {
     base: NarrationSegment,
     force: boolean,
   ) => Promise<NarrationSegment>;
-  preview: (ms: number) => void;
   regenerate: (ids: string[]) => Promise<void>;
   remove: (id: string) => Promise<void>;
   dirty: (count: number) => void;
@@ -136,27 +123,6 @@ export class TranscriptEditor {
       const words = values.text.trim().split(/\s+/).filter(Boolean).length;
       card.querySelector<HTMLElement>(".segment-words")!.textContent =
         `${words} words`;
-      // Fit meter: speech length against the time left in its scene.
-      const clip = bundle.edits.clips.find((c) => c.id === values.clipId);
-      const room = clip ? clipDuration(clip) - values.offsetMs : 0;
-      const speech =
-        segment.audio && ready
-          ? segment.audio.durationMs
-          : estimateSpeechMs(values.text);
-      const meter = card.querySelector<HTMLElement>(".fit-meter")!;
-      meter.hidden = !clip || !values.text.trim();
-      const bar = meter.querySelector<HTMLElement>(".fit-bar")!;
-      bar.classList.toggle("over", speech > room);
-      bar.querySelector<HTMLElement>("i")!.style.width =
-        `${Math.min(100, (speech / Math.max(1, room)) * 100)}%`;
-      meter.querySelector<HTMLElement>(".fit-numbers")!.textContent =
-        `${segment.audio && ready ? "" : "≈ "}${(speech / 1000).toFixed(1)} s speech · ${(room / 1000).toFixed(1)} s scene`;
-      const verdict = meter.querySelector<HTMLElement>(".fit-verdict")!;
-      verdict.className = `fit-verdict ${speech > room ? "over" : "fits"}`;
-      verdict.textContent =
-        speech > room
-          ? `Over by ${((speech - room) / 1000).toFixed(1)} s · fit adds a hold`
-          : "Fits";
       card.querySelector<HTMLElement>(".stale-reason")!.hidden =
         state !== "stale";
       card.querySelector<HTMLButtonElement>(".segment-generate")!.className =
@@ -176,23 +142,6 @@ export class TranscriptEditor {
       const conflict = card.querySelector<HTMLElement>(".segment-conflict")!;
       conflict.hidden = !draft?.error;
       conflict.querySelector("p")!.textContent = draft?.error ?? "";
-      const select = card.querySelector<HTMLSelectElement>(".segment-clip")!;
-      if (document.activeElement !== select) {
-        select.replaceChildren(
-          ...bundle.edits.clips.map((clip) => {
-            const option = el("option");
-            option.value = clip.id;
-            option.textContent = clip.id;
-            return option;
-          }),
-        );
-        select.value = values.clipId;
-      }
-      const offset = card.querySelector<HTMLInputElement>(".segment-offset")!;
-      if (document.activeElement !== offset)
-        offset.value = String(values.offsetMs / 1000);
-      const voice = card.querySelector<HTMLInputElement>(".segment-voice")!;
-      if (document.activeElement !== voice) voice.value = values.voice ?? "";
       const canvas = card.querySelector<HTMLCanvasElement>("canvas")!;
       canvas.hidden = !segment.audio || !ready;
       if (
@@ -203,8 +152,6 @@ export class TranscriptEditor {
         canvas.dataset.path = segment.audio.path;
         void this.drawWaveform(canvas, segment.audio.path);
       }
-      card.querySelector<HTMLButtonElement>(".segment-preview")!.disabled =
-        start === undefined;
       // Append existing nodes to reflect reordered segments without rebuilding focused editors.
       if (
         this.root.children[bundle.narration.segments.indexOf(segment)] !==
@@ -303,12 +250,6 @@ export class TranscriptEditor {
     canvas.width = 640;
     canvas.height = 56;
     canvas.hidden = true;
-    const meter = el("div", "fit-meter");
-    const bar = el("div", "fit-bar");
-    bar.append(el("i"));
-    const fitText = el("div", "fit-text");
-    fitText.append(el("span", "mono fit-numbers"), el("span", "fit-verdict"));
-    meter.append(bar, fitText);
     const info = el("div", "segment-info sr-only");
     info.append(el("span", "segment-time"), el("span", "segment-words"));
     const reason = el(
@@ -322,22 +263,12 @@ export class TranscriptEditor {
         "segment-generate button small primary",
         "Regenerate",
       ),
-      preview = el(
-        "button",
-        "segment-preview button secondary small",
-        "▷ Preview scene",
-      ),
       spacer = el("span", "spacer"),
       status = el("span", "segment-status"),
       save = el("button", "segment-save quiet small-text", "Save"),
       remove = el("button", "quiet", "×");
     remove.setAttribute("aria-label", `Remove ${id}`);
     remove.title = "Remove segment";
-    preview.onclick = () => {
-      const segment = this.bundle!.narration.segments.find((s) => s.id === id);
-      const time = segment && narrationStart(this.bundle!.edits, segment);
-      if (time !== undefined) this.hooks.preview(time);
-    };
     generate.onclick = () =>
       void this.save(id)
         .then(() => this.hooks.regenerate([id]))
@@ -351,30 +282,7 @@ export class TranscriptEditor {
           this.render(this.bundle!);
         })
         .catch(this.hooks.error);
-    const details = el("details", "segment-settings");
-    details.append(el("summary", "button secondary small", "Voice…"));
-    const form = el("div", "voice-form");
-    const clipLabel = el("label", undefined, "Scene"),
-      clips = el("select", "segment-clip");
-    clips.onchange = () => this.patch(id, { clipId: clips.value });
-    clipLabel.append(clips);
-    const offsetLabel = el("label", undefined, "Offset (seconds)"),
-      offset = el("input", "segment-offset");
-    offset.type = "number";
-    offset.min = "0";
-    offset.step = "0.1";
-    offset.onchange = () =>
-      this.patch(id, { offsetMs: Number(offset.value) * 1000 });
-    offsetLabel.append(offset);
-    const voiceLabel = el("label", "full", "Voice override"),
-      voice = el("input", "segment-voice");
-    voice.placeholder = "Use project voice";
-    voice.onchange = () =>
-      this.patch(id, { voice: voice.value.trim() || undefined });
-    voiceLabel.append(voice);
-    form.append(clipLabel, offsetLabel, voiceLabel);
-    details.append(form);
-    tools.append(generate, preview, details, spacer, status, save, remove);
+    tools.append(generate, spacer, status, save, remove);
     const conflict = el("div", "segment-conflict");
     conflict.hidden = true;
     conflict.append(el("p"));
@@ -390,7 +298,7 @@ export class TranscriptEditor {
     };
     row.append(keep, discard);
     conflict.append(row);
-    card.append(top, textarea, canvas, meter, reason, info, tools, conflict);
+    card.append(top, textarea, canvas, reason, info, tools, conflict);
     return card;
   }
   /** Decoded first channel, shared with the timeline voice lane. */

@@ -25,6 +25,8 @@ DOM events currently use pinned rrweb 2.1.7. A different incompatible event enco
 
 Copied references use `demohunter://capture/<captureId>/element/<ref>?t=<output-ms>`. HTTP links also include the capture/ref/time so links resolve independently of a machine's absolute folder location. The registry maps refs to document/node IDs, hierarchy and annotated HTML. Refs survive edits, not recapture. Original application source is known only when the app supplied `data-demohunter-source` / `data-demohunter-line`. Editing inspection snippets does not change playback.
 
+Comment references use `demohunter://capture/<captureId>/comment/<threadId>?t=<output-ms>`. HTTP note links add `comment=<threadId>` to the fragment and open that exact thread, including resolved notes. `resolve_reference` also accepts a bare `comment-…` ID within its bound project. It returns the current thread, replies, status and output time, plus captured HTML when the note has an element. Comment identity takes priority over an optional element in the same link.
+
 Runtime files are not canonical: selection.json, preview-state.json, preview-command.json, lock files, .history/, .studio/ (activity/poster cache), and exports/. Runtime/derived writes do not alter content revision. They may be discarded when moving a project. Keep audio/ and bundled assets for portable playback.
 
 ## Time and mutations

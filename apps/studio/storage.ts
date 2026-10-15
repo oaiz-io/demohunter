@@ -381,20 +381,27 @@ export async function undoProject(
           ? "Not enough tracked changes to undo."
           : "Nothing to undo yet.",
       );
-    for (let i = 0; i < steps; i++) {
-      const entry = history.at(-1)!;
-      if (entry.afterRevision !== current.revision) {
-        // Keep history consistent with the steps already undone.
-        if (i) await writeJson(path.join(dir, ".history/edits.json"), history);
+    // Check the whole chain before writing. A direct-file edit between two
+    // tracked changes is a boundary even if both changes are in one turn.
+    let expected = current.revision;
+    for (const entry of history.slice(-steps).reverse()) {
+      if (entry.afterRevision !== expected) {
         throw new RevisionConflict(
           "Files changed outside the editor or MCP since this action. Undo would overwrite those edits; restore them explicitly instead.",
         );
       }
+      expected = entry.before.revision;
+    }
+    for (let i = 0; i < steps; i++) {
+      const entry = history.at(-1)!;
       await persistBundle(dir, validateBundle(entry.before), current);
       history.pop();
       current = await loadBundle(dir);
-      if (history.length)
-        history[history.length - 1]!.afterRevision = current.revision;
+      const previous = history.at(-1);
+      // Canonical serialization can change the revision of restored data.
+      // Carry that change forward only across an intact tracked chain.
+      if (previous?.afterRevision === entry.before.revision)
+        previous.afterRevision = current.revision;
     }
     await writeJson(path.join(dir, ".history/edits.json"), history);
     return current;

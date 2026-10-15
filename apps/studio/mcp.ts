@@ -257,7 +257,7 @@ export function createReplayMcp(workspace: ReplayWorkspace): McpServer {
   );
   tool(
     "resolve_reference",
-    "Resolve a demohunter:// element reference or copied HTTP preview link to this capture, time, HTML and editable file locations. Does not fetch URLs or execute code.",
+    "Resolve a copied comment ID, demohunter:// element/comment reference, or HTTP preview link. Comment links return the exact thread, replies, status, time and optional element HTML. Does not fetch URLs or execute code.",
     z.object({ reference: z.string() }),
     ({ reference }) => workspace.resolve(reference),
   );

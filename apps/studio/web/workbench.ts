@@ -4,10 +4,9 @@ import {
   totalDuration,
   type ReplayBundle,
 } from "../model.js";
-import { elementUri, previewLink } from "../links.js";
+import { commentUri, elementUri, previewLink } from "../links.js";
 import type { ElementIndex, ElementRecord } from "../elements.js";
 import type { AgentActivity } from "../contract.js";
-import type { GitStatus } from "../git.js";
 import type { HistoryChange } from "../storage.js";
 import {
   agentTurns,
@@ -15,7 +14,6 @@ import {
   elapsed,
   noteState,
   threadTitle,
-  ReviewMemory,
   type HistoryItem,
   type Turn,
 } from "./agent.js";
@@ -24,7 +22,6 @@ import { clockMs } from "./timeline.js";
 export type WorkspaceData = {
   index: ElementIndex;
   projectDir: string;
-  git?: GitStatus;
   connection: { command: string; args: string[] };
   sourceBoundary: string;
 };
@@ -80,10 +77,7 @@ export async function copyText(text: string): Promise<void> {
   const success = document.execCommand("copy");
   input.remove();
   focused?.focus();
-  if (!success)
-    throw new Error(
-      "Clipboard unavailable. Copy the reference from the Element panel.",
-    );
+  if (!success) throw new Error("Clipboard unavailable in this browser.");
 }
 let toastTimer: ReturnType<typeof setTimeout>;
 export function toast(text: string): void {
@@ -102,17 +96,10 @@ export class AgentWorkbench {
   private commentCards = new Map<string, HTMLElement>();
   private activity: AgentActivity[] = [];
   private history: HistoryItem[] = [];
-  private git?: GitStatus;
   private client: "claude" | "codex" | "other" = "claude";
-  private memory?: ReviewMemory;
   private activeThread?: string;
   constructor(private hooks: Hooks) {
     $("#element-search").oninput = () => this.renderTree();
-    $("#copy-element-link").onclick = () =>
-      void this.copyReference(false).catch(hooks.error);
-    $("#copy-agent-context").onclick = () =>
-      void this.copyReference(true).catch(hooks.error);
-    $("#show-source").onclick = () => void this.showSource().catch(hooks.error);
     const dialog = $<HTMLDialogElement>("#agent-dialog");
     $("#connect-agent").onclick = () => {
       this.renderConnect();
@@ -147,10 +134,6 @@ export class AgentWorkbench {
       void copyText(hooks.data().projectDir)
         .then(() => toast("Project path copied"))
         .catch(hooks.error);
-    $("#copy-diff").onclick = () =>
-      void copyText(`git diff -- ${shellQuote(hooks.data().projectDir)}`)
-        .then(() => toast("git diff command copied"))
-        .catch(hooks.error);
     $("#focus-preview").onclick = () => {
       $(".workspace").classList.toggle("focus-mode");
       $("#focus-preview").setAttribute(
@@ -164,7 +147,6 @@ export class AgentWorkbench {
         .then(() => hooks.reload())
         .then(() => toast("Last edit undone"))
         .catch(hooks.error);
-    $("#comment-element").onclick = () => this.focusComposer();
     $("#add-comment").onclick = () => void this.addComment().catch(hooks.error);
     $("#new-comment").addEventListener("keydown", (event) => {
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -181,15 +163,6 @@ export class AgentWorkbench {
         : "All scenes";
       this.renderComments();
     };
-    $("#review-open").onclick = () =>
-      $<HTMLButtonElement>('[data-tab="agent"]').click();
-    $("#keep-all").onclick = () => {
-      this.memory?.keep(
-        this.turns().flatMap((t) => t.entries.map((e) => e.id)),
-      );
-      this.renderAgent();
-      this.onReview?.();
-    };
     document.addEventListener("keydown", (event) => {
       if (
         !(event.target as HTMLElement).closest("input,textarea,select") &&
@@ -201,7 +174,7 @@ export class AgentWorkbench {
       }
     });
   }
-  /** Called after Keep/Undo so the editor can refresh badges and marks. */
+  /** Called when agent history changes so the editor can refresh marks. */
   onReview?: () => void;
   private setResolved(resolved: boolean) {
     this.showResolved = resolved;
@@ -212,14 +185,11 @@ export class AgentWorkbench {
   render(): void {
     const data = this.hooks.data(),
       bundle = this.hooks.bundle();
-    this.memory ??= new ReviewMemory(`demohunter-kept-${data.index.captureId}`);
     $("#outline-title").textContent = bundle.project.title;
     $("#outline-meta").textContent =
       `${bundle.edits.clips.length} scenes · ${Math.round(bundle.project.durationMs / 1000)}s captured`;
     $("#scene-count").textContent = String(bundle.edits.clips.length);
     $("#element-count").textContent = String(data.index.elements.length);
-    $("#viewport-label").textContent =
-      `${bundle.project.viewport.width} × ${bundle.project.viewport.height}`;
     $("#agent-project-path").textContent = data.projectDir;
     $("#scene-list").replaceChildren();
     let offset = 0;
@@ -251,39 +221,29 @@ export class AgentWorkbench {
       `Scene ${index + 1}`
     );
   }
-  /** Activity, history and git arrive with every status poll. */
-  live(
-    activity: AgentActivity[],
-    history: HistoryItem[],
-    git?: GitStatus,
-  ): void {
+  /** Activity and history arrive with every status poll. */
+  live(activity: AgentActivity[], history: HistoryItem[]): void {
     const changed =
-      JSON.stringify([activity, history.map((h) => h.id), git]) !==
-      JSON.stringify([this.activity, this.history.map((h) => h.id), this.git]);
+      JSON.stringify([activity, history.map((h) => h.id)]) !==
+      JSON.stringify([this.activity, this.history.map((h) => h.id)]);
     this.activity = activity;
     this.history = history;
-    this.git = git;
     if (!changed) {
       // Elapsed time still moves.
       for (const node of document.querySelectorAll<HTMLElement>("[data-since]"))
         node.textContent = elapsed(node.dataset.since!);
+      if ($<HTMLDialogElement>("#agent-dialog").open) this.renderConnect();
       return;
     }
     this.renderComments();
     this.renderAgent();
-    this.renderHistory();
     this.onReview?.();
     if ($<HTMLDialogElement>("#agent-dialog").open) this.renderConnect();
   }
   turns(): Turn[] {
     return agentTurns(this.history);
   }
-  unreviewed(): Turn[] {
-    return this.turns().filter(
-      (t) => !t.entries.every((e) => this.memory?.has(e.id)),
-    );
-  }
-  agentMarks(): { timeMs: number; kept: boolean; title: string }[] {
+  agentMarks(): { timeMs: number; title: string }[] {
     const bundle = this.hooks.bundle(),
       index = this.hooks.data().index;
     const marks = [];
@@ -305,7 +265,6 @@ export class AgentWorkbench {
         if (time === undefined) continue;
         marks.push({
           timeMs: time,
-          kept: !!this.memory?.has(entry.id),
           title: `${entry.author?.actor}: ${entry.description}`,
         });
       }
@@ -328,97 +287,7 @@ export class AgentWorkbench {
     const element = this.selected();
     for (const node of document.querySelectorAll<HTMLElement>(".layer-button"))
       node.classList.toggle("active", node.dataset.ref === element?.ref);
-    if (!element) return;
-    const bundle = this.hooks.bundle();
-    const facts = $("#selection-facts");
-    facts.replaceChildren();
-    const visible = [
-      sourceToOutput(bundle.edits, element.firstSeenMs + 2),
-      element.lastSeenMs !== undefined
-        ? sourceToOutput(bundle.edits, element.lastSeenMs)
-        : totalDuration(bundle.edits),
-    ];
-    for (const [label, value, mono] of [
-      element.attributes["data-demohunter-name"]
-        ? [
-            "Named by the app",
-            element.attributes["data-demohunter-name"],
-            false,
-          ]
-        : ["Tag", `<${element.tag}>`, true],
-      [
-        "Visible",
-        visible[0] !== undefined
-          ? `${clockMs(visible[0])} – ${clockMs(visible[1] ?? totalDuration(bundle.edits))}`
-          : "Outside the edited scenes",
-        true,
-      ],
-      [
-        "Source",
-        element.source.originalFile
-          ? `${element.source.originalFile}${element.source.originalLine ? `:${element.source.originalLine}` : ""}`
-          : "Captured HTML only",
-        !!element.source.originalFile,
-      ],
-    ] as [string, string, boolean][]) {
-      facts.append(make("dt", undefined, label));
-      facts.append(make("dd", mono ? "mono" : undefined, value));
-    }
-    const root = $("#source-locations");
-    root.replaceChildren();
-    for (const [label, value] of [
-      ["Captured HTML", element.source.file],
-      ["Registry", `elements.json#${element.source.registryPointer}`],
-      ["Edits", "edits.json → elements / animations"],
-    ]) {
-      const row = make("p");
-      row.append(
-        make("strong", undefined, `${label}: `),
-        document.createTextNode(value!),
-      );
-      root.append(row);
-    }
-    $("#selected-tag").textContent =
-      element.text && element.text.length <= 48 ? element.text : element.name;
-    $("#handoff-text").textContent = this.handoff(element);
-    $("#source-html").hidden = true;
-    this.renderHistory();
     this.updateTime();
-  }
-  private handoff(element: ElementRecord) {
-    const data = this.hooks.data(),
-      bundle = this.hooks.bundle();
-    return [
-      `Demo "${bundle.project.title}" in ${relativeProject(data)}`,
-      `Element: ${element.tag} "${(element.text || element.name).slice(0, 60)}" at ${clockMs(this.hooks.time())}`,
-      elementUri(data.index.captureId, element.ref, this.hooks.time()),
-    ].join("\n");
-  }
-  private renderHistory() {
-    const element = this.selected();
-    const root = $("#element-history");
-    root.replaceChildren();
-    if (!element) return;
-    const entries = this.history.filter(
-      (h) =>
-        h.author?.elementRef === element.ref ||
-        h.changes?.some((c) => c.ref === element.ref),
-    );
-    $("#element-history-count").textContent = entries.length
-      ? String(entries.length)
-      : "No edits yet";
-    for (const entry of entries.slice(0, 12)) {
-      const row = make("div", "history-row");
-      row.append(
-        make(
-          "span",
-          undefined,
-          `${entry.author?.actor ?? "You"} · ${entry.description}`,
-        ),
-        make("span", undefined, ago(entry.createdAt)),
-      );
-      root.append(row);
-    }
   }
   private selected(): ElementRecord | undefined {
     return this.hooks
@@ -489,7 +358,8 @@ export class AgentWorkbench {
         make("p", "hint", "No matching captured elements."),
       );
   }
-  async copyReference(context: boolean): Promise<void> {
+  /** The selected element's reference, files and moment for an agent. */
+  async copyReference(): Promise<void> {
     const element = this.selected();
     if (!element) return;
     const data = this.hooks.data(),
@@ -506,56 +376,37 @@ export class AgentWorkbench {
       this.hooks.time(),
     );
     await copyText(
-      context
-        ? JSON.stringify(
-            {
-              reference: uri,
-              preview: link,
-              projectDir: data.projectDir,
-              revision: bundle.revision,
-              element: {
-                ref: element.ref,
-                name: element.name,
-                documentId: element.documentId,
-                nodeId: element.nodeId,
-                capturedHtml: `${data.projectDir}/${element.source.file}`,
-                htmlAnchor: element.source.htmlAnchor,
-                registry: `elements.json#${element.source.registryPointer}`,
-                editFile: "edits.json",
-                narrationFile: "narration.json",
-                commentsFile: "comments.json",
-              },
-              outputMs: Math.round(this.hooks.time()),
-              comments: bundle.comments.threads.filter(
-                (t) => t.elementRef === element.ref && t.status === "open",
-              ),
-              instruction:
-                "Resolve this reference with DemoHunter MCP or read the project AGENTS.md. Preserve captured events; edit the project overrides and transcript.",
-            },
-            null,
-            2,
-          )
-        : link,
+      JSON.stringify(
+        {
+          reference: uri,
+          preview: link,
+          projectDir: data.projectDir,
+          revision: bundle.revision,
+          element: {
+            ref: element.ref,
+            name: element.name,
+            documentId: element.documentId,
+            nodeId: element.nodeId,
+            capturedHtml: `${data.projectDir}/${element.source.file}`,
+            htmlAnchor: element.source.htmlAnchor,
+            registry: `elements.json#${element.source.registryPointer}`,
+            editFile: "edits.json",
+            narrationFile: "narration.json",
+            commentsFile: "comments.json",
+          },
+          outputMs: Math.round(this.hooks.time()),
+          comments: bundle.comments.threads.filter(
+            (t) => t.elementRef === element.ref && t.status === "open",
+          ),
+          instruction:
+            "Resolve this reference with DemoHunter MCP or read the project AGENTS.md. Preserve captured events; edit the project overrides and transcript.",
+        },
+        null,
+        2,
+      ),
     );
     history.replaceState(null, "", link);
-    toast(
-      context
-        ? "Element, files and moment copied — paste into your agent"
-        : "Element link copied",
-    );
-  }
-  private async showSource(): Promise<void> {
-    const element = this.selected();
-    if (!element) return;
-    const result = await this.hooks.api<{ html: string; truncated: boolean }>(
-      `/api/source?ref=${encodeURIComponent(element.ref)}`,
-    );
-    $("#source-html").textContent =
-      result.html +
-      (result.truncated
-        ? "\n…Inspect a smaller child element for the rest."
-        : "");
-    $("#source-html").hidden = false;
+    toast("Element, files and moment copied — paste into your agent");
   }
   openComments(): void {
     document
@@ -569,8 +420,10 @@ export class AgentWorkbench {
   openThread(id: string): void {
     const bundle = this.hooks.bundle();
     const thread = bundle.comments.threads.find((t) => t.id === id);
-    if (!thread) return;
-    if (thread.status === "resolved") this.setResolved(true);
+    if (!thread) throw new Error("Comment not found in this recording.");
+    this.sceneOnly = false;
+    $("#scope-toggle").textContent = "All scenes";
+    this.setResolved(thread.status === "resolved");
     this.activeThread = id;
     this.openComments();
     if (thread.elementRef) this.hooks.select(thread.elementRef, thread.timeMs);
@@ -578,6 +431,58 @@ export class AgentWorkbench {
     this.openComments();
     this.renderComments();
     this.commentCards.get(id)?.scrollIntoView({ block: "nearest" });
+  }
+  private threadLink(id: string): string {
+    const thread = this.hooks
+      .bundle()
+      .comments.threads.find((t) => t.id === id);
+    if (!thread) throw new Error("Comment not found in this recording.");
+    return previewLink(
+      location.href.split("#")[0]!,
+      this.hooks.data().index.captureId,
+      thread.elementRef,
+      thread.timeMs,
+      thread.id,
+    );
+  }
+  private async copyComment(id: string): Promise<void> {
+    const bundle = this.hooks.bundle();
+    const thread = bundle.comments.threads.find((t) => t.id === id);
+    if (!thread) return;
+    const data = this.hooks.data();
+    const element = data.index.elements.find(
+      (e) => e.ref === thread.elementRef,
+    );
+    await copyText(
+      JSON.stringify(
+        {
+          projectDir: data.projectDir,
+          revision: bundle.revision,
+          captureId: data.index.captureId,
+          threadId: thread.id,
+          reference: commentUri(data.index.captureId, thread.id, thread.timeMs),
+          preview: this.threadLink(id),
+          element: element
+            ? {
+                ref: element.ref,
+                capturedHtml: `${data.projectDir}/${element.source.file}`,
+                htmlAnchor: element.source.htmlAnchor,
+              }
+            : undefined,
+          comment: thread,
+          files: {
+            edits: "edits.json",
+            narration: "narration.json",
+            comments: "comments.json",
+          },
+          instruction:
+            "Read this project's AGENTS.md or use DemoHunter MCP resolve_reference with this reference or threadId. Inspect this exact comment and its element before editing. Preserve the capture; reply and resolve after verifying the result.",
+        },
+        null,
+        2,
+      ),
+    );
+    toast("Comment and ID copied — paste into your agent");
   }
   private async addComment(): Promise<void> {
     const textarea = $<HTMLTextAreaElement>("#new-comment");
@@ -655,6 +560,13 @@ export class AgentWorkbench {
       const pin = card.querySelector<HTMLElement>(".pin")!;
       pin.textContent = String(number);
       pin.classList.toggle("resolved", thread.status === "resolved");
+      const identity = card.querySelector<HTMLButtonElement>(".comment-id")!;
+      identity.textContent = thread.id;
+      identity.title = `Copy comment ID: ${thread.id}`;
+      pin.setAttribute(
+        "aria-label",
+        `Open note ${number}: ${thread.body.slice(0, 80)}`,
+      );
       card.querySelector(".comment-author-name")!.textContent = thread.author;
       card.querySelector(".comment-time")!.textContent = clockMs(thread.timeMs);
       card.querySelector(".comment-body")!.textContent = thread.body;
@@ -720,9 +632,8 @@ export class AgentWorkbench {
       const show = card.querySelector<HTMLButtonElement>(".comment-show")!;
       undo.hidden = true;
       show.hidden = state.kind !== "working" || !thread.elementRef;
-      // One clear next step per state, matching the design.
-      card.querySelector<HTMLElement>(".comment-copy")!.hidden =
-        state.kind !== "open";
+      // Sharing stays available in every note state.
+      card.querySelector<HTMLElement>(".comment-copy")!.hidden = false;
       card.querySelector<HTMLElement>(".comment-reply")!.hidden =
         state.kind === "working" || state.kind === "resolved";
       card.querySelector<HTMLElement>(".comment-resolve")!.hidden =
@@ -823,46 +734,23 @@ export class AgentWorkbench {
     );
     right.append(copy, show, replyButton, undo, resolve);
     actions.append(left, right);
-    copy.onclick = () => {
-      const thread = this.hooks
-        .bundle()
-        .comments.threads.find((t) => t.id === id);
-      if (!thread) return;
-      const data = this.hooks.data(),
-        element = data.index.elements.find((e) => e.ref === thread.elementRef);
-      const context = {
-        projectDir: data.projectDir,
-        revision: this.hooks.bundle().revision,
-        captureId: data.index.captureId,
-        reference: element
-          ? elementUri(data.index.captureId, element.ref, thread.timeMs)
-          : undefined,
-        preview: previewLink(
-          location.href.split("#")[0]!,
-          data.index.captureId,
-          element?.ref,
-          thread.timeMs,
-        ),
-        element: element
-          ? {
-              ref: element.ref,
-              capturedHtml: `${data.projectDir}/${element.source.file}`,
-              htmlAnchor: element.source.htmlAnchor,
-            }
-          : undefined,
-        comment: thread,
-        files: {
-          edits: "edits.json",
-          narration: "narration.json",
-          comments: "comments.json",
-        },
-        instruction:
-          "Read this project’s AGENTS.md or use DemoHunter MCP. Inspect this comment and its element before editing. Preserve the capture; reply and resolve after verifying the result.",
-      };
-      void copyText(JSON.stringify(context, null, 2))
-        .then(() => toast("Note and element context copied"))
+    copy.prepend(icon("copy"));
+    copy.onclick = () => void this.copyComment(id).catch(this.hooks.error);
+    const reference = make("div", "comment-reference");
+    const identity = make("button", "comment-id");
+    identity.setAttribute("aria-label", "Copy comment ID");
+    identity.onclick = () =>
+      void copyText(id)
+        .then(() => toast("Comment ID copied"))
         .catch(this.hooks.error);
-    };
+    const link = make("button", "comment-link quiet small-text", "Copy link");
+    link.prepend(icon("copy"));
+    link.title = "Copy a link to this comment";
+    link.onclick = () =>
+      void copyText(this.threadLink(id))
+        .then(() => toast("Comment link copied"))
+        .catch(this.hooks.error);
+    reference.append(identity, link);
     show.onclick = () => {
       const thread = this.hooks
         .bundle()
@@ -918,8 +806,13 @@ export class AgentWorkbench {
       this.activeThread = id;
       this.renderComments();
     };
+    card.ondblclick = (event) => {
+      if ((event.target as HTMLElement).closest("button,textarea")) return;
+      void this.copyComment(id).catch(this.hooks.error);
+    };
     body.append(
       top,
+      reference,
       make("p", "comment-body"),
       make("button", "comment-target ref-chip"),
       make("div", "comment-replies"),
@@ -927,7 +820,8 @@ export class AgentWorkbench {
       actions,
       reply,
     );
-    const pin = make("span", "pin");
+    const pin = make("button", "pin");
+    pin.onclick = () => this.openThread(id);
     card.append(pin, body);
     return card;
   }
@@ -953,19 +847,19 @@ export class AgentWorkbench {
     const connection = $("#agent-connection");
     connection.replaceChildren();
     const who = make("div", "who");
-    const avatar = make("span", `presence-avatar${last ? "" : " idle"}`);
+    const avatar = make(
+      "span",
+      `presence-avatar${last?.status === "running" ? "" : " idle"}`,
+    );
     avatar.append(icon("pencil"));
     const text = make("div");
     if (last) {
-      const firstOfSession = this.activity
-        .filter((a) => a.sessionId === last.sessionId)
-        .at(-1)!;
       text.append(
         make("strong", undefined, last.actor),
         make(
           "span",
           "muted",
-          `MCP · this demo only · since ${new Date(firstOfSession.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+          `MCP · this demo only · last call ${ago(last.finishedAt ?? last.startedAt)}`,
         ),
       );
     } else
@@ -1012,72 +906,16 @@ export class AgentWorkbench {
             : "Nothing is running.",
         ),
       );
-    // Review queue
+    // Changes, newest turn first
     const turns = this.turns();
-    const pending = turns.filter(
-      (t) => !t.entries.every((e) => this.memory?.has(e.id)),
-    );
-    const kept = turns.filter((t) =>
-      t.entries.every((e) => this.memory?.has(e.id)),
-    );
-    const count = pending.reduce((n, t) => n + t.entries.length, 0);
-    $("#review-title").textContent = count
-      ? `To review · ${count}`
-      : "To review";
-    $("#keep-all").hidden = !pending.length;
-    $("#agent-count").textContent = count ? String(count) : "";
-    $("#agent-count").hidden = !count;
-    $("#review-count").textContent = count ? String(count) : "";
-    $("#review-open").hidden = !count;
     const list = $("#review-list");
-    list.replaceChildren();
-    for (const turn of pending) list.append(this.turnCard(turn, running));
-    if (!pending.length)
-      list.append(
-        make(
-          "p",
-          "review-empty",
-          turns.length
-            ? "All agent changes are reviewed."
-            : "Changes that agents make appear here, grouped by turn.",
-        ),
-      );
-    $("#review-earlier").hidden = !kept.length;
-    $("#review-earlier-title").textContent = `Earlier · ${kept.length} kept`;
-    const earlier = $("#review-earlier-list");
-    earlier.replaceChildren(
-      ...kept.slice(0, 10).map((t) => this.turnCard(t, undefined)),
+    list.replaceChildren(
+      ...turns.slice(0, 20).map((turn) => this.turnCard(turn, running)),
     );
-    // Raw activity
-    const activityList = $("#agent-activity-list");
-    activityList.replaceChildren();
-    for (const e of this.activity.slice(0, 12)) {
-      const row = make("li");
-      row.append(
-        make("span", undefined, `${e.actor} · ${e.label}`),
-        make("small", undefined, e.status),
+    if (!turns.length)
+      list.append(
+        make("p", "review-empty", "Agent changes appear here, by turn."),
       );
-      if (e.elementRef) {
-        const button = make("button", "link-agent", "Show element");
-        button.onclick = () => this.hooks.showElement(e.elementRef!);
-        row.append(button);
-      }
-      if (e.error) row.append(make("p", undefined, e.error));
-      activityList.append(row);
-    }
-    if (!this.activity.length)
-      activityList.append(make("li", undefined, "No tool calls yet."));
-    // Git footer
-    const git = this.git ?? this.hooks.data().git;
-    $("#git-footer").hidden = !git?.branch && !git?.repository;
-    $("#copy-diff").hidden = !!git?.ignored;
-    $("#git-footer-text").textContent = !git
-      ? ""
-      : git.ignored
-        ? "Saved to files · folder not in git"
-        : git.changed.length
-          ? `${git.changed.length} file${git.changed.length === 1 ? "" : "s"} changed · not committed`
-          : "All changes committed";
   }
   private turnCard(
     turn: Turn,
@@ -1165,22 +1003,12 @@ export class AgentWorkbench {
         card.append(row);
       }
     }
-    const foot = make("div", "turn-foot");
-    const kept = turn.entries.every((e) => this.memory?.has(e.id));
-    if (!kept) {
-      if (turn.undoSteps) {
-        const undo = make("button", "button secondary small", "Undo turn");
-        undo.onclick = () => void this.undoTurn(turn).catch(this.hooks.error);
-        foot.append(undo);
-      } else foot.append(make("span", "note", "Undo newer changes first"));
-      const keep = make("button", "button primary small", "Keep");
-      keep.onclick = () => {
-        this.memory?.keep(turn.entries.map((e) => e.id));
-        this.renderAgent();
-        this.renderComments();
-        this.onReview?.();
-      };
-      foot.append(keep);
+    // Undo is linear: only the newest turn can be undone in one step.
+    if (turn.undoSteps) {
+      const foot = make("div", "turn-foot");
+      const undo = make("button", "button secondary small", "Undo turn");
+      undo.onclick = () => void this.undoTurn(turn).catch(this.hooks.error);
+      foot.append(undo);
       card.append(foot);
     }
     return card;
@@ -1218,18 +1046,14 @@ export class AgentWorkbench {
     $("#agent-config").textContent = JSON.stringify(this.mcpConfig(), null, 2);
     const status = $("#agent-dialog-status");
     const last = this.lastAgent();
-    status.classList.toggle("connected", !!last);
     const running = this.activity.find((a) => a.status === "running");
+    status.classList.toggle("connected", !!running);
     status.textContent = running
-      ? `${running.actor} is connected · working now`
+      ? `${running.actor} is working now`
       : last
-        ? `${last.actor} is connected · last call ${ago(last.finishedAt ?? last.startedAt)}`
+        ? `${last.actor} · last activity ${ago(last.finishedAt ?? last.startedAt)}`
         : "Waiting for the first tool call…";
   }
-}
-function relativeProject(data: WorkspaceData) {
-  const marker = data.projectDir.lastIndexOf("/.demohunter/");
-  return marker >= 0 ? data.projectDir.slice(marker + 1) : data.projectDir;
 }
 function shellQuote(value: string): string {
   return /^[\w@%+=:,./-]+$/.test(value)

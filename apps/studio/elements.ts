@@ -236,9 +236,16 @@ export function indexEvents(events: CaptureEvent[]): {
         if (addition.node.type === 3) {
           const text = (addition.node.textContent ?? "").trim();
           let record = known.get(key(addition.parentId));
+          const seen = new Set<ElementRecord>();
           // Only text that arrives with the element; later text changes are
           // replay state, not the element's identity.
-          while (text && record && record.firstSeenMs === time) {
+          while (
+            text &&
+            record &&
+            record.firstSeenMs === time &&
+            !seen.has(record)
+          ) {
+            seen.add(record);
             if (record.text.length < 1000) {
               record.text = `${record.text} ${text}`
                 .trim()

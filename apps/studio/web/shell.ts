@@ -10,15 +10,8 @@ export function initializeShell() {
     $<HTMLDetailsElement>("#element-details").open = true;
     $("#element-search").focus();
   };
-  for (const button of document.querySelectorAll<HTMLButtonElement>(
-    "[data-back]",
-  ))
-    button.onclick = () =>
-      $<HTMLButtonElement>(`[data-tab="${button.dataset.back}"]`).click();
   $("#help-open").onclick = () => help.showModal();
   $("#help-close").onclick = () => help.close();
-  $("#back-comments").onclick = () =>
-    $<HTMLButtonElement>('[data-tab="comments"]').click();
   for (const dialog of document.querySelectorAll<HTMLDialogElement>("dialog"))
     dialog.addEventListener("click", (e) => {
       if (e.target === dialog) {

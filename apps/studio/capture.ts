@@ -43,9 +43,6 @@ export async function captureReplay(
   input: SmokeGenerateInput & {
     projectDir: string;
     configureContext?: (context: BrowserContext) => Promise<void>;
-    /** Coarse progress: pass 1 collects the timeline, pass 2 records the
-     * DOM, then assets are bundled and elements indexed. */
-    onProgress?: (step: "timeline" | "record" | "bundle") => void;
   },
 ): Promise<string> {
   const dir = path.resolve(input.projectDir);
@@ -123,7 +120,6 @@ export async function captureReplay(
     });
     first.on("response", collectAsset);
     await input.configureContext?.(first);
-    input.onProgress?.("timeline");
     const timeline = await collectTimeline({
       loadedConfig: input.loadedConfig,
       page: await first.newPage(),
@@ -178,7 +174,6 @@ export async function captureReplay(
       content: `${await readFile(rrwebPath, "utf8")}\n;(${armRecorder.toString()})();`,
     });
     const page = await context.newPage();
-    input.onProgress?.("record");
     await replayTimeline({
       loadedConfig: input.loadedConfig,
       page,
@@ -228,12 +223,43 @@ export async function captureReplay(
       sessionStorage.removeItem("__dhReplayRecording");
     });
     await Promise.all([...pending]);
+    // Pages declare more @font-face files (weights, unicode ranges) than the
+    // recorded text used; the replay needs them, so bundle them too.
+    const fontPattern =
+      /url\(\s*\\?["']?([^)"'\\\s]+\.(?:woff2?|ttf|otf)(?:\?[^)"'\\\s]*)?)/g;
+    const fonts = new Set<string>();
+    const findFonts = (text: string, base?: string) => {
+      for (const [, value] of text.matchAll(fontPattern)) {
+        try {
+          const href = new URL(value!, base).href;
+          if (/^https?:/.test(href) && !assets.has(href)) fonts.add(href);
+        } catch {}
+      }
+    };
+    for (const [url, asset] of assets)
+      if (asset.css) findFonts(asset.body.toString(), url);
+    findFonts(JSON.stringify(events));
+    for (const url of [...fonts].slice(0, 100)) {
+      const response = await context.request
+        .get(url, { timeout: 10_000 })
+        .catch(() => undefined);
+      const body = response?.ok() ? await response.body() : undefined;
+      if (!body || body.length > 10_000_000) {
+        warnings.add(`Could not bundle font: ${new URL(url).pathname}`);
+        continue;
+      }
+      const extension = /\.(woff2?|ttf|otf)(?:\?|$)/.exec(url)![1];
+      assets.set(url, {
+        file: `assets/${createHash("sha256").update(url).digest("hex").slice(0, 20)}.${extension}`,
+        body,
+        css: false,
+      });
+    }
     await context.close();
     recording = false;
     if (!events.some((event) => event.type === 2))
       throw new Error("No DOM snapshot was captured.");
 
-    input.onProgress?.("bundle");
     const replacements = [...assets].sort(([a], [b]) => b.length - a.length);
     const rewrite = (text: string): string =>
       replacements.reduce(
@@ -257,6 +283,25 @@ export async function captureReplay(
       await writeFile(path.join(dir, asset.file), body);
     }
     const rewrittenEvents = JSON.parse(rewrite(JSON.stringify(events)));
+    // Icons, preloads and manifests that were never fetched only make the
+    // offline replay request the source site; they show nothing.
+    const dropRemoteHeadLinks = (node: any): void => {
+      if (!node || typeof node !== "object") return;
+      const attributes = node.attributes;
+      if (
+        node.tagName === "link" &&
+        /^https?:/.test(attributes?.href ?? "") &&
+        /icon|preload|prefetch|preconnect|manifest/i.test(attributes?.rel ?? "")
+      )
+        delete attributes.href;
+      for (const child of node.childNodes ?? []) dropRemoteHeadLinks(child);
+    };
+    for (const event of rewrittenEvents) {
+      if (event.type === 2) dropRemoteHeadLinks(event.data.node);
+      if (event.type === 3 && event.data.source === 0)
+        for (const addition of event.data.adds ?? [])
+          dropRemoteHeadLinks(addition.node);
+    }
     const sourceMarkers = segments.map(
       (s) => (s as NarrationSegment & { sourceMs: number }).sourceMs,
     );

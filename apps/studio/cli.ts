@@ -10,7 +10,6 @@ import { loadAuthoredModule } from "../../packages/cli/src/utils/load-authored-m
 import { captureReplay } from "./capture.js";
 import { createDemo } from "./demo.js";
 import { regenerateNarration } from "./narration.js";
-import { serveReplay } from "./server.js";
 import { loadBundle } from "./storage.js";
 import { totalDuration, audioIsCurrent } from "./model.js";
 import type { DemoHunterTour } from "@demohunter/sdk";
@@ -18,32 +17,46 @@ import { runReplayMcp } from "./mcp.js";
 import { ReplayWorkspace } from "./workspace.js";
 import { createInvoiceDemo } from "./invoice-demo.js";
 
-const help = `DemoHunter Studio — local-first recording workspace
+const help = `DemoHunter Studio — local-first demo workspace
 
-bun run studio [library] [workspace-directory] [--port 4310]
+bun run studio [workspace-directory] [--port 4310] [--host 127.0.0.1]
+    Open Studio with every demo in the workspace (default: current directory).
+
+bun run studio capture <tour.ts> [--project <new-dir>]
+bun run studio demo [--sample invoices|fractions] [--project <new-dir>]
+bun run studio narrate <project-dir> [--fit] [--cache-dir <dir>]
+bun run studio inspect <project-dir>
 bun run studio export <project-dir> --output <new-directory> [--fps 24] [--strict-audio]
 bun run studio list [workspace-directory]    JSON library discovery for agents/CI
+bun run studio mcp <project-dir>             Agent-facing stdio MCP server
+bun run studio resolve <project-dir> <element-link>
 bun run studio contract
-
-bun run replay demo [--sample invoices|fractions] [--project <dir>] [--port 4310]
-bun run replay capture <tour.ts> [--project <new-dir>]
-bun run replay open <project-dir> [--port 4310] [--host 127.0.0.1]
-bun run replay narrate <project-dir> [--fit] [--cache-dir <dir>]
-bun run replay inspect <project-dir>
-bun run replay mcp <project-dir>    Start the agent-facing stdio MCP server
-bun run replay resolve <project-dir> <element-link>
 
 Capture uses draft narration timing and needs no API key. Narrate explicitly
 uses the project's TTS settings, environment credentials, and existing cache.
-Edit edits.json, narration.json, overrides.css, or project.json while open.
-Saved replays can be exported without the source application.`;
+Saved demos can be exported without the source application.`;
+
+const commands = new Set([
+  "capture",
+  "demo",
+  "narrate",
+  "inspect",
+  "export",
+  "list",
+  "mcp",
+  "resolve",
+  "contract",
+]);
 
 export async function main(args: string[]): Promise<void> {
-  const [command = "library", ...rest] = args;
-  if (!command || command === "--help" || command === "help") {
+  if (args[0] === "--help" || args[0] === "help") {
     console.log(help);
     return;
   }
+  // Anything that is not a command opens Studio: `bun run studio [workspace]`.
+  const [command, ...rest] = commands.has(args[0] ?? "")
+    ? args
+    : ["studio", ...args];
   const positions: string[] = [];
   const flags = new Map<string, string>();
   for (let i = 0; i < rest.length; i++) {
@@ -87,7 +100,8 @@ export async function main(args: string[]): Promise<void> {
     );
     return;
   }
-  if (command === "library") {
+  if (command === "studio") {
+    if (positions.length > 1) throw new Error(help);
     const app = await serveLibrary(positions[0] ?? process.cwd(), {
       port,
       host: flags.get("host"),
@@ -109,7 +123,7 @@ export async function main(args: string[]): Promise<void> {
     console.log(`Capturing ${sample} as DOM events (no video)…`);
     if (sample === "fractions") await createDemo(dir);
     else await createInvoiceDemo(dir);
-    await open(dir, port, flags.get("host"));
+    console.log(`Created ${dir}\nOpen Studio: bun run studio`);
     return;
   }
   if (!positions[0] || positions.length > (command === "resolve" ? 2 : 1))
@@ -150,11 +164,9 @@ export async function main(args: string[]): Promise<void> {
       loadedConfig,
       tourFile: { path: target, tour },
       projectDir: dir,
-      // Machine-readable progress for the library's record dialog.
-      onProgress: (step) => console.error(`studio:step ${step}`),
     });
     console.log(
-      `Captured editable replay: ${dir}\nPreview: bun run replay open ${JSON.stringify(dir)}`,
+      `Captured editable replay: ${dir}\nOpen Studio: bun run studio`,
     );
     return;
   }
@@ -175,10 +187,6 @@ export async function main(args: string[]): Promise<void> {
         2,
       ),
     );
-    return;
-  }
-  if (command === "open") {
-    await open(target, port, flags.get("host"));
     return;
   }
   if (command === "narrate") {
@@ -227,12 +235,6 @@ export async function main(args: string[]): Promise<void> {
     return;
   }
   throw new Error(help);
-}
-async function open(dir: string, port: number, host?: string): Promise<void> {
-  const preview = await serveReplay(dir, { port, host });
-  console.log(
-    `\nReplay editor: ${preview.url}\nProject files: ${preview.projectDir}\nAgent guide: .agents/skills/demohunter-replay/SKILL.md\nKeep this process running. Changes to project files reload automatically.`,
-  );
 }
 if (
   process.argv[1] &&

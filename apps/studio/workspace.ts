@@ -156,11 +156,32 @@ export class ReplayWorkspace {
     };
   }
   async resolve(value: string) {
-    const parsed = parseReference(value);
+    const parsed = /^comment-[a-zA-Z0-9_-]+$/.test(value)
+      ? { captureId: this.index.captureId, commentId: value, timeMs: 0 }
+      : parseReference(value);
     if (parsed.captureId !== this.index.captureId)
       throw new Error(
         "This link belongs to a different capture. Connect the agent to that project first.",
       );
+    if (parsed.commentId !== undefined) {
+      const bundle = await loadBundle(this.dir);
+      const comment = bundle.comments.threads.find(
+        (t) => t.id === parsed.commentId,
+      );
+      if (!comment) throw new Error("Comment not found in this capture.");
+      return {
+        ...(comment.elementRef ? await this.nodeInfo(comment.elementRef) : {}),
+        projectDir: this.dir,
+        captureId: this.index.captureId,
+        revision: bundle.revision,
+        threadId: comment.id,
+        comment,
+        outputMs: comment.timeMs,
+        ...(comment.elementRef
+          ? { capturedHtml: await this.html(comment.elementRef) }
+          : {}),
+      };
+    }
     return {
       ...(await this.nodeInfo(parsed.elementRef)),
       outputMs: parsed.timeMs,

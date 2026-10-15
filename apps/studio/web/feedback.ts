@@ -47,7 +47,7 @@ export class AgentFeedback {
           event.status === "running" &&
           card.dataset.id === event.segmentId,
       );
-    // Title bar presence: shown while an agent is (or was recently) connected.
+    // Show observed work or recent activity, not inferred connection status.
     const last = events[0];
     const present =
       !!last &&
@@ -71,8 +71,8 @@ export class AgentFeedback {
           ? event.tool
           : event?.status === "failed"
             ? "failed"
-            : "idle";
-      this.root.title = `${shown.actor} · ${shown.label}`;
+            : "recent";
+      this.root.title = `${shown.actor} · ${event?.status === "running" ? shown.label : "Recent activity: " + shown.label}`;
     }
     this.draw();
   }

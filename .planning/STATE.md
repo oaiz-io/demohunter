@@ -5,7 +5,7 @@ milestone_name: milestone
 status: milestone_complete
 stopped_at: v1.0 archived; no active milestone
 last_updated: "2026-10-15"
-last_activity: 2026-10-15 -- Quick task 261015-er8 completed local-first Studio application, library, protocol and CI export
+last_activity: 2026-10-15 -- Final Studio review; full deterministic suite and delivery checks passed
 progress:
   total_phases: 6
   completed_phases: 6
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: none — milestone archived
 Plan: none
 Status: v1.0 complete
-Last activity: 2026-10-15 -- Quick task 261015-fpz simplified Studio around preview, comments and external agents; verified real interaction and rendered video
+Last activity: 2026-10-15 -- Quick task 261015-nsz reviewed Studio, protected undo boundaries, and passed the full delivery checks
 Progress: [██████████] 100%
 
 ## Performance Metrics
@@ -43,6 +43,11 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
+| 2026-10-15 | 261015-nsz | Final Studio review and delivery | Fixed undo across direct-file edits and accurate agent activity labels; full suite 322 passed, 2 skipped; builds, typechecks and publish dry-run passed. |
+| 2026-10-15 | 261015-ms5 | Clear comment IDs and agent links | Copy ID/link/context in every note state; MCP comment resolution and reliable canvas/card/timeline pins. Studio: 22 passed; typecheck passed. |
+| 2026-10-15 | 261015-onc | One Studio command | `bun run studio [workspace]` always opens the full library; removed `open`, `library` and the `replay` alias. Studio tests 21 passed. |
+| 2026-10-15 | 261015-smp | Simplify the Studio surface | Studio as a window onto code-made demos: removed recording, filters, find/replace, manual edit, Element/Timing panels, Keep/follow and export options (~2,750 lines). Fixed font bundling, stuck render queue, example ports. Full suite 317 passed, 1 skipped. |
+| 2026-10-15 | 261015-hrx | Implement the proof-desk Studio design | Paper design in apps/studio: attributed agent history, undo by turn, git status, local fonts, scene thumbnails, timeline, Notes/Script/Agent panels, agent motion, repo library. |
 | 2026-10-15 | 261015-fpz | Simplify Studio around preview and comments | Paper-inspired canvas-first editor, contextual controls, simpler library, comment-to-agent handoff and updated skill. Fixed blank renderer/posters and library back navigation. Full suite: 312 passed, 2 skipped; build/typechecks passed. |
 | 2026-10-15 | 261015-er8 | Productize local-first Studio | Promoted apps/studio with recording library, versioned format/schemas, real MCP activity, isolated project routes and UI/CI MP4 export. Full suite 312 passed, 2 skipped; final Studio suite 17 passed. |
 | 2026-10-15 | 261015-dey | Build agent-native replay Studio | Added real MCP, stable element links/HTML provenance, comments, animations, revision-checked undo, conflict-safe narration editor and realistic narrated invoice capture. Replay: 13 passed; build/typecheck and affected E2E reruns passed. |

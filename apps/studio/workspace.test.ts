@@ -7,7 +7,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { projectFixture } from "./test-support.js";
 import { loadBundle, mutateProject, writeJson } from "./storage.js";
 import { ReplayWorkspace } from "./workspace.js";
-import { elementUri, previewLink, parseReference } from "./links.js";
+import {
+  commentUri,
+  elementUri,
+  previewLink,
+  parseReference,
+} from "./links.js";
 import { indexEvents } from "./elements.js";
 import { sampleAnimation } from "./model.js";
 
@@ -66,6 +71,68 @@ test("element links preserve capture identity, document scope and honest source 
     expect(new Set(scoped.elements.map((e) => e.ref)).size).toBe(2);
     await writeJson(path.join(dir, "events.json"), []);
     await expect(ReplayWorkspace.open(dir)).rejects.toThrow("Capture changed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("comment links resolve the exact thread, including resolved and recording-wide notes", async () => {
+  const { root, dir, workspace: w } = await setup();
+  try {
+    const ref = w.index.elements[0]!.ref;
+    const anchored = await w.addComment({
+      expectedRevision: (await loadBundle(dir)).revision,
+      elementRef: ref,
+      timeMs: 120,
+      body: "Change this heading",
+    });
+    await w.commentAction({
+      expectedRevision: anchored.revision,
+      threadId: anchored.id,
+      reply: "Checked the result",
+      status: "resolved",
+    });
+    const general = await w.addComment({
+      expectedRevision: (await loadBundle(dir)).revision,
+      timeMs: 200,
+      body: "Shorten the whole recording",
+    });
+    const before = (await loadBundle(dir)).revision;
+    for (const reference of [
+      anchored.id,
+      commentUri(w.index.captureId, anchored.id, 120),
+      previewLink(
+        "http://localhost:4310/projects/demo/",
+        w.index.captureId,
+        ref,
+        120,
+        anchored.id,
+      ),
+    ]) {
+      const result = await w.resolve(reference);
+      expect(result.comment?.id).toBe(anchored.id);
+      expect(result.comment?.status).toBe("resolved");
+      expect(result.comment?.replies[0]?.body).toBe("Checked the result");
+      expect(result.outputMs).toBe(120);
+      expect(result.capturedHtml?.html).toContain("Invoice");
+    }
+    const result = await w.resolve(commentUri(w.index.captureId, general.id));
+    expect(result.comment?.body).toBe("Shorten the whole recording");
+    expect(result.outputMs).toBe(200);
+    expect(result.capturedHtml).toBeUndefined();
+    expect((await loadBundle(dir)).revision).toBe(before);
+    await expect(
+      w.resolve(commentUri("0123456789abcdef", anchored.id)),
+    ).rejects.toThrow("different capture");
+    await expect(
+      w.resolve(commentUri(w.index.captureId, "comment-missing")),
+    ).rejects.toThrow("Comment not found");
+    expect(() =>
+      parseReference(commentUri(w.index.captureId, "../bad")),
+    ).toThrow();
+    expect(() =>
+      parseReference(commentUri(w.index.captureId, general.id, -1)),
+    ).toThrow();
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -173,13 +240,22 @@ test("agent can inspect and edit through the real stdio MCP transport", async ()
       },
     });
     expect(stale.isError).toBe(true);
-    await call("add_comment", {
+    const comment = await call("add_comment", {
       expectedRevision: changed.revision,
       elementRef: ref,
       timeMs: 0,
       body: "Looks good",
     });
     expect((await call("list_comments")).threads).toHaveLength(1);
+    for (const reference of [
+      comment.id,
+      commentUri(w.index.captureId, comment.id),
+    ]) {
+      const resolved = await call("resolve_reference", { reference });
+      expect(resolved.threadId).toBe(comment.id);
+      expect(resolved.comment.body).toBe("Looks good");
+      expect(resolved.capturedHtml.html).toContain("Invoice");
+    }
     const beforeCamera = await loadBundle(dir);
     const camera = await call("update_timeline_item", {
       expectedRevision: beforeCamera.revision,

@@ -21,10 +21,6 @@
       <symbol id="i-comment" viewBox="0 0 24 24">
         <path d="M5 5h14v11H9l-4 4z" />
       </symbol>
-      <symbol id="i-find" viewBox="0 0 24 24">
-        <circle cx="10.5" cy="10.5" r="6" />
-        <path d="M15 15l5 5" />
-      </symbol>
       <symbol id="i-focus" viewBox="0 0 24 24">
         <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
       </symbol>
@@ -37,12 +33,6 @@
       <symbol id="i-copy" viewBox="0 0 24 24">
         <rect x="8" y="8" width="12" height="12" rx="2" />
         <path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3" />
-      </symbol>
-      <symbol id="i-edit" viewBox="0 0 24 24">
-        <path d="M4 20h4L19 9l-4-4L4 16z" />
-      </symbol>
-      <symbol id="i-code" viewBox="0 0 24 24">
-        <path d="M8 7l-5 5 5 5m8-10l5 5-5 5" />
       </symbol>
       <symbol id="i-chevron" viewBox="0 0 24 24">
         <path d="M6 9l6 6 6-6" />
@@ -87,13 +77,11 @@
             <path class="logo-frame" d="M6 1h19l-5 18H1z" />
             <path class="logo-mark" d="M8.5 7h11l-1.6 6h-11z" /></svg
         ></a>
-        <span id="repo-name" class="crumb-repo" hidden></span>
         <span class="crumb-sep" data-library-only>/</span>
         <a href="#" class="crumb-link" data-library-only>Demos</a>
         <span class="crumb-sep" data-library-only>/</span>
         <h1 id="project-title">Loading recording…</h1>
-        <span id="git-branch" class="chip mono" hidden></span>
-        <span id="live-status" class="git-state">Connecting…</span>
+        <span id="live-status" class="save-state">Connecting…</span>
         <span id="save-indicator" class="draft-state" hidden></span>
       </div>
       <div class="header-actions">
@@ -107,10 +95,6 @@
         <button id="connect-agent" class="button secondary">
           Connect agent
         </button>
-        <button id="review-open" class="button secondary" hidden>
-          <span class="review-label">Review changes</span
-          ><span id="review-count" class="badge agent"></span>
-        </button>
         <button id="export-open" class="button primary">Export</button>
         <details id="project-menu" class="project-menu">
           <summary aria-label="More options" title="More options">
@@ -118,7 +102,6 @@
           </summary>
           <div class="menu-content">
             <button id="undo" disabled>Undo last edit <kbd>⌘Z</kbd></button
-            ><button data-tab="timing">Timing &amp; effects</button
             ><button id="timeline-toggle">Show element list</button
             ><button id="help-open">Keyboard shortcuts</button>
             <div class="menu-files">
@@ -174,16 +157,10 @@
               <use href="#i-chevron" />
             </svg>
           </button>
-          <span id="canvas-instruction" class="canvas-hint"
-            >Click anything to select it</span
-          >
-          <span class="canvas-bar-right"
-            ><span id="viewport-label" class="mono"></span
-            ><button id="focus-preview" class="quiet" title="Expand preview">
-              <svg class="icon" aria-hidden="true"><use href="#i-focus" /></svg
-              ><span>Focus</span>
-            </button></span
-          >
+          <button id="focus-preview" class="quiet" title="Expand preview">
+            <svg class="icon" aria-hidden="true"><use href="#i-focus" /></svg
+            ><span>Focus</span>
+          </button>
         </div>
         <div class="canvas-wrap" id="canvas-wrap">
           <div id="stage" class="stage">
@@ -206,7 +183,6 @@
               <div id="select-layer" hidden></div>
             </div>
             <div id="stage-loading">Loading recording…</div>
-            <div class="canvas-label" id="canvas-label"></div>
           </div>
           <div
             id="selection-toolbar"
@@ -223,26 +199,6 @@
             <button id="toolbar-copy">
               <svg class="icon" aria-hidden="true"><use href="#i-copy" /></svg
               >Copy for agent
-            </button>
-            <span class="toolbar-sep"></span>
-            <div class="toolbar-menu">
-              <button id="toolbar-edit" aria-expanded="false">
-                <svg class="icon" aria-hidden="true"><use href="#i-edit" /></svg
-                >Edit<svg class="icon tiny" aria-hidden="true">
-                  <use href="#i-chevron" />
-                </svg>
-              </button>
-              <div id="toolbar-edit-menu" class="toolbar-popover" hidden>
-                <button data-edit="text">Edit text…</button>
-                <button data-edit="hide">Hide element</button>
-                <button data-edit="zoom">Add zoom here</button>
-                <button data-edit="highlight">Add highlight here</button>
-                <button data-edit="animate">Add fade-in</button>
-              </div>
-            </div>
-            <button id="toolbar-inspect">
-              <svg class="icon" aria-hidden="true"><use href="#i-code" /></svg
-              >Inspect
             </button>
           </div>
           <div class="tool-palette" role="toolbar" aria-label="Canvas tools">
@@ -263,33 +219,8 @@
             >
               <svg class="icon" aria-hidden="true">
                 <use href="#i-comment" /></svg
-              ><kbd>C</kbd></button
-            ><span class="palette-sep"></span
-            ><button id="find-toggle" aria-pressed="false" title="Find (⌘F)">
-              <svg class="icon" aria-hidden="true"><use href="#i-find" /></svg
-              ><span>Find &amp; replace</span><kbd>⌘F</kbd>
+              ><kbd>C</kbd>
             </button>
-          </div>
-          <div id="find-panel" class="find-panel" hidden>
-            <div class="find-fields">
-              <input
-                id="find-input"
-                placeholder="Find text in the recording"
-                aria-label="Find text"
-              />
-              <input
-                id="replace-input"
-                placeholder="Replace with"
-                aria-label="Replace with"
-              />
-            </div>
-            <div id="find-results" class="find-results"></div>
-            <div class="find-footer">
-              <span id="find-count" class="muted"></span>
-              <button id="replace-all" class="button primary small" disabled>
-                Replace all
-              </button>
-            </div>
           </div>
         </div>
         <div class="timeline">
@@ -309,21 +240,15 @@
                 ><span id="time" class="mono">00:00.0</span
                 ><span id="duration-label" class="mono muted"></span
               ></span>
-              <select id="speed" aria-label="Playback speed">
-                <option value="0.75">0.75×</option>
-                <option value="1" selected>1×</option>
-                <option value="1.5">1.5×</option>
-                <option value="2">2×</option>
-              </select>
-              <button id="restart" hidden aria-label="Back to start"></button>
             </div>
-            <span id="timeline-legend" class="timeline-legend"></span>
           </div>
           <div class="tracks" id="tracks">
             <div class="track-labels" aria-hidden="true">
               <span class="ruler-label"></span>
-              <span>Scenes</span><span>Camera</span><span>Voice</span
-              ><span>Notes</span>
+              <span class="label-scenes">Scenes</span
+              ><span id="camera-label" class="label-camera">Camera</span
+              ><span class="label-voice">Voice</span
+              ><span id="notes-label" class="label-notes">Notes</span>
             </div>
             <div class="lanes" id="lanes">
               <div class="ruler" id="ruler"></div>
@@ -334,7 +259,6 @@
               <div id="playhead" class="playhead"><i></i></div>
             </div>
           </div>
-          <div id="timeline-detail" hidden></div>
         </div>
       </section>
       <aside class="inspector">
@@ -350,15 +274,6 @@
             Script <i id="script-dot" class="dot" hidden></i></button
           ><button data-tab="agent" role="tab" aria-selected="false">
             Agent
-            <span id="agent-count" class="badge agent" hidden></span></button
-          ><button
-            id="element-tab"
-            data-tab="selection"
-            role="tab"
-            aria-selected="false"
-            hidden
-          >
-            Element
           </button>
         </nav>
         <section id="panel-comments" class="panel">
@@ -424,12 +339,6 @@
         <section id="panel-narration" class="panel" hidden>
           <div class="panel-row">
             <span id="transcript-meta" class="muted"></span>
-            <button id="voice-open" class="button secondary small">
-              <span id="voice-label">Voice</span
-              ><svg class="icon tiny" aria-hidden="true">
-                <use href="#i-chevron" />
-              </svg>
-            </button>
           </div>
           <div class="panel-scroll">
             <div id="audio-status" class="audio-status" hidden>
@@ -442,40 +351,6 @@
               <span id="audio-status-detail"></span>
             </div>
             <p id="narration-job" class="job-line" role="status"></p>
-            <details class="voice-details" id="voice-details">
-              <summary class="sr-only">Voice settings</summary>
-              <div class="voice-form">
-                <label
-                  >Provider<select id="tts-provider">
-                    <option value="openai">OpenAI</option>
-                    <option value="elevenlabs">ElevenLabs</option>
-                  </select></label
-                ><label
-                  >Voice<input
-                    id="tts-voice"
-                    placeholder="Voice name or ID" /></label
-                ><label>Model<input id="tts-model" /></label
-                ><label
-                  >Language<input
-                    id="tts-language"
-                    placeholder="Optional, e.g. en" /></label
-                ><label class="full"
-                  >Direction<textarea id="tts-instructions" rows="3"></textarea>
-                </label>
-              </div>
-              <div class="button-row">
-                <button id="save-voice" class="button primary small">
-                  Save voice</button
-                ><button id="discard-voice" class="quiet small-text">
-                  Use file settings
-                </button>
-              </div>
-              <p class="hint">
-                Keys come from OPENAI_API_KEY or ELEVENLABS_API_KEY in the
-                service environment.
-              </p>
-              <pre id="voice-settings" hidden></pre>
-            </details>
             <div id="narration-list"></div>
             <div class="script-footer">
               <button id="add-segment" class="quiet">+ Add segment</button
@@ -489,139 +364,13 @@
           <div class="panel-scroll">
             <div id="agent-connection" class="agent-connection"></div>
             <div class="agent-now">
-              <div class="section-head">
-                <span class="micro-label">Now</span
-                ><label class="switch"
-                  ><input type="checkbox" id="follow-agent" /><i></i
-                  ><span>Follow agent</span></label
-                >
-              </div>
+              <span class="micro-label">Now</span>
               <div id="agent-now"></div>
             </div>
             <div class="agent-review">
-              <div class="section-head">
-                <span id="review-title" class="micro-label">To review</span
-                ><button id="keep-all" class="quiet small-text" hidden>
-                  Keep all
-                </button>
-              </div>
+              <span id="review-title" class="micro-label">Changes</span>
               <div id="review-list"></div>
-              <details id="review-earlier" class="review-earlier" hidden>
-                <summary id="review-earlier-title"></summary>
-                <div id="review-earlier-list"></div>
-              </details>
-              <details class="review-earlier">
-                <summary>Recent tool calls</summary>
-                <ul id="agent-activity-list" class="activity-list"></ul>
-              </details>
             </div>
-          </div>
-          <div id="git-footer" class="git-footer" hidden>
-            <span id="git-footer-text"></span
-            ><button id="copy-diff" class="quiet small-text">Copy diff</button>
-          </div>
-        </section>
-        <section id="panel-selection" class="panel" hidden>
-          <div class="panel-row">
-            <button class="quiet back-button" data-back="comments">
-              ← Notes
-            </button>
-            <span class="muted">Esc to close</span>
-          </div>
-          <div class="panel-scroll">
-            <div id="selection-empty" class="first-run small">
-              <h2>Every element has an address.</h2>
-              <p>
-                Choose something in the recording or in the element list. Your
-                agent gets its HTML, files and moment.
-              </p>
-              <button id="select-start" class="button secondary small">
-                Select an element
-              </button>
-            </div>
-            <div id="selection-detail" hidden>
-              <div class="identity">
-                <code id="selected-id" class="ref-chip"></code>
-                <h2 id="selected-tag"></h2>
-                <dl class="facts" id="selection-facts"></dl>
-              </div>
-              <div class="handoff">
-                <span class="micro-label">Hand off</span>
-                <pre id="handoff-text"></pre>
-                <div class="button-pair">
-                  <button id="copy-agent-context" class="button primary">
-                    Copy for agent <kbd>⌘⇧C</kbd></button
-                  ><button id="comment-element" class="button mark">
-                    Add a note <kbd>C</kbd>
-                  </button>
-                </div>
-                <button id="copy-element-link" class="quiet small-text">
-                  Copy element link
-                </button>
-              </div>
-              <details class="manual-edits accordion">
-                <summary>Edit by hand</summary>
-                <label class="field-label" for="selection-text">Text</label
-                ><textarea id="selection-text" rows="3"></textarea>
-                <div class="button-row">
-                  <button id="apply-element" class="button primary small">
-                    Apply text</button
-                  ><button id="hide-element" class="button secondary small">
-                    Hide</button
-                  ><button id="reset-element" class="quiet small-text">
-                    Reset
-                  </button>
-                </div>
-                <div class="button-grid">
-                  <button id="add-zoom" class="button secondary small">
-                    + Zoom</button
-                  ><button id="add-highlight" class="button secondary small">
-                    + Highlight</button
-                  ><button id="add-animation" class="button secondary small">
-                    + Animate
-                  </button>
-                </div>
-              </details>
-              <details class="source-details accordion">
-                <summary>Captured HTML</summary>
-                <code id="selected-selector" class="selector"></code>
-                <div id="source-locations" class="source-locations"></div>
-                <button id="show-source" class="button secondary small">
-                  View captured HTML
-                </button>
-                <pre id="source-html" hidden></pre>
-              </details>
-              <details class="accordion">
-                <summary>
-                  History <span id="element-history-count" class="muted"></span>
-                </summary>
-                <div id="element-history"></div>
-              </details>
-            </div>
-          </div>
-        </section>
-        <section id="panel-timing" class="panel" hidden>
-          <div class="panel-row">
-            <button id="back-comments" class="quiet back-button">
-              ← Notes
-            </button>
-            <strong>Timing &amp; effects</strong>
-          </div>
-          <div class="panel-scroll">
-            <div id="timing-list"></div>
-            <details class="accordion" open>
-              <summary>Effects</summary>
-              <div id="effects-list"></div>
-            </details>
-            <div class="button-row">
-              <button id="save-timing" class="button primary small">
-                Save timing
-              </button>
-            </div>
-            <p class="hint">
-              Narration follows its scene. Effect times stay where you placed
-              them.
-            </p>
           </div>
         </section>
       </aside>
@@ -636,24 +385,7 @@
       </div>
       <ul id="export-readiness" class="checklist"></ul>
       <div class="dialog-settings">
-        <label class="setting"
-          ><span>Frame rate</span
-          ><select id="export-fps">
-            <option value="24">24 fps</option>
-            <option value="30">30 fps</option>
-            <option value="60">60 fps</option>
-            <option value="12">12 fps</option>
-          </select></label
-        >
-        <label class="setting"
-          ><span
-            >Require current audio<small
-              >Same as --strict-audio in CI</small
-            ></span
-          ><span class="switch"
-            ><input type="checkbox" id="export-strict" /><i></i></span
-        ></label>
-        <div class="setting column">
+        <div class="setting">
           <span>Output</span>
           <code id="export-output" class="field mono"
             >.demohunter/replays/…/exports/</code
@@ -671,7 +403,6 @@
         ><a id="export-manifest" class="quiet small-text">Manifest</a>
       </div>
       <div class="dialog-foot">
-        <span id="export-frames" class="muted"></span>
         <div class="button-row">
           <button class="button secondary" id="export-cancel">Cancel</button
           ><button id="export-start" class="button primary" autofocus>
@@ -746,8 +477,6 @@
         <dd><kbd>C</kbd></dd>
         <dt>Script</dt>
         <dd><kbd>S</kbd></dd>
-        <dt>Find and replace</dt>
-        <dd><kbd>⌘F</kbd></dd>
         <dt>Copy for agent</dt>
         <dd><kbd>⌘⇧C</kbd></dd>
         <dt>Play or pause</dt>

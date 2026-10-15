@@ -141,25 +141,6 @@ export function elapsed(iso: string, now = Date.now()) {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} m ${s % 60} s`;
 }
 
-/** Reviewed turns are a local acknowledgement only; files do not change. */
-export class ReviewMemory {
-  private kept: Set<string>;
-  constructor(private key: string) {
-    try {
-      this.kept = new Set(JSON.parse(localStorage.getItem(key) ?? "[]"));
-    } catch {
-      this.kept = new Set();
-    }
-  }
-  has(id: string) {
-    return this.kept.has(id);
-  }
-  keep(ids: string[]) {
-    for (const id of ids) this.kept.add(id);
-    localStorage.setItem(this.key, JSON.stringify([...this.kept].slice(-500)));
-  }
-}
-
 export function threadTitle(bundle: ReplayBundle, threadId?: string) {
   const index = bundle.comments.threads.findIndex((t) => t.id === threadId);
   return index < 0

@@ -7,7 +7,7 @@ import {
 } from "../model.js";
 import type { AgentActivity } from "../contract.js";
 
-export type AgentMark = { timeMs: number; kept: boolean; title: string };
+export type AgentMark = { timeMs: number; title: string };
 type Hooks = {
   bundle: () => ReplayBundle;
   seek: (ms: number) => void;
@@ -48,7 +48,8 @@ const WRITE_TOOLS = new Set([
 ]);
 
 /** The edited timeline: ruler, scenes, camera, voice and notes lanes. Lanes are
- * positioned in percent of the output duration so they follow resizes. */
+ * positioned in percent of the output duration so they follow resizes. Camera
+ * and Notes only show when they have something in them. */
 export class Timeline {
   private lanes = $("#lanes");
   private dragging = false;
@@ -159,6 +160,7 @@ export class Timeline {
       "--camera-h",
       `${Math.max(1, rows.length) * 26 - 4}px`,
     );
+    effects.hidden = $("#camera-label").hidden = !all.length;
     // Voice
     const voice = $("#voice-track");
     voice.replaceChildren();
@@ -170,8 +172,7 @@ export class Timeline {
       const start = narrationStart(bundle.edits, segment);
       if (start === undefined || !segment.text.trim()) continue;
       const current = audioIsCurrent(bundle.project, segment);
-      // Long speech is shown up to the next segment; the Script fit meter
-      // reports the overrun.
+      // Long speech is shown up to the next segment.
       const next = starts.find((t) => t > start) ?? duration;
       const length = Math.max(
         200,
@@ -216,11 +217,13 @@ export class Timeline {
       notes.append(pin);
     }
     for (const mark of marks) {
-      const diamond = el("span", `agent-mark${mark.kept ? " kept" : ""}`);
+      const diamond = el("span", "agent-mark");
       diamond.style.left = this.pct(Math.min(duration, mark.timeMs));
       diamond.title = mark.title;
       notes.append(diamond);
     }
+    notes.hidden = $("#notes-label").hidden =
+      !bundle.comments.threads.length && !marks.length;
     this.signature = bundle.revision;
   }
   private renderRuler() {

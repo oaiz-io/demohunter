@@ -36,6 +36,9 @@ test("discovers captures and source tours, contains routes, isolates project edi
     expect(
       response.recordings.find((r: any) => r.path === "broken").error,
     ).toContain("Invalid replay");
+    // Studio does not record; capture stays in the CLI.
+    for (const route of ["/api/machine", "/api/record"])
+      expect((await fetch(app.url + route)).status).toBe(404);
     const first = response.recordings.find((r: any) => r.path === "project"),
       second = response.recordings.find((r: any) => r.path === "other");
     const base = `${app.url}/projects/${first.id}`;

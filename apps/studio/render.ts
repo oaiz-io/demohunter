@@ -87,15 +87,33 @@ export async function renderReplayFrame(
     outputMs?: number;
     elementRef?: string;
     expectedRevision?: string;
+    timeoutMs?: number;
   } = {},
 ) {
-  const renderer = await openReplayRenderer(dir, options.expectedRevision);
+  // Frames share one global queue; a render that never settles (for example
+  // when the project folder is replaced mid-render) must not block it.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("Frame render timed out.")),
+      options.timeoutMs ?? 60_000,
+    );
+  });
+  const opening = openReplayRenderer(dir, options.expectedRevision);
+  let renderer: Awaited<typeof opening> | undefined;
   try {
+    renderer = await Promise.race([opening, timeout]);
     const outputMs = options.outputMs ?? 0;
-    const bytes = await renderer.frame(outputMs);
+    const bytes = await Promise.race([renderer.frame(outputMs), timeout]);
     await renderer.checkRevision();
     return { bytes, revision: renderer.bundle.revision, outputMs };
   } finally {
-    await renderer.close();
+    clearTimeout(timer);
+    if (renderer) await renderer.close().catch(() => {});
+    else
+      void opening.then(
+        (late) => late.close().catch(() => {}),
+        () => {},
+      );
   }
 }

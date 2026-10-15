@@ -1,4 +1,5 @@
 import { initializeShell } from "./shell.js";
+import { NarrationPlayback } from "./audio.js";
 import { projectUrl } from "./transport.js";
 import { AgentFeedback } from "./feedback.js";
 import {
@@ -9,12 +10,9 @@ import {
   totalDuration,
   sourceToOutput,
   clipStart,
-  narrationSchema,
   sampleAnimation,
-  type NarrationSegment,
   type ReplayBundle,
   type Target,
-  type ReplayEdits,
 } from "../model.js";
 import type { Replayer, eventWithTime } from "rrweb";
 import { TranscriptEditor, type ScriptPatch } from "./transcript.js";
@@ -22,7 +20,6 @@ import { AgentWorkbench, toast, type WorkspaceData } from "./workbench.js";
 import { parseReference } from "../links.js";
 import { Timeline, clockMs } from "./timeline.js";
 import type { HistoryItem } from "./agent.js";
-import type { GitStatus } from "../git.js";
 import type { AgentActivity } from "../contract.js";
 
 declare global {
@@ -37,21 +34,12 @@ declare global {
 }
 const $ = <T extends HTMLElement = HTMLElement>(selector: string): T =>
   document.querySelector<T>(selector)!;
-const fmt = (ms: number): string =>
-  `${Math.floor(ms / 60000)
-    .toString()
-    .padStart(2, "0")}:${Math.floor((ms / 1000) % 60)
-    .toString()
-    .padStart(2, "0")}`;
-const input = (selector: string) => $<HTMLInputElement>(selector);
 let bundle: ReplayBundle,
   events: eventWithTime[],
   replayer: Replayer | undefined;
 let position = 0,
   playing = false,
-  speed = 1,
-  lastTick = 0,
-  inspecting = true;
+  lastTick = 0;
 let interactionMode: "select" | "comment" = "select";
 initializeShell();
 if ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
@@ -72,9 +60,7 @@ if ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
     node.hidden = !inLibrary;
   if (inLibrary) $<HTMLAnchorElement>(".crumb-link").href = "/";
 }
-let statusHistory: HistoryItem[] = [],
-  statusGit: GitStatus | undefined,
-  lastFollowed = "";
+let statusHistory: HistoryItem[] = [];
 let selection:
   | {
       nodeId: number;
@@ -95,12 +81,11 @@ let lastSource = -1,
 let manualError = "",
   fileError = "",
   jobError = "";
-const audio = new Map<string, HTMLAudioElement>();
+const narrationPlayback = new NarrationPlayback(report);
+let audioNeedsSeek = true;
 let workspaceData: WorkspaceData, workbench: AgentWorkbench;
 let timeline: Timeline | undefined;
-let voiceBase: string | undefined;
 let hoverRef: string | undefined,
-  voiceDirty = false,
   firstSnapshotMs = 0,
   lastCommand = "";
 const feedback = new AgentFeedback((ref) => boxOf({ ref }), selectRef);
@@ -112,17 +97,10 @@ $("#export-close").onclick = () =>
   $<HTMLDialogElement>("#export-dialog").close();
 $("#export-cancel").onclick = () =>
   $<HTMLDialogElement>("#export-dialog").close();
-$("#export-fps").onchange = () => renderExportReadiness();
 $("#export-start").onclick = () =>
   void transcript
     .flushAll()
-    .then(() =>
-      api("/api/export", {
-        revision: bundle.revision,
-        fps: Number(input("#export-fps").value),
-        strictAudio: input("#export-strict").checked,
-      }),
-    )
+    .then(() => api("/api/export", { revision: bundle.revision }))
     .then(() => {
       $("#export-status").textContent = "Preparing saved replay…";
       $("#export-progress").hidden = false;
@@ -172,10 +150,6 @@ const transcript = new TranscriptEditor($("#narration-list"), {
       await reload();
       return current;
     }),
-  preview: (time) => {
-    seek(time);
-    setPlaying(true);
-  },
   regenerate: async (ids) => {
     setPlaying(false);
     await api("/api/narrate", { segmentIds: ids });
@@ -200,20 +174,11 @@ const transcript = new TranscriptEditor($("#narration-list"), {
 
 function updateSaveIndicator(): void {
   const count = transcript.dirtyCount;
-  const text = [
-    count ? `${count} unsaved script change${count === 1 ? "" : "s"}` : "",
-    voiceDirty ? "Unsaved voice settings" : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  $("#save-indicator").textContent = text;
-  $("#save-indicator").hidden = !text;
+  $("#save-indicator").textContent = count
+    ? `${count} unsaved script change${count === 1 ? "" : "s"}`
+    : "";
+  $("#save-indicator").hidden = !count;
 }
-$("#discard-voice").onclick = () => {
-  voiceDirty = false;
-  renderPanels();
-  updateSaveIndicator();
-};
 
 function replaySource(): number {
   return Math.max(firstSnapshotMs + 1, outputToSource(bundle.edits, position));
@@ -245,13 +210,14 @@ function report(error: unknown): void {
   showErrors();
 }
 function pauseAudio(): void {
-  for (const player of audio.values()) player.pause();
+  narrationPlayback.pause();
 }
 function setPlaying(value: boolean): void {
   if (!bundle) return;
   if (value && position >= totalDuration(bundle.edits) - 1) position = 0;
   playing = value;
-  $("#select-layer").hidden = playing || !inspecting;
+  audioNeedsSeek = true;
+  $("#select-layer").hidden = playing;
   lastTick = performance.now();
   $("#play")
     .querySelector("use")!
@@ -268,6 +234,7 @@ function seek(ms: number): void {
   position = Math.max(0, Math.min(totalDuration(bundle.edits), ms));
   lastTick = performance.now();
   lastSource = -1;
+  audioNeedsSeek = true;
   replayer?.pause(replaySource());
   update();
 }
@@ -431,7 +398,13 @@ function drawEffects(): void {
       width: `${hoverBox.width}px`,
       height: `${hoverBox.height}px`,
     });
-  $("#comment-pins").replaceChildren();
+  // Keep pin nodes between preview frames so pointer/keyboard clicks can finish.
+  const pinContainer = $("#comment-pins");
+  const previousPins = new Map(
+    [...pinContainer.querySelectorAll<HTMLButtonElement>(".comment-pin")].map(
+      (pin) => [pin.dataset.threadId!, pin] as const,
+    ),
+  );
   if (!renderMode)
     for (const [i, thread] of bundle.comments.threads.entries()) {
       if (
@@ -442,7 +415,14 @@ function drawEffects(): void {
         continue;
       const target = boxOf({ ref: thread.elementRef });
       if (!target) continue;
-      const pin = document.createElement("button");
+      let pin = previousPins.get(thread.id);
+      previousPins.delete(thread.id);
+      if (!pin) {
+        pin = document.createElement("button");
+        pin.dataset.threadId = thread.id;
+        pin.onclick = () => workbench.openThread(thread.id);
+        pinContainer.append(pin);
+      }
       pin.className = `comment-pin${thread.elementRef === selection?.elementRef ? " active" : ""}`;
       pin.textContent = String(i + 1);
       pin.title = thread.body;
@@ -457,9 +437,8 @@ function drawEffects(): void {
         left: `${target.x + target.width + 2}px`,
         top: `${below ? target.y + target.height - 6 : target.y + 6}px`,
       });
-      pin.onclick = () => workbench.openThread(thread.id);
-      $("#comment-pins").append(pin);
     }
+  for (const pin of previousPins.values()) pin.remove();
 }
 /** The selection toolbar floats under (or above) the selected element, inside
  * the canvas, without covering the element itself. */
@@ -467,7 +446,6 @@ function placeToolbar(visible: boolean): void {
   const toolbar = $("#selection-toolbar");
   if (!visible || (playing && !renderMode)) {
     toolbar.hidden = true;
-    $("#toolbar-edit-menu").hidden = true;
     return;
   }
   toolbar.hidden = false;
@@ -556,47 +534,8 @@ function applyAnimations(): void {
   }
 }
 function syncAudio(): void {
-  for (const segment of bundle.narration.segments) {
-    const start = narrationStart(bundle.edits, segment);
-    const ready = segment.audio && audioIsCurrent(bundle.project, segment);
-    let player = audio.get(segment.id);
-    if (!ready || start === undefined) {
-      player?.pause();
-      continue;
-    }
-    const url = new URL(
-      projectUrl(`/files/${segment.audio!.path}`),
-      location.href,
-    ).href;
-    if (!player || player.src !== url) {
-      player?.pause();
-      player = new Audio(url);
-      player.preload = "auto";
-      audio.set(segment.id, player);
-    }
-    const elapsed = position - start;
-    if (elapsed < 0 || elapsed >= segment.audio!.durationMs) {
-      player.pause();
-      continue;
-    }
-    player.playbackRate = speed;
-    if (Math.abs(player.currentTime * 1000 - elapsed) > 180) {
-      try {
-        player.currentTime = elapsed / 1000;
-      } catch {
-        /* Wait for metadata. */
-      }
-    }
-    if (playing && player.paused)
-      void player.play().catch((error) => {
-        if (error.name !== "AbortError") {
-          manualError =
-            "Audio could not play. Check the audio file and click Play again.";
-          showErrors();
-        }
-      });
-    if (!playing) player.pause();
-  }
+  narrationPlayback.sync(bundle, position, playing, audioNeedsSeek);
+  audioNeedsSeek = false;
 }
 function update(): void {
   if (!bundle || !replayer) return;
@@ -610,7 +549,7 @@ function update(): void {
     if (holding) {
       if (lastSource !== source) replayer.pause(source);
     } else {
-      const rate = ((next - source) / 20) * speed;
+      const rate = (next - source) / 20;
       if (
         lastSource < 0 ||
         Math.abs(replayer.getCurrentTime() - source) > 180 ||
@@ -723,7 +662,7 @@ async function reload(): Promise<void> {
     $("#project-title").textContent = bundle.project.title;
     document.title = `${bundle.project.title} · DemoHunter Studio`;
     $("#file-revision").textContent = bundle.revision.slice(0, 8);
-    renderGitState();
+    renderSaveState();
     $("#stage-loading").hidden = true;
     if (!workbench)
       workbench = new AgentWorkbench({
@@ -765,119 +704,10 @@ async function reload(): Promise<void> {
   }
 }
 function renderPanels(): void {
-  $("#timing-list").replaceChildren();
-  $("#effects-list").replaceChildren();
-  let offset = 0;
-  for (const [i, clip] of bundle.edits.clips.entries()) {
-    const start = offset;
-    offset += clipDuration(clip);
-    const title =
-      bundle.narration.segments.find((s) => s.clipId === clip.id)?.title ??
-      `Scene ${i + 1}`;
-    const card = document.createElement("div");
-    card.className = "timing-card";
-    card.dataset.id = clip.id;
-    const top = document.createElement("div");
-    top.className = "card-top";
-    const label = document.createElement("span");
-    label.textContent = title;
-    top.append(label);
-    const jump = document.createElement("button");
-    jump.textContent = clockMs(start);
-    jump.className = "mono";
-    jump.onclick = () => seek(start);
-    top.append(jump);
-    card.append(top);
-    const fields = document.createElement("div");
-    fields.className = "timing-fields";
-    for (const [key, name, value] of [
-      ["sourceStartMs", "Start", clip.sourceStartMs / 1000],
-      ["sourceEndMs", "End", clip.sourceEndMs / 1000],
-      ["rate", "Speed", clip.rate],
-      ["holdMs", "Hold", clip.holdMs / 1000],
-    ] as const) {
-      const field = document.createElement("label");
-      field.textContent = name;
-      const control = document.createElement("input");
-      control.type = "number";
-      control.step = "0.1";
-      control.min = "0";
-      control.value = String(Math.round(value * 1000) / 1000);
-      control.dataset.field = key;
-      control.setAttribute("aria-label", `${name} for ${clip.id}`);
-      field.append(control);
-      fields.append(field);
-    }
-    card.append(fields);
-    $("#timing-list").append(card);
-  }
   transcript.render(bundle);
   workbench.render();
   timeline?.render(workbench.agentMarks());
   renderScriptStatus();
-  $("#voice-settings").textContent = JSON.stringify(
-    bundle.project.tts,
-    null,
-    2,
-  );
-  if (!voiceDirty) {
-    voiceBase = JSON.stringify(bundle.project.tts);
-    $<HTMLSelectElement>("#tts-provider").value = bundle.project.tts.provider;
-    input("#tts-voice").value = bundle.project.tts.voice;
-    input("#tts-model").value = bundle.project.tts.model;
-    input("#tts-language").value = bundle.project.tts.language ?? "";
-    $<HTMLTextAreaElement>("#tts-instructions").value =
-      bundle.project.tts.instructions;
-  }
-  for (const [kind, effects] of [
-    ["camera", bundle.edits.camera],
-    ["highlights", bundle.edits.highlights],
-    ["animations", bundle.edits.animations ?? []],
-  ] as const)
-    for (const effect of effects) {
-      const row = document.createElement("div");
-      row.className = "effect-item";
-      const label = document.createElement("span");
-      label.textContent = `${kind === "camera" ? "Zoom" : kind === "highlights" ? "Highlight" : "Animation"} · ${fmt(effect.startMs)}–${fmt(effect.endMs)}`;
-      const remove = document.createElement("button");
-      remove.textContent = "×";
-      remove.setAttribute("aria-label", `Remove ${effect.id}`);
-      remove.onclick = () => {
-        const next = structuredClone(bundle.edits);
-        if (kind === "camera")
-          next.camera = next.camera.filter((e) => e.id !== effect.id);
-        else if (kind === "highlights")
-          next.highlights = next.highlights.filter((e) => e.id !== effect.id);
-        else
-          next.animations = next.animations?.filter((e) => e.id !== effect.id);
-        void save("edits.json", next).catch(report);
-      };
-      row.append(label, remove);
-      $("#effects-list").append(row);
-    }
-  renderSelection();
-}
-function renderSelection(): void {
-  $("#element-tab").hidden = !selection;
-  $("#selection-empty").hidden = !!selection;
-  $("#selection-detail").hidden = !selection;
-  if (!selection) return;
-  $("#selected-tag").textContent =
-    workspaceData?.index.elements.find((e) => e.ref === selection?.elementRef)
-      ?.name ?? `<${selection.tag}>`;
-  $("#selected-id").textContent =
-    selection.elementRef ??
-    `doc ${selection.documentId} · node ${selection.nodeId}`;
-  $("#selected-selector").textContent = selection.selector;
-  $<HTMLTextAreaElement>("#selection-text").value =
-    bundle.edits.elements.find(
-      (e) =>
-        (e.target.ref === selection!.elementRef &&
-          selection!.elementRef !== undefined) ||
-        (e.target.nodeId === selection!.nodeId &&
-          (e.target.documentId ?? 1) === selection!.documentId),
-    )?.text ?? selection.text;
-  workbench?.selectionChanged();
 }
 function tab(name: string): void {
   $(".workspace").classList.remove("focus-mode");
@@ -890,26 +720,13 @@ function tab(name: string): void {
   for (const panel of document.querySelectorAll<HTMLElement>(".panel"))
     panel.hidden = panel.id !== `panel-${name}`;
 }
-async function save(
-  file: "edits.json" | "narration.json" | "project.json" | "comments.json",
-  value: unknown,
-): Promise<void> {
-  manualError = "";
-  await api("/api/save", { file, value, revision: bundle.revision });
-  await reload();
-}
 function chooseTool(mode: "select" | "comment"): void {
   interactionMode = mode;
-  inspecting = true;
   setPlaying(false);
   document.body.dataset.tool = mode;
   $("#select-layer").hidden = false;
   $("#inspect-toggle").setAttribute("aria-pressed", String(mode === "select"));
   $("#tool-comment").setAttribute("aria-pressed", String(mode === "comment"));
-  $("#canvas-instruction").textContent =
-    mode === "comment"
-      ? "Click an element to add a note"
-      : "Paused · click anything to select it";
   if (mode === "comment") tab("comments");
   drawEffects();
 }
@@ -917,8 +734,7 @@ function clearSelection(): void {
   selection = undefined;
   hoverRef = undefined;
   chooseTool("select");
-  if (!$("#panel-selection").hidden) tab("comments");
-  renderSelection();
+  workbench?.selectionChanged();
   drawEffects();
   void api("/api/selection", { clear: true })
     .then(() => publishPreview())
@@ -926,16 +742,8 @@ function clearSelection(): void {
 }
 
 $("#play").onclick = () => setPlaying(!playing);
-$("#restart").onclick = () => seek(0);
-$("#speed").onchange = () => {
-  speed = Number($<HTMLSelectElement>("#speed").value);
-  lastSource = -1;
-};
 $("#inspect-toggle").onclick = () => chooseTool("select");
 $("#tool-comment").onclick = () => chooseTool("comment");
-$("#select-start").onclick = () => {
-  chooseTool("select");
-};
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-tab]"))
   button.onclick = () => tab(button.dataset.tab!);
 function pickNode(event: MouseEvent): Element | null {
@@ -957,11 +765,7 @@ function persistSelection(): void {
     outputMs: position,
   }).catch(report);
 }
-function selectRef(
-  ref: string,
-  time?: number,
-  options: { inspect?: boolean } = {},
-): void {
+function selectRef(ref: string, time?: number): void {
   const record = workspaceData?.index.elements.find((e) => e.ref === ref);
   if (!record) {
     report(new Error("This element is not part of this capture."));
@@ -981,9 +785,7 @@ function selectRef(
     text: (node?.textContent ?? record.text).trim().slice(0, 4000),
     attributes: record.attributes,
   };
-  // Selecting shows the toolbar; the Element panel opens on Inspect.
-  if (options.inspect) tab("selection");
-  renderSelection();
+  workbench.selectionChanged();
   drawEffects();
   persistSelection();
 }
@@ -1013,7 +815,7 @@ $("#select-layer").onmousemove = (event: MouseEvent) => {
 $("#select-layer").onmouseleave = () => {
   hoverRef = undefined;
 };
-/** Bring an element into view without selecting it (agent follow/show). */
+/** Bring an element into view without selecting it (Show on canvas). */
 function showElement(ref: string): void {
   const record = workspaceData?.index.elements.find((e) => e.ref === ref);
   if (!record) return;
@@ -1029,129 +831,7 @@ function showElement(ref: string): void {
 }
 // Selection toolbar ---------------------------------------------------------
 $("#toolbar-note").onclick = () => workbench.focusComposer();
-$("#toolbar-copy").onclick = () =>
-  void workbench.copyReference(true).catch(report);
-$("#toolbar-inspect").onclick = () => tab("selection");
-$("#toolbar-edit").onclick = () => {
-  const menu = $("#toolbar-edit-menu");
-  menu.hidden = !menu.hidden;
-  $("#toolbar-edit").setAttribute("aria-expanded", String(!menu.hidden));
-};
-for (const button of document.querySelectorAll<HTMLButtonElement>(
-  "#toolbar-edit-menu [data-edit]",
-))
-  button.onclick = () => {
-    $("#toolbar-edit-menu").hidden = true;
-    $("#toolbar-edit").setAttribute("aria-expanded", "false");
-    const action = button.dataset.edit;
-    if (action === "text") {
-      tab("selection");
-      $<HTMLDetailsElement>(".manual-edits").open = true;
-      $<HTMLTextAreaElement>("#selection-text").focus();
-    } else if (action === "hide") void editSelection("hide").catch(report);
-    else if (action === "zoom") addEffect("camera");
-    else if (action === "highlight") addEffect("highlights");
-    else if (action === "animate") $("#add-animation").click();
-  };
-document.addEventListener("pointerdown", (event) => {
-  if (!(event.target as HTMLElement).closest(".toolbar-menu"))
-    $("#toolbar-edit-menu").hidden = true;
-});
-// Find and replace ------------------------------------------------------------
-function findMatches(query: string) {
-  if (!query || !workspaceData) return [];
-  const q = query.toLowerCase();
-  const overrides = new Map(
-    bundle.edits.elements
-      .filter((e) => e.target.ref && e.text !== undefined)
-      .map((e) => [e.target.ref!, e.text!]),
-  );
-  const elements = workspaceData.index.elements.filter((e) =>
-    (overrides.get(e.ref) ?? e.text).toLowerCase().includes(q),
-  );
-  const refs = new Set(elements.map((e) => e.ref));
-  // Leaf matches only: a parent's text includes its children's text.
-  return elements
-    .filter((e) => !e.children.some((child) => refs.has(child)))
-    .map((e) => ({ record: e, text: overrides.get(e.ref) ?? e.text }));
-}
-function renderFind(): void {
-  const query = input("#find-input").value.trim();
-  const matches = findMatches(query);
-  const root = $("#find-results");
-  root.replaceChildren();
-  for (const match of matches.slice(0, 40)) {
-    const row = document.createElement("button");
-    row.className = "find-result";
-    const text = document.createElement("span");
-    const at = match.text.toLowerCase().indexOf(query.toLowerCase());
-    const start = Math.max(0, at - 24);
-    text.append(
-      document.createTextNode((start ? "…" : "") + match.text.slice(start, at)),
-    );
-    const mark = document.createElement("mark");
-    mark.textContent = match.text.slice(at, at + query.length);
-    text.append(
-      mark,
-      document.createTextNode(
-        match.text.slice(at + query.length, at + query.length + 40),
-      ),
-    );
-    const ref = document.createElement("span");
-    ref.className = "mono muted";
-    ref.textContent = match.record.ref;
-    row.append(text, ref);
-    row.onclick = () => selectRef(match.record.ref);
-    root.append(row);
-  }
-  $("#find-count").textContent = query
-    ? `${matches.length} match${matches.length === 1 ? "" : "es"}${matches.length > 40 ? " · showing 40" : ""}`
-    : "Text edits apply in every scene.";
-  $<HTMLButtonElement>("#replace-all").disabled = !query || !matches.length;
-}
-function toggleFind(open?: boolean): void {
-  const panel = $("#find-panel");
-  panel.hidden = !(open ?? panel.hidden);
-  $("#find-toggle").setAttribute("aria-pressed", String(!panel.hidden));
-  if (!panel.hidden) {
-    renderFind();
-    input("#find-input").focus();
-    input("#find-input").select();
-  }
-}
-$("#find-toggle").onclick = () => toggleFind();
-input("#find-input").oninput = renderFind;
-$("#find-input").addEventListener("keydown", (event) => {
-  if (event.key === "Escape") toggleFind(false);
-});
-$("#replace-all").onclick = () => {
-  const query = input("#find-input").value.trim();
-  const replacement = input("#replace-input").value;
-  const matches = findMatches(query);
-  if (!matches.length) return;
-  const next = structuredClone(bundle.edits);
-  const pattern = new RegExp(
-    query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-    "gi",
-  );
-  for (const match of matches) {
-    const id = `edit-${match.record.ref}`;
-    let edit = next.elements.find((e) => e.id === id);
-    if (!edit) {
-      edit = { id, target: { ref: match.record.ref } };
-      next.elements.push(edit);
-    }
-    edit.text = match.text.replace(pattern, replacement);
-  }
-  void save("edits.json", next)
-    .then(() => {
-      toast(
-        `Replaced text in ${matches.length} element${matches.length === 1 ? "" : "s"}`,
-      );
-      renderFind();
-    })
-    .catch(report);
-};
+$("#toolbar-copy").onclick = () => void workbench.copyReference().catch(report);
 // Script audio status ----------------------------------------------------------
 function renderScriptStatus(): void {
   const segments = bundle.narration.segments.filter(
@@ -1168,32 +848,22 @@ function renderScriptStatus(): void {
   $("#audio-status-title").textContent = missing
     ? `${missing} segment${missing === 1 ? "" : "s"} need${missing === 1 ? "s" : ""} audio`
     : "All audio is current";
-  const key =
-    bundle.project.tts.provider === "openai"
-      ? "OPENAI_API_KEY"
-      : "ELEVENLABS_API_KEY";
-  $("#audio-status-detail").textContent = missing
-    ? `${[stale.length ? `${stale.length} stale` : "", draft.length ? `${draft.length} draft` : ""].filter(Boolean).join(", ")}. Uses ${key} from the service environment. Cached segments do not cost credits.`
-    : `Regenerate only after you change the text or voice.`;
+  $("#audio-status-detail").textContent = [
+    stale.length ? `${stale.length} stale` : "",
+    draft.length ? `${draft.length} draft` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   $("#regenerate").textContent = missing
     ? `Regenerate ${missing}`
     : "Regenerate all";
   $("#regenerate").className =
     `button small ${missing ? "primary" : "secondary"}`;
-  $("#voice-label").textContent =
-    `${bundle.project.tts.provider === "openai" ? "OpenAI" : "ElevenLabs"} · ${bundle.project.tts.voice}`;
 }
-$("#voice-open").onclick = () => {
-  const details = $<HTMLDetailsElement>("#voice-details");
-  details.open = !details.open;
-};
 // Export readiness -------------------------------------------------------------
 function renderExportReadiness(): void {
   const duration = totalDuration(bundle.edits);
-  const fps = Number(input("#export-fps").value);
   $("#export-revision").textContent = `rev ${bundle.revision.slice(0, 8)}`;
-  $("#export-frames").textContent =
-    `${Math.ceil((duration * fps) / 1000)} frames at ${fps} fps`;
   $("#export-output").textContent =
     `${workspaceData.projectDir.replace(/^.*\/(\.demohunter\/)/, "$1")}/exports/export-…`;
   const rows: {
@@ -1286,73 +956,12 @@ function renderExportReadiness(): void {
     }),
   );
 }
-// Header git state ----------------------------------------------------------------
-function renderGitState(error?: string): void {
+// Header save state ---------------------------------------------------------------
+function renderSaveState(error?: string): void {
   const status = $("#live-status");
-  const git = statusGit ?? workspaceData?.git;
-  if (git?.repository) {
-    $("#repo-name").textContent = git.repository;
-    $("#repo-name").hidden = false;
-  }
-  $("#git-branch").hidden = !git?.branch;
-  $("#git-branch").textContent = git?.branch ? `⎇ ${git.branch}` : "";
-  if (error) {
-    status.dataset.state = "error";
-    status.textContent = error;
-  } else if (!git?.repository) {
-    status.dataset.state = "saved";
-    status.textContent = "Saved to files";
-  } else if (git.ignored) {
-    status.dataset.state = "saved";
-    status.textContent = "Saved · not in git";
-  } else if (git.changed.length) {
-    status.dataset.state = "changed";
-    status.textContent = `${git.changed.length} file${git.changed.length === 1 ? "" : "s"} changed`;
-  } else {
-    status.dataset.state = "saved";
-    status.textContent = "Committed";
-  }
-  status.title = git?.changed.length ? git.changed.slice(0, 20).join("\n") : "";
+  status.dataset.state = error ? "error" : "saved";
+  status.textContent = error ?? "Saved";
 }
-async function editSelection(action: "text" | "hide" | "reset"): Promise<void> {
-  if (!selection) return;
-  const next = structuredClone(bundle.edits);
-  const id = selection.elementRef
-    ? `edit-${selection.elementRef}`
-    : `element-${selection.documentId}-${selection.nodeId}`;
-  let edit = next.elements.find((e) => e.id === id);
-  if (action === "reset")
-    next.elements = next.elements.filter((e) => e.id !== id);
-  else {
-    if (!edit) {
-      edit = { id, target: selectionTarget() };
-      next.elements.push(edit);
-    }
-    if (action === "text")
-      edit.text = $<HTMLTextAreaElement>("#selection-text").value;
-    if (action === "hide") edit.hidden = true;
-  }
-  await save("edits.json", next);
-}
-$("#apply-element").onclick = () => void editSelection("text").catch(report);
-$("#hide-element").onclick = () => void editSelection("hide").catch(report);
-$("#reset-element").onclick = () => void editSelection("reset").catch(report);
-function addEffect(kind: "camera" | "highlights"): void {
-  if (!selection) return;
-  const next = structuredClone(bundle.edits);
-  const startMs = Math.min(position, Math.max(0, totalDuration(next) - 1));
-  const base = {
-    id: `${kind}-${Date.now()}`,
-    startMs,
-    endMs: Math.min(totalDuration(next), startMs + 3000),
-    target: selectionTarget(),
-  };
-  if (kind === "camera") next.camera.push({ ...base, scale: 1.8 });
-  else next.highlights.push({ ...base, color: "#7484f7", padding: 8 });
-  void save("edits.json", next).catch(report);
-}
-$("#add-zoom").onclick = () => addEffect("camera");
-$("#add-highlight").onclick = () => addEffect("highlights");
 async function saveScript(): Promise<void> {
   await transcript.flushAll();
 }
@@ -1387,77 +996,6 @@ $("#add-segment").onclick = () =>
     await reload();
     toast("Narration segment added");
   }).catch(report);
-for (const field of document.querySelectorAll<
-  HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
->(".voice-form input,.voice-form textarea,.voice-form select"))
-  if (field.id.startsWith("tts-"))
-    field.oninput = () => {
-      voiceDirty = true;
-      updateSaveIndicator();
-    };
-$("#save-voice").onclick = () =>
-  void queued(async () => {
-    const latest = await api<ReplayBundle>("/api/project");
-    if (JSON.stringify(latest.project.tts) !== voiceBase)
-      throw new Error(
-        "Voice settings changed elsewhere. Review project.json before saving.",
-      );
-    const provider = $<HTMLSelectElement>("#tts-provider").value as
-      "openai" | "elevenlabs";
-    latest.project.tts = {
-      ...latest.project.tts,
-      provider,
-      voice: input("#tts-voice").value.trim(),
-      model: input("#tts-model").value.trim(),
-      language: input("#tts-language").value.trim() || undefined,
-      instructions: $<HTMLTextAreaElement>("#tts-instructions").value,
-      format:
-        provider !== latest.project.tts.provider
-          ? provider === "openai"
-            ? "mp3"
-            : "mp3_44100_128"
-          : latest.project.tts.format,
-    };
-    if (provider === "openai") delete latest.project.tts.voiceSettings;
-    await api("/api/save", {
-      file: "project.json",
-      value: latest.project,
-      revision: latest.revision,
-    });
-    voiceDirty = false;
-    await reload();
-    toast("Voice settings saved; regenerate audio to hear changes");
-  }).catch(report);
-$("#add-animation").onclick = () => {
-  if (!selection) return;
-  const next = structuredClone(bundle.edits),
-    startMs = Math.min(position, totalDuration(next) - 1);
-  (next.animations ??= []).push({
-    id: `animation-${Date.now()}`,
-    target: selectionTarget(),
-    startMs,
-    endMs: Math.min(totalDuration(next), startMs + 900),
-    from: { opacity: 0, y: 12 },
-    to: { opacity: 1, y: 0 },
-    easing: "ease-in-out",
-    fill: "none",
-  });
-  void save("edits.json", next)
-    .then(() => toast("Fade & rise animation added at the playhead"))
-    .catch(report);
-};
-$("#save-timing").onclick = () => {
-  const next: ReplayEdits = structuredClone(bundle.edits);
-  for (const card of document.querySelectorAll<HTMLElement>(".timing-card")) {
-    const clip = next.clips.find((c) => c.id === card.dataset.id)!;
-    for (const field of card.querySelectorAll<HTMLInputElement>("input")) {
-      const key = field.dataset.field as
-        "sourceStartMs" | "sourceEndMs" | "holdMs" | "rate";
-      clip[key] = Number(field.value) * (key === "rate" ? 1 : 1000);
-    }
-  }
-  void save("edits.json", next).catch(report);
-};
 document.addEventListener("keydown", (event) => {
   if (
     (event.target as HTMLElement).closest(
@@ -1477,18 +1015,13 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.code === "ArrowRight") seek(position + 1000);
   if (event.code === "ArrowLeft") seek(position - 1000);
-  if ((event.metaKey || event.ctrlKey) && event.code === "KeyF") {
-    event.preventDefault();
-    toggleFind(true);
-    return;
-  }
   if (
     (event.metaKey || event.ctrlKey) &&
     event.shiftKey &&
     event.code === "KeyC"
   ) {
     event.preventDefault();
-    void workbench.copyReference(true).catch(report);
+    void workbench.copyReference().catch(report);
     return;
   }
   if (
@@ -1515,8 +1048,8 @@ document.addEventListener("keydown", (event) => {
 });
 new ResizeObserver(resize).observe($("#stage"));
 function tick(now: number): void {
-  if (playing && bundle && !reloading) {
-    position += (now - lastTick) * speed;
+  if (playing && bundle && !reloading && !narrationPlayback.buffering) {
+    position += now - lastTick;
     if (position >= totalDuration(bundle.edits)) {
       position = totalDuration(bundle.edits);
       setPlaying(false);
@@ -1537,7 +1070,6 @@ async function poll(): Promise<void> {
       command?: { id: string; elementRef?: string; outputMs: number };
       historyCount: number;
       history?: HistoryItem[];
-      git?: GitStatus;
       activity?: AgentActivity[];
       export?: {
         running: boolean;
@@ -1551,8 +1083,7 @@ async function poll(): Promise<void> {
       : "";
     jobError = status.narrationError;
     statusHistory = status.history ?? [];
-    statusGit = status.git ?? statusGit;
-    renderGitState(status.error ? "Waiting for valid files" : undefined);
+    renderSaveState(status.error ? "Waiting for valid files" : undefined);
     $<HTMLButtonElement>("#regenerate").disabled = status.narrating;
     for (const button of document.querySelectorAll<HTMLButtonElement>(
       ".segment-generate",
@@ -1575,16 +1106,7 @@ async function poll(): Promise<void> {
       );
     }
     feedback.update(status.activity ?? []);
-    workbench?.live(status.activity ?? [], statusHistory, statusGit);
-    const running = (status.activity ?? []).find((a) => a.status === "running");
-    if (
-      input("#follow-agent").checked &&
-      running?.elementRef &&
-      running.id !== lastFollowed
-    ) {
-      lastFollowed = running.id;
-      showElement(running.elementRef);
-    }
+    workbench?.live(status.activity ?? [], statusHistory);
     if ($<HTMLDialogElement>("#export-dialog").open && !status.export?.running)
       renderExportReadiness();
     if (status.revision && status.revision !== bundle?.revision) await reload();
@@ -1604,30 +1126,25 @@ async function poll(): Promise<void> {
     showErrors();
   } catch (error) {
     fileError = `Preview disconnected: ${error instanceof Error ? error.message : String(error)}`;
-    renderGitState("Disconnected");
+    renderSaveState("Disconnected");
     showErrors();
   }
   setTimeout(() => void poll(), 800);
 }
 let initialLink = !!location.hash;
-input("#follow-agent").checked =
-  localStorage.getItem("demohunter-follow-agent") === "1";
-input("#follow-agent").onchange = () =>
-  localStorage.setItem(
-    "demohunter-follow-agent",
-    input("#follow-agent").checked ? "1" : "0",
-  );
 function applyLocation(): void {
   if (!location.hash || !workspaceData) return;
   try {
     const params = new URLSearchParams(location.hash.slice(1));
-    if (params.get("element")) {
+    if (params.has("comment") || params.has("element")) {
       const reference = parseReference(location.href);
       if (reference.captureId !== workspaceData.index.captureId)
         throw new Error(
           "This link belongs to a different capture. Open that project to follow it.",
         );
-      selectRef(reference.elementRef, reference.timeMs);
+      if (reference.commentId !== undefined)
+        workbench.openThread(reference.commentId);
+      else selectRef(reference.elementRef, reference.timeMs);
     } else if (params.has("t")) {
       const time = Number(params.get("t"));
       if (Number.isFinite(time) && time >= 0) seek(time);
@@ -1682,7 +1199,7 @@ async function publishPreview(): Promise<void> {
   }
 }
 window.addEventListener("beforeunload", (event) => {
-  if (transcript.dirtyCount || voiceDirty) event.preventDefault();
+  if (transcript.dirtyCount) event.preventDefault();
 });
 window.__replayLab = {
   seek,
