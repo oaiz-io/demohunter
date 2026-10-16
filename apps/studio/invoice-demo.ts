@@ -188,6 +188,7 @@ export async function generateLocalSampleSpeech(dir: string): Promise<void> {
         origin: "local-demo",
       };
       const clip = bundle.edits.clips.find((c) => c.id === segment.clipId)!;
+      if (clip.kind === "scene") continue;
       clip.holdMs += Math.max(
         0,
         segment.offsetMs + durationMs + 600 - clipDuration(clip),

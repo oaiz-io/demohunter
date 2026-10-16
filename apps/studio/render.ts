@@ -14,7 +14,11 @@ export async function openReplayRenderer(
   const preview = await serveReplay(dir, { port: 0 });
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   try {
-    browser = await chromium.launch();
+    // Full Chromium in new headless mode renders frames ~4–6× faster than
+    // the stripped headless shell; fall back where it is not installed.
+    browser = await chromium
+      .launch({ channel: "chromium" })
+      .catch(() => chromium.launch());
     const page = await browser.newPage({
       viewport: {
         width: bundle.project.viewport.width,
@@ -35,8 +39,12 @@ export async function openReplayRenderer(
         "#viewport{left:0!important;top:0!important;transform:none!important}#selection-box,#hover-box,#agent-target,#comment-pins,.canvas-label,.replayer-mouse{display:none!important}";
       document.head.append(style);
     }, bundle.project.viewport);
+    await page.evaluate(() => (window as any).__replayLab.scenesReady());
     await page.evaluate(async () => {
-      const doc = document.querySelector("iframe")?.contentDocument;
+      const doc =
+        document.querySelector<HTMLIFrameElement>(
+          "#replay iframe",
+        )?.contentDocument;
       await doc?.fonts.ready;
       await Promise.all(
         [...(doc?.images ?? [])].map((img) => img.decode().catch(() => {})),
@@ -45,24 +53,65 @@ export async function openReplayRenderer(
     return {
       bundle,
       page,
-      frame: async (outputMs: number) => {
+      frame: async (
+        outputMs: number,
+        shot: { format?: "png" | "jpeg"; quality?: number } = {},
+      ) => {
         if (
           !Number.isFinite(outputMs) ||
           outputMs < 0 ||
           outputMs > totalDuration(bundle.edits)
         )
           throw new Error("Frame time is outside the edited timeline.");
+        // seek() updates the DOM synchronously; the screenshot itself
+        // produces a fresh frame, so no animation-frame wait is needed.
+        await page.evaluate(
+          (time) => (window as any).__replayLab.seek(time),
+          outputMs,
+        );
+        // Playwright's "disabled" mode finish()es every animation in every
+        // frame, which would freeze scene and overlay pages at their end
+        // state for the rest of the export. With scenes in the project the
+        // pages are seeked per frame (and the paused replay holds still).
+        const scene =
+          bundle.edits.clips.some((c) => c.kind === "scene") ||
+          (bundle.edits.overlays ?? []).length > 0;
+        return page.screenshot({
+          type: shot.format ?? "png",
+          quality: shot.format === "jpeg" ? (shot.quality ?? 90) : undefined,
+          animations: scene ? "allow" : "disabled",
+          timeout: 15000,
+        });
+      },
+      sceneCues: () =>
+        page.evaluate(
+          () =>
+            (window as any).__replayLab.sceneCues() as {
+              id: string;
+              src: string;
+              atMs: number;
+              volume: number;
+            }[],
+        ),
+      /** A recorded element at an output time, as standalone styled HTML. */
+      snapshot: async (outputMs: number, target: Record<string, unknown>) => {
         await page.evaluate(async (time) => {
           (window as any).__replayLab.seek(time);
           await new Promise<void>((r) =>
             requestAnimationFrame(() => requestAnimationFrame(() => r())),
           );
         }, outputMs);
-        return page.screenshot({
-          type: "png",
-          animations: "disabled",
-          timeout: 15000,
-        });
+        return page.evaluate(
+          (target) =>
+            (window as any).__replayLab.snapshot(target) as
+              | {
+                  html: string;
+                  rect: { x: number; y: number; width: number; height: number };
+                  fontsCss: string;
+                }
+              | undefined,
+          target,
+        );
       },
       checkRevision: async () => {
         if ((await loadBundle(dir)).revision !== bundle.revision)

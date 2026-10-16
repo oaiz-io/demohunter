@@ -22,7 +22,13 @@ import { clockMs } from "./timeline.js";
 export type WorkspaceData = {
   index: ElementIndex;
   projectDir: string;
-  connection: { command: string; args: string[] };
+  connection: {
+    command: string;
+    args: string[];
+    /** "workspace": the server edits whichever demo is open in Studio. */
+    scope?: "workspace" | "project";
+    name?: string;
+  };
   sourceBoundary: string;
 };
 type Hooks = {
@@ -217,6 +223,7 @@ export class AgentWorkbench {
     const bundle = this.hooks.bundle();
     const clip = bundle.edits.clips[index];
     return (
+      (clip?.kind === "scene" ? clip.title : undefined) ??
       bundle.narration.segments.find((s) => s.clipId === clip?.id)?.title ??
       `Scene ${index + 1}`
     );
@@ -1015,6 +1022,8 @@ export class AgentWorkbench {
   }
   // Connect dialog --------------------------------------------------------
   private serverName() {
+    const named = this.hooks.data().connection.name;
+    if (named) return named;
     const slug = this.hooks
       .bundle()
       .project.id.toLowerCase()
@@ -1044,6 +1053,10 @@ export class AgentWorkbench {
         ? JSON.stringify(this.mcpConfig(), null, 2)
         : this.command(client);
     $("#agent-config").textContent = JSON.stringify(this.mcpConfig(), null, 2);
+    $("#agent-dialog .dialog-lead").textContent =
+      this.hooks.data().connection.scope === "workspace"
+        ? "Run once in the repo. It edits whichever demo is open in Studio; your agent settings are not changed."
+        : "Run once in the repo. Studio does not change your agent settings.";
     const status = $("#agent-dialog-status");
     const last = this.lastAgent();
     const running = this.activity.find((a) => a.status === "running");

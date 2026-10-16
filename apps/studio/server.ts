@@ -34,6 +34,13 @@ const mime: Record<string, string> = {
   ".wav": "audio/wav",
   ".ogg": "audio/ogg",
   ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".m4a": "audio/mp4",
+  ".jpeg": "image/jpeg",
+  ".avif": "image/avif",
+  ".otf": "font/otf",
+  ".json": "application/json",
+  ".html": "text/html; charset=utf-8",
 };
 const selectionSchema = z
   .object({
@@ -72,7 +79,12 @@ function browserAssets() {
 
 export async function createReplayHandler(
   projectDir: string,
-  options: { basePath?: string; library?: boolean } = {},
+  options: {
+    basePath?: string;
+    library?: boolean;
+    /** Studio library root: agents connect to the workspace, not one demo. */
+    workspaceRoot?: string;
+  } = {},
 ) {
   const basePath = options.basePath ?? "";
   const dir = path.resolve(projectDir);
@@ -149,10 +161,27 @@ export async function createReplayHandler(
         return json(res, {
           index: workspace.index,
           projectDir: dir,
-          connection: {
-            command: process.execPath,
-            args: [path.join(here, "cli.ts"), "mcp", dir],
-          },
+          // Workspace-scoped: the MCP server edits whichever demo is open
+          // in Studio, so one connection serves every demo in the library.
+          connection: options.workspaceRoot
+            ? {
+                command: process.execPath,
+                args: [path.join(here, "cli.ts"), "mcp", options.workspaceRoot],
+                scope: "workspace",
+                name: `demohunter-${
+                  path
+                    .basename(options.workspaceRoot)
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, "-")
+                    .replace(/^-|-$/g, "")
+                    .slice(0, 40) || "studio"
+                }`,
+              }
+            : {
+                command: process.execPath,
+                args: [path.join(here, "cli.ts"), "mcp", dir],
+                scope: "project",
+              },
           sourceBoundary:
             "Captured HTML is a recording artifact. Original source locations are available only when explicitly annotated by the app.",
         });
@@ -421,8 +450,15 @@ export async function createReplayHandler(
         const relative = decodeURIComponent(
           url.pathname.slice("/files/".length),
         );
-        if (!relative.startsWith("assets/") && !relative.startsWith("audio/"))
+        if (!/^(assets|audio|scenes)\//.test(relative))
           return json(res, { error: "Unknown file." }, 404);
+        // Scene pages are project code (like tour files): inline scripts and
+        // styles run, but only local files load, so renders stay offline.
+        if (relative.startsWith("scenes/"))
+          res.setHeader(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'",
+          );
         const file = await safeFile(dir, relative);
         let data = await readFile(file);
         if (path.extname(file) === ".css" && basePath)

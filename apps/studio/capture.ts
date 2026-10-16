@@ -15,7 +15,7 @@ import { ensureFormat } from "./format.js";
 import { ensureElementIndex } from "./elements.js";
 import {
   validateBundle,
-  type Clip,
+  type RecordingClip,
   type NarrationSegment,
   type ReplayProject,
 } from "./model.js";
@@ -166,6 +166,8 @@ export async function captureReplay(
           collectFonts: true,
           maskAllInputs: true,
           recordCanvas: false,
+          // Smooth scrolls replay smoothly (rrweb's default is 100 ms).
+          sampling: { scroll: 16 },
         });
       }
     };
@@ -193,6 +195,7 @@ export async function captureReplay(
             collectFonts: true,
             maskAllInputs: true,
             recordCanvas: false,
+            sampling: { scroll: 16 },
           });
         });
       },
@@ -248,6 +251,8 @@ export async function captureReplay(
         warnings.add(`Could not bundle font: ${new URL(url).pathname}`);
         continue;
       }
+      // Bundled after all: drop the warning from the failed first attempt.
+      warnings.delete(`Could not bundle asset: ${new URL(url).pathname}`);
       const extension = /\.(woff2?|ttf|otf)(?:\?|$)/.exec(url)![1];
       assets.set(url, {
         file: `assets/${createHash("sha256").update(url).digest("hex").slice(0, 20)}.${extension}`,
@@ -312,7 +317,7 @@ export async function captureReplay(
         durationMs,
       ]),
     ].sort((a, b) => a - b);
-    const clips: Clip[] = boundaries.slice(0, -1).map((start, i) => ({
+    const clips: RecordingClip[] = boundaries.slice(0, -1).map((start, i) => ({
       id: `clip-${i + 1}`,
       sourceStartMs: start,
       sourceEndMs: boundaries[i + 1]!,

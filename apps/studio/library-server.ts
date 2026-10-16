@@ -8,6 +8,13 @@ import { LocalLibrary } from "./library.js";
 import { createReplayHandler } from "./server.js";
 import { contract } from "./contract.js";
 import { fontFile } from "./fonts.js";
+import { randomUUID } from "node:crypto";
+import { loadBundle } from "./storage.js";
+import { clearStudioSession, writeStudioSession } from "./workspace.js";
+/** A tab that has not polled for this long no longer counts as viewing.
+ * Hidden tabs may poll only once a minute under browser throttling. */
+const VIEWER_TIMEOUT_MS = 90_000,
+  SESSION_HEARTBEAT_MS = 15_000;
 export async function serveLibrary(
   root: string,
   options: { port?: number; host?: string } = {},
@@ -27,6 +34,55 @@ export async function serveLibrary(
       target: "es2022",
     })
   ).outputFiles[0]!.contents;
+  // Record which demo the person is viewing so the workspace MCP server edits
+  // that one. Opening a demo or acting in it (any POST except the periodic
+  // preview-state) claims focus; status polls keep the claim alive.
+  const serverId = randomUUID();
+  const viewers = new Map<
+    string,
+    { dir: string; host: string; seen: number; claimed: number }
+  >();
+  let shown: string | undefined,
+    shownAt = 0,
+    writing = Promise.resolve();
+  const noteViewer = (id: string, dir: string, claim: boolean, host = "") => {
+    const now = Date.now();
+    const viewer = viewers.get(id) ?? { dir, host, seen: 0, claimed: 0 };
+    viewer.seen = now;
+    viewer.host = host || viewer.host;
+    if (claim) viewer.claimed = now;
+    viewers.set(id, viewer);
+    for (const [key, v] of viewers)
+      if (now - v.seen > VIEWER_TIMEOUT_MS) viewers.delete(key);
+    const best = Math.max(...[...viewers.values()].map((v) => v.claimed));
+    const next =
+      shown && viewers.get(shown)?.claimed === best
+        ? shown
+        : [...viewers.entries()]
+            .filter(([, v]) => v.claimed === best)
+            .sort((a, b) => b[1].seen - a[1].seen)[0]![0];
+    if (next === shown && now - shownAt < SESSION_HEARTBEAT_MS) return;
+    shown = next;
+    shownAt = now;
+    const target = viewers.get(next)!;
+    writing = writing
+      .then(async () =>
+        writeStudioSession(library.root, {
+          protocolVersion: 1,
+          projectDir: path.relative(library.root, target.dir) || ".",
+          projectId: next,
+          title: await loadBundle(target.dir)
+            .then((b) => b.project.title)
+            .catch(() => path.basename(target.dir)),
+          url: target.host
+            ? `http://${target.host}/projects/${next}/`
+            : undefined,
+          updatedAt: new Date().toISOString(),
+          serverId,
+        }),
+      )
+      .catch(() => {});
+  };
   const handlers = new Map<
     string,
     Promise<Awaited<ReturnType<typeof createReplayHandler>>>
@@ -89,11 +145,21 @@ export async function serveLibrary(
         if (match[2] === "/poster.png" && req.method === "GET") {
           return send(await projectPoster(dir), "image/png");
         }
+        const sub = match[2],
+          host = req.headers.host ?? "";
+        if (req.method === "GET" && sub === "/") {
+          // Headless renders are not a person viewing the demo.
+          if (!url.searchParams.has("render")) noteViewer(id, dir, true, host);
+        } else if (req.method === "GET" && sub === "/api/status")
+          noteViewer(id, dir, url.searchParams.get("focused") === "1", host);
+        else if (req.method === "POST" && sub.startsWith("/api/"))
+          noteViewer(id, dir, sub !== "/api/preview-state", host);
         let handler = handlers.get(id);
         if (!handler) {
           handler = createReplayHandler(dir, {
             basePath: `/projects/${id}`,
             library: true,
+            workspaceRoot: library.root,
           });
           handlers.set(id, handler);
           handler.catch(() => handlers.delete(id));
@@ -126,6 +192,8 @@ export async function serveLibrary(
       await Promise.all(
         [...handlers.values()].map(async (h) => (await h).close()),
       );
+      await writing;
+      await clearStudioSession(library.root, serverId);
       // Idle keep-alive sockets would otherwise hold close() open.
       server.closeAllConnections();
       await new Promise<void>((r) => server.close(() => r()));

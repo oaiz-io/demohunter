@@ -18,7 +18,8 @@ DOM events currently use pinned rrweb 2.1.7. A different incompatible event enco
 | project.json            | Title, source viewport/duration, TTS configuration, capture warnings                                 |
 | events.json, assets/    | Original recording and bundled resources; immutable                                                  |
 | elements.json, sources/ | Versioned index and readable captured HTML; derived from the immutable capture, then stable          |
-| edits.json              | Clips, persistent element overrides, camera, highlights, optional animations                         |
+| edits.json              | Clips (recording or HTML scene), element overrides, camera, highlights, animations, overlays, audio  |
+| scenes/                 | Scene and overlay pages (HTML/CSS/JS/fonts/images); part of the content revision                     |
 | narration.json, audio/  | Script/voice overrides and portable generated audio with request identity                            |
 | comments.json           | Element/time-anchored threads, replies and resolution state; missing legacy file means empty threads |
 | overrides.css           | Persistent page styles                                                                               |
@@ -31,7 +32,7 @@ Runtime files are not canonical: selection.json, preview-state.json, preview-com
 
 ## Time and mutations
 
-All persisted times are milliseconds. Clip ranges are source time; rate and end holds map them to output time. Narration offsets are relative to a clip's output start. Camera, highlights, animation and comment times are output time. Absolute effects do not move automatically when clips are reordered or fitted. Layout-preserving hiding uses visibility; display:none reflows. Text replacement does not recompute app logic.
+All persisted times are milliseconds. A scene clip (`kind: "scene"`, `src`, `durationMs`) plays its page while the recording holds the frame where it stands (or where the next clip starts). Overlay and audio times are output time; an overlay's optional `backdrop` (`blur` px, `dim` 0–1, `easeMs`) softens the recording underneath while it is up; `scenes/lifts/` holds elements lifted from the recording (HTML with inline computed styles plus their rect); `audio.music[].offsetMs` skips into the file. Music gain = volume × fades × duck while current narration plays; preview and export share this envelope. Scene pages are pure functions of time and load only local files. Clip ranges are source time; rate and end holds map them to output time. Narration offsets are relative to a clip's output start. Camera, highlights, animation and comment times are output time. Absolute effects do not move automatically when clips are reordered or fitted. Layout-preserving hiding uses visibility; display:none reflows. Text replacement does not recompute app logic.
 
 UI/MCP mutations read an opaque revision, validate, acquire the advisory project lock and compare expectedRevision before writing. Conflicts return HTTP 409 or a clear MCP tool error. Reread and merge intent; never retry a stale whole file blindly. Tracked changes preserve up to 50 undo entries in `.history/edits.json`. Each entry may name its `author` (MCP actor, session ID, tool and target ref/thread/segment; absent for local UI/CLI writes) and a short `changes` list (kind, label, file, ref, before/after). Undo can take `steps` to undo a whole agent turn in one locked operation and refuses to overwrite later direct-file changes.
 

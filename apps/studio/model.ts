@@ -57,9 +57,10 @@ export const projectSchema = z
       .strict(),
   })
   .strict();
-export const clipSchema = z
+export const recordingClipSchema = z
   .object({
     id,
+    kind: z.literal("recording").optional(),
     sourceStartMs: ms,
     sourceEndMs: ms,
     rate: z.number().finite().min(0.1).max(10).default(1),
@@ -70,6 +71,72 @@ export const clipSchema = z
     (clip) => clip.sourceEndMs > clip.sourceStartMs,
     "Clip end must be after start.",
   );
+/** An HTML scene in the sequence (intro, outro, chapter card). Its page is a
+ * pure function of time: Studio seeks its animations on every frame. */
+export const sceneClipSchema = z
+  .object({
+    id,
+    kind: z.literal("scene"),
+    src: relativePath,
+    durationMs: ms.positive().max(120_000),
+    title: z.string().optional(),
+  })
+  .strict();
+export const clipSchema = z.union([sceneClipSchema, recordingClipSchema]);
+const overlaySchema = z
+  .object({
+    id,
+    src: relativePath,
+    startMs: ms,
+    endMs: ms,
+    title: z.string().optional(),
+    // Blur/dim the recording under the overlay (eased in and out).
+    backdrop: z
+      .object({
+        blur: z.number().finite().min(0).max(40).default(0),
+        dim: z.number().finite().min(0).max(1).default(0),
+        easeMs: ms.max(3000).default(450),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .refine((o) => o.endMs > o.startMs, "Overlay end must be after start.");
+const volume = z.number().finite().min(0).max(1);
+export const audioSchema = z
+  .object({
+    music: z
+      .array(
+        z
+          .object({
+            id,
+            src: relativePath,
+            startMs: ms.default(0),
+            endMs: ms.optional(),
+            offsetMs: ms.default(0),
+            volume: volume.default(0.3),
+            fadeInMs: ms.default(800),
+            fadeOutMs: ms.default(1500),
+            // Gain multiplier while narration plays.
+            duck: volume.default(0.35),
+          })
+          .strict(),
+      )
+      .default([]),
+    sfx: z
+      .array(
+        z
+          .object({
+            id,
+            src: relativePath,
+            atMs: ms,
+            volume: volume.default(0.7),
+          })
+          .strict(),
+      )
+      .default([]),
+  })
+  .strict();
 export const targetSchema = z
   .object({
     ref: id.optional(),
@@ -110,6 +177,8 @@ export const editsSchema = z
             scale: z.number().finite().min(1).max(4),
             x: z.number().finite().optional(),
             y: z.number().finite().optional(),
+            // Ease in/out duration; slow push-ins read as camera moves.
+            easeMs: ms.max(5000).optional(),
           })
           .strict()
           .refine(
@@ -172,6 +241,8 @@ export const editsSchema = z
           ),
       )
       .optional(),
+    overlays: z.array(overlaySchema).optional(),
+    audio: audioSchema.optional(),
   })
   .strict();
 export const narrationSchema = z
@@ -241,6 +312,13 @@ export type ReplayEdits = z.infer<typeof editsSchema>;
 export type ReplayNarration = z.infer<typeof narrationSchema>;
 export type NarrationSegment = ReplayNarration["segments"][number];
 export type Clip = z.infer<typeof clipSchema>;
+export type RecordingClip = z.infer<typeof recordingClipSchema>;
+export type SceneClip = z.infer<typeof sceneClipSchema>;
+export type Overlay = NonNullable<ReplayEdits["overlays"]>[number];
+export type ReplayAudio = z.infer<typeof audioSchema>;
+export function isScene(clip: Clip): clip is SceneClip {
+  return clip.kind === "scene";
+}
 export type Target = z.infer<typeof targetSchema>;
 export type Animation = NonNullable<ReplayEdits["animations"]>[number];
 export function sampleAnimation(
@@ -273,9 +351,12 @@ export type ReplayBundle = {
   css: string;
   comments: ReplayComments;
   revision: string;
+  /** Changes only when scene pages or audio files change. */
+  assetsRevision?: string;
 };
 
 export function clipDuration(clip: Clip): number {
+  if (isScene(clip)) return clip.durationMs;
   return (clip.sourceEndMs - clip.sourceStartMs) / clip.rate + clip.holdMs;
 }
 export function totalDuration(edits: ReplayEdits): number {
@@ -283,16 +364,43 @@ export function totalDuration(edits: ReplayEdits): number {
 }
 export function outputToSource(edits: ReplayEdits, outputMs: number): number {
   let remaining = Math.max(0, outputMs);
+  // Scenes hold the recording where it stands (or where it will start).
+  let held =
+    edits.clips.find((c): c is RecordingClip => !isScene(c))?.sourceStartMs ??
+    0;
   for (const clip of edits.clips) {
     const duration = clipDuration(clip);
-    if (remaining < duration)
+    if (isScene(clip)) {
+      if (remaining < duration) return held;
+    } else if (remaining < duration)
       return Math.min(
         clip.sourceEndMs,
         clip.sourceStartMs + remaining * clip.rate,
       );
+    else held = clip.sourceEndMs;
     remaining -= duration;
   }
-  return edits.clips.at(-1)!.sourceEndMs;
+  return held;
+}
+/** The scene (or overlay-free recording) at an output time. */
+export function sceneAt(
+  edits: ReplayEdits,
+  outputMs: number,
+): { clip: SceneClip; startMs: number; localMs: number } | undefined {
+  let start = 0;
+  for (const clip of edits.clips) {
+    const duration = clipDuration(clip);
+    if (outputMs < start + duration || clip === edits.clips.at(-1))
+      return isScene(clip)
+        ? {
+            clip,
+            startMs: start,
+            localMs: Math.min(duration, Math.max(0, outputMs - start)),
+          }
+        : undefined;
+    start += duration;
+  }
+  return undefined;
 }
 export function sourceToOutput(
   edits: ReplayEdits,
@@ -300,7 +408,11 @@ export function sourceToOutput(
 ): number | undefined {
   let output = 0;
   for (const clip of edits.clips) {
-    if (sourceMs >= clip.sourceStartMs && sourceMs <= clip.sourceEndMs)
+    if (
+      !isScene(clip) &&
+      sourceMs >= clip.sourceStartMs &&
+      sourceMs <= clip.sourceEndMs
+    )
       return output + (sourceMs - clip.sourceStartMs) / clip.rate;
     output += clipDuration(clip);
   }
@@ -352,6 +464,7 @@ export function validateBundle(value: {
   css: string;
   comments?: unknown;
   revision?: string;
+  assetsRevision?: string;
 }): ReplayBundle {
   const project = projectSchema.parse(value.project);
   const edits = editsSchema.parse(value.edits);
@@ -364,12 +477,19 @@ export function validateBundle(value: {
     ["highlights", edits.highlights],
     ["narration", narration.segments],
     ["animations", edits.animations ?? []],
+    ["overlays", edits.overlays ?? []],
+    ["music", edits.audio?.music ?? []],
+    ["sfx", edits.audio?.sfx ?? []],
     ["comments", comments.threads],
   ] as const) {
     if (new Set(entries.map((e) => e.id)).size !== entries.length)
       throw new Error(`Duplicate id in ${name}.`);
   }
-  if (edits.clips.some((clip) => clip.sourceEndMs > project.durationMs + 1))
+  if (
+    edits.clips.some(
+      (clip) => !isScene(clip) && clip.sourceEndMs > project.durationMs + 1,
+    )
+  )
     throw new Error("A clip extends beyond the captured duration.");
   // Narration anchored to a deleted clip is intentionally omitted from playback.
   return {
@@ -379,5 +499,57 @@ export function validateBundle(value: {
     css: value.css,
     comments,
     revision: value.revision ?? "",
+    assetsRevision: value.assetsRevision,
   };
+}
+
+/** Output-time spans where current narration audio plays. */
+export function voiceSpans(bundle: ReplayBundle): [number, number][] {
+  return bundle.narration.segments
+    .flatMap((segment) => {
+      const start = narrationStart(bundle.edits, segment);
+      return start !== undefined &&
+        segment.audio &&
+        audioIsCurrent(bundle.project, segment)
+        ? [[start, start + segment.audio.durationMs] as [number, number]]
+        : [];
+    })
+    .sort((a, b) => a[0] - b[0]);
+}
+const DUCK_ATTACK_MS = 180,
+  DUCK_RELEASE_MS = 450;
+/** Gain of a music bed at an output time: volume × fades × ducking under
+ * narration. Shared by the preview and the export so both mix the same. */
+export function musicGain(
+  music: ReplayAudio["music"][number],
+  outputMs: number,
+  totalMs: number,
+  voice: [number, number][],
+): number {
+  const end = Math.min(totalMs, music.endMs ?? totalMs);
+  if (outputMs < music.startMs || outputMs > end) return 0;
+  const fadeIn = music.fadeInMs
+    ? Math.min(1, (outputMs - music.startMs) / music.fadeInMs)
+    : 1;
+  const fadeOut = music.fadeOutMs
+    ? Math.min(1, (end - outputMs) / music.fadeOutMs)
+    : 1;
+  let duck = 0;
+  for (const [start, stop] of voice) {
+    if (outputMs < start - DUCK_ATTACK_MS) break;
+    const amount =
+      outputMs < start
+        ? 1 - (start - outputMs) / DUCK_ATTACK_MS
+        : outputMs <= stop
+          ? 1
+          : Math.max(0, 1 - (outputMs - stop) / DUCK_RELEASE_MS);
+    duck = Math.max(duck, amount);
+  }
+  const ease = (t: number) => t * t * (3 - 2 * t);
+  return (
+    music.volume *
+    ease(Math.max(0, fadeIn)) *
+    ease(Math.max(0, fadeOut)) *
+    (1 - (1 - music.duck) * ease(duck))
+  );
 }

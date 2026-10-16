@@ -8,6 +8,8 @@ import {
   open,
   unlink,
   mkdir,
+  readdir,
+  stat,
 } from "node:fs/promises";
 import path from "node:path";
 import { readFormat } from "./format.js";
@@ -37,6 +39,9 @@ export async function loadBundle(dir: string): Promise<ReplayBundle> {
       throw error;
     }),
   );
+  // Scene pages and audio are project content too: agents edit them directly.
+  const motion = await motionFingerprint(dir);
+  files.push(motion);
   const revision = createHash("sha256")
     .update(files.join("\0"))
     .digest("hex")
@@ -49,6 +54,10 @@ export async function loadBundle(dir: string): Promise<ReplayBundle> {
       css: files[3]!,
       comments: JSON.parse(files[4]!),
       revision,
+      assetsRevision: createHash("sha256")
+        .update(motion)
+        .digest("hex")
+        .slice(0, 16),
     });
   } catch (error) {
     throw new Error(
@@ -57,6 +66,43 @@ export async function loadBundle(dir: string): Promise<ReplayBundle> {
   }
 }
 
+/** Scene/overlay files by content, audio by size and time (they can be big). */
+async function motionFingerprint(dir: string): Promise<string> {
+  const parts: string[] = [];
+  for (const [folder, byContent] of [
+    ["scenes", true],
+    ["audio", false],
+  ] as const) {
+    for (const name of (await listFiles(path.join(dir, folder))).sort()) {
+      const file = path.join(dir, folder, name);
+      const info = await stat(file).catch(() => undefined);
+      if (!info?.isFile()) continue;
+      parts.push(
+        `${folder}/${name}:${
+          byContent
+            ? createHash("sha256")
+                .update(await readFile(file))
+                .digest("hex")
+            : `${info.size}:${Math.round(info.mtimeMs)}`
+        }`,
+      );
+    }
+  }
+  return parts.join("\n");
+}
+/** Files under a folder, without following symlinks (no loops, no escapes). */
+async function listFiles(root: string, prefix = ""): Promise<string[]> {
+  const entries = await readdir(path.join(root, prefix), {
+    withFileTypes: true,
+  }).catch(() => []);
+  const files: string[] = [];
+  for (const entry of entries) {
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...(await listFiles(root, name)));
+    else if (entry.isFile()) files.push(name);
+  }
+  return files;
+}
 export class RevisionConflict extends Error {
   readonly status = 409;
 }
@@ -107,6 +153,10 @@ export type HistoryChange = {
     | "camera"
     | "highlight"
     | "animation"
+    | "overlay"
+    | "music"
+    | "sound"
+    | "scene"
     | "clip"
     | "narration"
     | "voice"
@@ -200,6 +250,24 @@ export function describeChanges(
       before.edits.animations ?? [],
       after.edits.animations ?? [],
     ],
+    [
+      "overlay",
+      "Overlay",
+      before.edits.overlays ?? [],
+      after.edits.overlays ?? [],
+    ],
+    [
+      "music",
+      "Music",
+      before.edits.audio?.music ?? [],
+      after.edits.audio?.music ?? [],
+    ],
+    [
+      "sound",
+      "Sound",
+      before.edits.audio?.sfx ?? [],
+      after.edits.audio?.sfx ?? [],
+    ],
   ] as const) {
     const old = new Map<string, unknown>(a.map((e) => [e.id, e]));
     for (const effect of b as { id: string; target?: { ref?: string } }[])
@@ -221,6 +289,12 @@ export function describeChanges(
   }
   if (JSON.stringify(before.edits.clips) !== JSON.stringify(after.edits.clips))
     changes.push({ kind: "clip", label: "Scene timing", file: "edits.json" });
+  if (before.assetsRevision !== after.assetsRevision)
+    changes.push({
+      kind: "scene",
+      label: "Scene or audio files",
+      file: "scenes/",
+    });
   const oldSegments = new Map(before.narration.segments.map((s) => [s.id, s]));
   for (const segment of after.narration.segments) {
     const old = oldSegments.get(segment.id);

@@ -1,8 +1,18 @@
 import { ensureFormat } from "./format.js";
 import { contract } from "./contract.js";
-import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
+import { LocalLibrary } from "./library.js";
 import {
   ensureElementIndex,
   elementHtml,
@@ -11,12 +21,15 @@ import {
 } from "./elements.js";
 import { elementUri, parseReference, previewLink } from "./links.js";
 import {
+  atomicWrite,
   loadBundle,
   mutateProject,
   mutationAuthor,
+  RevisionConflict,
   writeJson,
   historySummary,
   undoProject,
+  withProjectLock,
 } from "./storage.js";
 import {
   audioIsCurrent,
@@ -109,6 +122,8 @@ export class ReplayWorkspace {
         narration: "narration.json",
         comments: "comments.json",
         css: "overrides.css",
+        scenes: "scenes/<name>.html (scene clips and overlays)",
+        audio: "audio/<name>.mp3|wav|ogg|m4a (music beds and sound effects)",
       },
       sourceBoundary:
         "HTML files are captured DOM, not original application source. Original file locations are only present when the app supplied data-demohunter-source.",
@@ -120,6 +135,11 @@ export class ReplayWorkspace {
         "camera",
         "highlights",
         "animations",
+        "scene-clips",
+        "overlays",
+        "music",
+        "sfx",
+        "scene-files",
         "narration",
         "undo",
       ],
@@ -161,7 +181,7 @@ export class ReplayWorkspace {
       : parseReference(value);
     if (parsed.captureId !== this.index.captureId)
       throw new Error(
-        "This link belongs to a different capture. Connect the agent to that project first.",
+        "This link belongs to a different capture. Open that demo in Studio or pass its `project`.",
       );
     if (parsed.commentId !== undefined) {
       const bundle = await loadBundle(this.dir);
@@ -329,4 +349,353 @@ export async function readOptional<T>(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+/** Which demo the person is viewing in Studio. The library server writes it
+ * from editor polls; the workspace MCP server reads it on every tool call. */
+export type StudioSession = {
+  protocolVersion: 1;
+  /** Project directory relative to the workspace root. */
+  projectDir: string;
+  /** Library project ID (stable hash of projectDir). */
+  projectId: string;
+  title: string;
+  url?: string;
+  updatedAt: string;
+  /** Identifies the Studio process that wrote the record. */
+  serverId?: string;
+};
+export const SESSION_STALE_MS = 120_000;
+export function sessionFile(root: string): string {
+  return path.join(root, ".demohunter", "studio", "session.json");
+}
+export function libraryProjectId(relative: string): string {
+  return createHash("sha256").update(relative).digest("hex").slice(0, 16);
+}
+export async function writeStudioSession(
+  root: string,
+  session: StudioSession,
+): Promise<void> {
+  const file = sessionFile(root);
+  await mkdir(path.dirname(file), { recursive: true });
+  // Runtime state: keep it out of git without touching the user's .gitignore.
+  await writeFile(path.join(path.dirname(file), ".gitignore"), "*\n", {
+    flag: "wx",
+  }).catch(() => {});
+  await writeJson(file, session);
+}
+export async function readStudioSession(
+  root: string,
+): Promise<StudioSession | null> {
+  try {
+    const value = JSON.parse(await readFile(sessionFile(root), "utf8"));
+    return typeof value?.projectDir === "string" &&
+      typeof value?.updatedAt === "string"
+      ? (value as StudioSession)
+      : null;
+  } catch {
+    return null;
+  }
+}
+/** Remove the record if this Studio process wrote it (Studio closing). */
+export async function clearStudioSession(
+  root: string,
+  serverId: string,
+): Promise<void> {
+  const current = await readStudioSession(root);
+  if (current?.serverId === serverId)
+    await unlink(sessionFile(root)).catch(() => {});
+}
+async function isProjectDir(dir: string): Promise<boolean> {
+  return stat(path.join(dir, "project.json"))
+    .then((s) => s.isFile())
+    .catch(() => false);
+}
+export type ProjectTarget = {
+  workspace: ReplayWorkspace;
+  dir: string;
+  /** Path relative to the workspace root ("." when bound to one project). */
+  path: string;
+  id: string;
+  title: string;
+  /** How the target was chosen. */
+  source: "bound" | "explicit" | "studio" | "reference";
+  url?: string;
+};
+/**
+ * Resolves which project an MCP tool call edits. Bound to one project when
+ * started on a project directory; otherwise workspace-scoped: an explicit
+ * `project` wins, then the demo currently open in Studio. Never guesses.
+ */
+export class ProjectTargets {
+  private cache = new Map<
+    string,
+    { key: string; workspace: Promise<ReplayWorkspace> }
+  >();
+  private library?: Promise<LocalLibrary>;
+  private constructor(
+    readonly root: string,
+    readonly bound: boolean,
+  ) {}
+  static async open(dir: string): Promise<ProjectTargets> {
+    const resolved = await realpath(path.resolve(dir));
+    if (await isProjectDir(resolved)) {
+      const targets = new ProjectTargets(resolved, true);
+      await targets.workspaceFor(resolved);
+      return targets;
+    }
+    return new ProjectTargets(resolved, false);
+  }
+  get mode(): "project" | "workspace" {
+    return this.bound ? "project" : "workspace";
+  }
+  private lib(): Promise<LocalLibrary> {
+    return (this.library ??= LocalLibrary.open(this.root));
+  }
+  /** One ReplayWorkspace per project, reopened when the capture changes. */
+  async workspaceFor(dir: string): Promise<ReplayWorkspace> {
+    const key = (
+      await Promise.all(
+        ["events.json", "elements.json"].map((name) =>
+          stat(path.join(dir, name))
+            .then((s) => `${s.size}:${s.mtimeMs}`)
+            .catch(() => "-"),
+        ),
+      )
+    ).join("|");
+    const cached = this.cache.get(dir);
+    if (cached?.key === key) return cached.workspace;
+    const workspace = ReplayWorkspace.open(dir);
+    this.cache.set(dir, { key, workspace });
+    workspace.catch(() => this.cache.delete(dir));
+    return workspace;
+  }
+  private async target(
+    dir: string,
+    source: ProjectTarget["source"],
+    url?: string,
+  ): Promise<ProjectTarget> {
+    const workspace = await this.workspaceFor(dir);
+    const relative = path.relative(this.root, dir) || ".";
+    const title = await loadBundle(dir)
+      .then((b) => b.project.title)
+      .catch(() => path.basename(dir));
+    return {
+      workspace,
+      dir,
+      path: relative,
+      id: libraryProjectId(this.bound ? "" : relative),
+      title,
+      source,
+      url,
+    };
+  }
+  /** Resolve an explicit `project` argument: a workspace-relative (or
+   * absolute) project directory, or a Studio library project ID. */
+  private async explicit(project: string): Promise<string> {
+    const value = project.trim();
+    if (this.bound) {
+      if (
+        [".", "", libraryProjectId("")].includes(value) ||
+        path.resolve(this.root, value) === this.root
+      )
+        return this.root;
+      throw new Error(
+        `This MCP server is bound to one demo (${this.root}). Re-add it with the workspace root (\`studio mcp <workspace>\`) to edit other demos.`,
+      );
+    }
+    let dir: string | undefined;
+    if (/^[a-f0-9]{16}$/.test(value)) {
+      dir = await (await this.lib()).resolve(value).catch(() => undefined);
+    }
+    if (!dir) {
+      const requested = path.resolve(this.root, value);
+      const real = await realpath(requested).catch(() => undefined);
+      if (
+        real &&
+        (real === this.root || real.startsWith(this.root + path.sep)) &&
+        (await isProjectDir(real))
+      )
+        dir = real;
+    }
+    if (!dir)
+      throw new Error(
+        `No demo matches project "${value}" in ${this.root}.\n${await this.available()}`,
+      );
+    return dir;
+  }
+  async projects() {
+    if (this.bound) {
+      const t = await this.target(this.root, "bound");
+      return [{ id: t.id, path: t.path, title: t.title }];
+    }
+    const scan = await (await this.lib()).scan();
+    return scan.recordings.map((r) => ({
+      id: r.id,
+      path: r.path,
+      title: r.title,
+      captureId: r.captureId,
+      durationMs: r.durationMs,
+      openComments: r.comments,
+      modifiedAt: r.modifiedAt,
+      ...(r.error ? { error: r.error } : {}),
+    }));
+  }
+  private async available(): Promise<string> {
+    const list = await this.projects().catch(() => []);
+    if (!list.length)
+      return "No demos found in this workspace. Capture one with `bun run studio capture <tour.ts>`.";
+    return `Available demos (pass one as \`project\`):\n${list
+      .slice(0, 25)
+      .map((p) => `- ${p.title} — project: "${p.path}" (id ${p.id})`)
+      .join("\n")}${list.length > 25 ? `\n… ${list.length - 25} more` : ""}`;
+  }
+  /** The live Studio view, if fresh and pointing at a project here. */
+  async studio(): Promise<
+    | { status: "open"; session: StudioSession; dir: string }
+    | { status: "stale" | "closed" | "missing"; session?: StudioSession }
+  > {
+    const session = await readStudioSession(this.root);
+    if (!session) return { status: "closed" };
+    if (Date.now() - Date.parse(session.updatedAt) > SESSION_STALE_MS)
+      return { status: "stale", session };
+    const dir = await realpath(
+      path.resolve(this.root, session.projectDir),
+    ).catch(() => undefined);
+    if (
+      !dir ||
+      !(dir === this.root || dir.startsWith(this.root + path.sep)) ||
+      !(await isProjectDir(dir))
+    )
+      return { status: "missing", session };
+    return { status: "open", session, dir };
+  }
+  /**
+   * Pick the project for one tool call. `captureId` (from a copied link)
+   * selects the demo that owns that capture when no project is explicit.
+   */
+  async resolve(project?: string, captureId?: string): Promise<ProjectTarget> {
+    if (this.bound)
+      return this.target(
+        project === undefined ? this.root : await this.explicit(project),
+        "bound",
+      );
+    if (project !== undefined)
+      return this.target(await this.explicit(project), "explicit");
+    const live = await this.studio();
+    const open =
+      live.status === "open"
+        ? await this.target(live.dir, "studio", live.session.url)
+        : undefined;
+    if (captureId && open?.workspace.index.captureId !== captureId) {
+      const owners = (await this.projects()).filter(
+        (p) => "captureId" in p && p.captureId === captureId,
+      );
+      if (owners.length === 1)
+        return this.target(
+          path.resolve(this.root, owners[0]!.path),
+          "reference",
+        );
+    }
+    if (open) return open;
+    const reason =
+      live.status === "stale"
+        ? `Studio last showed "${live.session!.title}" ${Math.round((Date.now() - Date.parse(live.session!.updatedAt)) / 60000)} min ago, so it is no longer a safe target.`
+        : live.status === "missing"
+          ? `Studio points at "${live.session!.projectDir}", which is no longer a demo here.`
+          : "No demo is open in DemoHunter Studio for this workspace.";
+    throw new Error(
+      `${reason} Open the demo in Studio (\`bun run studio\`) or pass \`project\` explicitly.\n${await this.available()}`,
+    );
+  }
+}
+const SCENE_FILE_LIMIT = 512 * 1024;
+const sceneExtensions = new Set([".html", ".css", ".js", ".svg", ".json"]);
+/**
+ * Write a scene page or its asset under `scenes/`. Runs under the project
+ * lock with a revision check; scene files are part of the project revision.
+ */
+export async function writeSceneFile(
+  dir: string,
+  expectedRevision: string,
+  relative: string,
+  content: string,
+): Promise<{
+  path: string;
+  bytes: number;
+  revision: string;
+  created: boolean;
+}> {
+  const parts = relative.split("/");
+  if (
+    parts[0] !== "scenes" ||
+    parts.length < 2 ||
+    relative.includes("\\") ||
+    parts.some((p) => p === "" || p === "." || p === "..")
+  )
+    throw new Error(
+      'Path must be inside scenes/, e.g. "scenes/intro.html" (no "..", absolute paths or backslashes).',
+    );
+  if (!sceneExtensions.has(path.extname(relative).toLowerCase()))
+    throw new Error("Scene files must be .html, .css, .js, .svg or .json.");
+  const bytes = Buffer.byteLength(content, "utf8");
+  if (bytes > SCENE_FILE_LIMIT)
+    throw new Error(
+      `Scene file is ${bytes} bytes; the limit is ${SCENE_FILE_LIMIT} (512 KB).`,
+    );
+  return withProjectLock(dir, async () => {
+    const before = await loadBundle(dir);
+    if (before.revision !== expectedRevision)
+      throw new RevisionConflict(
+        "The project changed. Read the latest revision before retrying; the file was not written.",
+      );
+    const root = await realpath(dir);
+    // Refuse symlinked folders so writes cannot leave the project.
+    let current = root;
+    for (const part of parts.slice(0, -1)) {
+      current = path.join(current, part);
+      const info = await lstat(current).catch(() => undefined);
+      if (!info) await mkdir(current);
+      else if (!info.isDirectory() || info.isSymbolicLink())
+        throw new Error(`${path.relative(root, current)} is not a folder.`);
+    }
+    const file = path.join(root, ...parts);
+    const existing = await lstat(file).catch(() => undefined);
+    if (existing && !existing.isFile())
+      throw new Error(`${relative} exists and is not a regular file.`);
+    await atomicWrite(file, content);
+    const after = await loadBundle(dir);
+    return {
+      path: relative,
+      bytes,
+      revision: after.revision,
+      created: !existing,
+    };
+  });
+}
+/** Project-relative files usable as scene/overlay pages and audio sources.
+ * Walks without following symlinked folders (Bun's recursive readdir does). */
+export async function projectMediaFiles(
+  dir: string,
+): Promise<{ scenes: string[]; audio: string[] }> {
+  const list = async (folder: string, pattern: RegExp) => {
+    const found: string[] = [];
+    const walk = async (relative: string, depth: number) => {
+      if (depth > 6 || found.length >= 200) return;
+      const entries = await readdir(path.join(dir, relative), {
+        withFileTypes: true,
+      }).catch(() => []);
+      for (const entry of entries) {
+        const name = `${relative}/${entry.name}`;
+        if (entry.isDirectory()) await walk(name, depth + 1);
+        else if (entry.isFile() && pattern.test(name)) found.push(name);
+      }
+    };
+    await walk(folder, 0);
+    return found.sort().slice(0, 200);
+  };
+  return {
+    scenes: await list("scenes", /\.html$/i),
+    audio: await list("audio", /\.(mp3|wav|ogg|m4a)$/i),
+  };
 }

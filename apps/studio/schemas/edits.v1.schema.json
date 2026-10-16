@@ -6,34 +6,69 @@
       "minItems": 1,
       "type": "array",
       "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^[a-zA-Z0-9_-]+$"
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "scene"
+              },
+              "src": {
+                "type": "string",
+                "minLength": 1
+              },
+              "durationMs": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 120000
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "kind", "src", "durationMs"],
+            "additionalProperties": false
           },
-          "sourceStartMs": {
-            "type": "number",
-            "minimum": 0
-          },
-          "sourceEndMs": {
-            "type": "number",
-            "minimum": 0
-          },
-          "rate": {
-            "default": 1,
-            "type": "number",
-            "minimum": 0.1,
-            "maximum": 10
-          },
-          "holdMs": {
-            "default": 0,
-            "type": "number",
-            "minimum": 0
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "recording"
+              },
+              "sourceStartMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "sourceEndMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "rate": {
+                "default": 1,
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 10
+              },
+              "holdMs": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": ["id", "sourceStartMs", "sourceEndMs"],
+            "additionalProperties": false
           }
-        },
-        "required": ["id", "sourceStartMs", "sourceEndMs"],
-        "additionalProperties": false
+        ]
       }
     },
     "elements": {
@@ -142,6 +177,11 @@
           },
           "y": {
             "type": "number"
+          },
+          "easeMs": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 5000
           }
         },
         "required": ["id", "startMs", "endMs", "scale"],
@@ -309,6 +349,125 @@
         "required": ["id", "target", "startMs", "endMs", "from", "to"],
         "additionalProperties": false
       }
+    },
+    "overlays": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "src": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "endMs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "src", "startMs", "endMs"],
+        "additionalProperties": false
+      }
+    },
+    "audio": {
+      "type": "object",
+      "properties": {
+        "music": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "src": {
+                "type": "string",
+                "minLength": 1
+              },
+              "startMs": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0
+              },
+              "endMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "offsetMs": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0
+              },
+              "volume": {
+                "default": 0.3,
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "fadeInMs": {
+                "default": 800,
+                "type": "number",
+                "minimum": 0
+              },
+              "fadeOutMs": {
+                "default": 1500,
+                "type": "number",
+                "minimum": 0
+              },
+              "duck": {
+                "default": 0.35,
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": ["id", "src"],
+            "additionalProperties": false
+          }
+        },
+        "sfx": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "src": {
+                "type": "string",
+                "minLength": 1
+              },
+              "atMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "volume": {
+                "default": 0.7,
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": ["id", "src", "atMs"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": ["clips"],

@@ -25,7 +25,7 @@ bun run studio list
 
 Studio is where you see and point; your agent (Claude Code, Codex or another MCP client) does the editing. Press `C` and click anything to add a **note**: it keeps the element and the moment. Click an element to get the selection toolbar: **Note** and **Copy for agent** (the element's reference, files and moment, ready to paste). `V` returns to selection, `⌘⇧C` copies the selection for your agent, Escape clears it. The editor has three panels: Notes, Script and Agent. Edits to the recording itself happen in code or through your agent.
 
-**Connect agent** shows the exact `claude mcp add …` and `codex mcp add …` commands (or JSON for other clients) for a server bound to this one recording, plus the prompt to start with. No agent settings are changed automatically.
+**Connect agent** shows the exact `claude mcp add …` and `codex mcp add …` commands (or JSON for other clients) for one server per repository. It edits the demo you have open in Studio (or one the agent names with `project`), plus the prompt to start with. No agent settings are changed automatically.
 
 Each note shows its stable comment ID. Click the ID to copy it, use **Copy link** to copy a link to that exact note, or use **Copy for agent** to copy the note, replies, ID, link and element context. Double-click the note text to copy the same agent context. These actions stay available after replies and resolution. Canvas, timeline and note-card pins open the matching note. Your agent can pass a copied link or comment ID to MCP `resolve_reference`.
 
@@ -34,12 +34,17 @@ While an agent works, Studio shows it from real activity records only: the title
 The **Agent** panel groups tracked agent changes into turns (one MCP session without a long pause) with a readable change list. **Undo turn** undoes the newest turn in one locked step and refuses to overwrite later direct-file edits.
 
 ```sh
-bun run studio mcp .demohunter/replays/my-demo
+bun run studio mcp            # the workspace; follows the demo open in Studio
+bun run studio kit .demohunter/replays/my-demo --mood calm
 bun run studio resolve .demohunter/replays/my-demo '<copied-element-link>'
 bun run studio contract
 ```
 
-An MCP agent can inspect selection/HTML/styles, edit elements, clips/camera/highlights/animations, handle comments, edit/regenerate narration, render screenshots and undo. Direct file changes refresh too, but cannot be attributed to an agent automatically.
+An MCP agent can inspect selection/HTML/styles, edit elements, clips/camera/highlights/animations, add HTML intro/outro scenes and overlays, music and sound effects, handle comments, edit/regenerate narration, render screenshots and undo. Direct file changes refresh too, but cannot be attributed to an agent automatically.
+
+## Scenes, music and sound
+
+Intros, outros and chapter cards are HTML pages in the demo's `scenes/` folder, placed in the timeline like clips; overlays sit on top of the recording. Studio drives every animation from the timeline, so preview and export are frame-exact. `lift` copies a real element of the recording (a card, a button) into `scenes/lifts/` so an overlay can pick it up from the page, bring it to the camera and animate it while the page blurs behind it. `kit` adds the scene helper (`scenes/kit/motion.js`) and a generated, license-free score with sound effects in the same key; the timeline's Sound track shows the music bed and every effect, including sounds a scene declares. Export mixes narration, music (ducked under the voice) and effects and normalises loudness to −16 LUFS. It renders in parallel (one browser per four cores, up to four; `--workers` to change) and joins the segments without re-encoding: a 67 s 1080p film exports in under 30 seconds.
 
 The [agent skill](../../.agents/skills/demohunter-replay/SKILL.md) and each new project's AGENTS.md explain file editing. The browser holds the last valid preview through partial writes. UI/MCP edits check revisions. Narration cards autosave and preserve same-field conflicts for an explicit choice.
 

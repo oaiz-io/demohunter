@@ -12,9 +12,11 @@ type Hooks = {
   bundle: () => ReplayBundle;
   seek: (ms: number) => void;
   openThread: (threadId: string) => void;
-  frameUrl: (ms: number) => string;
+  /** Thumbnail URL, or undefined for none (exports render no thumbnails). */
+  frameUrl: (ms: number) => string | undefined;
   waveform: (audioPath: string) => Promise<Float32Array>;
   sceneTitle: (index: number) => string;
+  sceneCues: () => { atMs: number; src: string }[];
 };
 const $ = <T extends HTMLElement = HTMLElement>(s: string) =>
   document.querySelector<T>(s)!;
@@ -97,7 +99,10 @@ export class Timeline {
       const notes = bundle.comments.threads.filter(
         (t) => t.status === "open" && t.timeMs >= start && t.timeMs < offset,
       ).length;
-      const block = el("button", "clip-block");
+      const block = el(
+        "button",
+        clip.kind === "scene" ? "clip-block scene" : "clip-block",
+      );
       block.dataset.start = String(start);
       block.dataset.end = String(offset);
       block.dataset.clip = clip.id;
@@ -109,14 +114,15 @@ export class Timeline {
       const at = Math.round(start + Math.min(1500, length / 2));
       const key = `${bundle.revision}:${at}`;
       if (this.thumbs.get(clip.id) !== key) this.thumbs.set(clip.id, key);
-      thumb.style.backgroundImage = `url("${this.hooks.frameUrl(at)}")`;
+      const url = this.hooks.frameUrl(at);
+      if (url) this.loadThumb(thumb, url);
       const text = el("span", "clip-text");
       text.append(
         el("strong", undefined, title),
         el(
           "span",
           undefined,
-          `${seconds(length)}${clip.rate !== 1 ? ` · ${clip.rate}×` : ""}${notes ? ` · ${notes} note${notes === 1 ? "" : "s"}` : ""}`,
+          `${seconds(length)}${clip.kind !== "scene" && clip.rate !== 1 ? ` · ${clip.rate}×` : ""}${notes ? ` · ${notes} note${notes === 1 ? "" : "s"}` : ""}`,
         ),
       );
       block.append(thumb, text);
@@ -131,6 +137,7 @@ export class Timeline {
       ...bundle.edits.camera.map((e) => ["zoom", e] as const),
       ...bundle.edits.highlights.map((e) => ["highlight", e] as const),
       ...(bundle.edits.animations ?? []).map((e) => ["animate", e] as const),
+      ...(bundle.edits.overlays ?? []).map((e) => ["overlay", e] as const),
     ].sort((a, b) => a[1].startMs - b[1].startMs);
     for (const [kind, effect] of all) {
       let row = rows.findIndex((end) => end <= effect.startMs);
@@ -150,7 +157,9 @@ export class Timeline {
             ? `Zoom ${(effect as { scale: number }).scale}×`
             : kind === "highlight"
               ? "Highlight"
-              : "Animation",
+              : kind === "overlay"
+                ? ((effect as { title?: string }).title ?? "Overlay")
+                : "Animation",
         ),
       );
       block.title = `${block.textContent} · ${clockMs(effect.startMs)}–${clockMs(effect.endMs)}`;
@@ -198,6 +207,40 @@ export class Timeline {
       }
       voice.append(block);
     }
+    // Music and sound effects
+    const sound = $("#sound-track");
+    sound.replaceChildren();
+    for (const bed of bundle.edits.audio?.music ?? []) {
+      const end = Math.min(duration, bed.endMs ?? duration);
+      if (end <= bed.startMs) continue;
+      const block = el("div", "music-block");
+      block.style.left = this.pct(bed.startMs);
+      block.style.width = `calc(${this.pct(end - bed.startMs)} - 2px)`;
+      block.title = `${bed.src} · volume ${bed.volume}`;
+      block.append(
+        el(
+          "span",
+          undefined,
+          bed.src
+            .split("/")
+            .pop()!
+            .replace(/\.\w+$/, ""),
+        ),
+      );
+      sound.append(block);
+    }
+    const cues = [
+      ...(bundle.edits.audio?.sfx ?? []).map((s) => ({ ...s, scene: false })),
+      ...this.hooks.sceneCues().map((s) => ({ ...s, scene: true })),
+    ];
+    for (const cue of cues) {
+      const mark = el("span", cue.scene ? "sfx-mark scene-cue" : "sfx-mark");
+      mark.style.left = this.pct(Math.min(duration, cue.atMs));
+      mark.title = `${cue.src.split("/").pop()} · ${clockMs(cue.atMs)}`;
+      sound.append(mark);
+    }
+    sound.hidden = $("#sound-label").hidden =
+      !(bundle.edits.audio?.music ?? []).length && !cues.length;
     // Notes and agent changes
     const notes = $("#notes-track");
     notes.replaceChildren();
@@ -279,6 +322,34 @@ export class Timeline {
           activity.status === "running" &&
           block.dataset.segment === activity.segmentId,
       );
+  }
+  // Thumbnails render slowly; few at a time so they never take the
+  // browser's connections from scene pages, audio or status polls.
+  private thumbQueue: (() => Promise<void>)[] = [];
+  private thumbsLoading = 0;
+  private loadThumb(thumb: HTMLElement, url: string) {
+    const load = async () => {
+      const image = new Image();
+      image.src = url;
+      try {
+        await image.decode();
+        if (thumb.isConnected) thumb.style.backgroundImage = `url("${url}")`;
+      } catch {
+        /* No thumbnail; the block still shows its title. */
+      }
+    };
+    this.thumbQueue.push(load);
+    this.pumpThumbs();
+  }
+  private pumpThumbs() {
+    while (this.thumbsLoading < 2 && this.thumbQueue.length) {
+      const next = this.thumbQueue.shift()!;
+      this.thumbsLoading++;
+      void next().finally(() => {
+        this.thumbsLoading--;
+        this.pumpThumbs();
+      });
+    }
   }
   private async drawWave(
     canvas: HTMLCanvasElement,

@@ -102,14 +102,17 @@ export async function regenerateNarration(
           )
             continue;
           const clip = latest.edits.clips.find((c) => c.id === segment.clipId);
-          if (clip)
-            clip.holdMs += Math.max(
-              0,
-              segment.offsetMs +
-                segment.audio.durationMs +
-                250 -
-                clipDuration(clip),
-            );
+          const overrun = clip
+            ? Math.max(
+                0,
+                segment.offsetMs +
+                  segment.audio.durationMs +
+                  250 -
+                  clipDuration(clip),
+              )
+            : 0;
+          if (clip?.kind === "scene") clip.durationMs += overrun;
+          else if (clip) clip.holdMs += overrun;
         }
       });
     }

@@ -452,13 +452,21 @@ test("captures editable DOM replay and exports saved narration and video without
             .locator("body")
             .evaluate((n) => getComputedStyle(n).backgroundImage),
         ).toContain(`/projects/${record.id}/files/assets/`);
+        // Workspace-scoped, like Connect agent: it edits the demo open here.
         await client.connect(
           new StdioClientTransport({
             command: process.execPath,
-            args: [path.resolve(import.meta.dir, "cli.ts"), "mcp", dir],
+            args: [path.resolve(import.meta.dir, "cli.ts"), "mcp", root],
             stderr: "pipe",
           }),
         );
+        const info = await client.callTool({ name: "get_basic_info" });
+        expect(info.isError).not.toBe(true);
+        expect(JSON.parse((info.content as any)[0].text).target).toMatchObject({
+          path: "capture",
+          id: record.id,
+          source: "studio",
+        });
         const beforePosition = await scoped.evaluate(
           () => (window as any).__replayLab.state().position,
         );

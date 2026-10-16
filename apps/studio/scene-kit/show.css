@@ -1,0 +1,38 @@
+/* DemoHunter scene kit — default look for show.js (override the variables). */
+:root {
+  --kit-ink: #191919;
+  --kit-accent: #1f7ce2;
+  --kit-serif: Georgia, "Times New Roman", serif;
+  --kit-sans: system-ui, sans-serif;
+}
+.kit-copy {
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  width: 640px;
+  z-index: 3;
+}
+.kit-copy.left {
+  left: 150px;
+}
+.kit-copy.right {
+  right: 130px;
+}
+.kit-kicker {
+  font: 600 19px var(--kit-sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--kit-accent);
+}
+.kit-copy h1 {
+  margin: 18px 0 0;
+  font: 400 86px/1.04 var(--kit-serif);
+  letter-spacing: -0.03em;
+  color: var(--kit-ink);
+}
+.kit-copy h1 span:last-child {
+  font-style: italic;
+}
+.kit-hero-card {
+  will-change: transform;
+}

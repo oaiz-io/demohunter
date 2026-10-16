@@ -1,5 +1,8 @@
 import { initializeShell } from "./shell.js";
 import { NarrationPlayback } from "./audio.js";
+import { SceneLayer, type SceneCue } from "./scenes.js";
+import { MotionAudio } from "./motion-audio.js";
+import { snapshotElement, type Snapshot } from "./snapshot.js";
 import { projectUrl } from "./transport.js";
 import { AgentFeedback } from "./feedback.js";
 import {
@@ -29,6 +32,9 @@ declare global {
       seek: (ms: number) => void;
       select: (ref: string, ms?: number) => void;
       state: () => unknown;
+      scenesReady: () => Promise<void>;
+      sceneCues: () => SceneCue[];
+      snapshot: (target: Target) => Snapshot | undefined;
     };
   }
 }
@@ -41,6 +47,8 @@ let position = 0,
   playing = false,
   lastTick = 0;
 let interactionMode: "select" | "comment" = "select";
+const sceneLayer = new SceneLayer($("#scene-layer"));
+const motionAudio = new MotionAudio();
 initializeShell();
 if ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
   document.body.classList.add("desktop");
@@ -211,6 +219,7 @@ function report(error: unknown): void {
 }
 function pauseAudio(): void {
   narrationPlayback.pause();
+  motionAudio.pause();
 }
 function setPlaying(value: boolean): void {
   if (!bundle) return;
@@ -337,10 +346,14 @@ function drawEffects(): void {
       ? box.y + box.height / 2
       : (camera.y ?? bundle.project.viewport.height / 2);
     // Short eased entry/exit; camera motion never changes layout inside the replay.
+    const ease = Math.max(
+      1,
+      Math.min(camera.easeMs ?? 300, (camera.endMs - camera.startMs) / 2),
+    );
     const edge = Math.min(
       1,
-      (position - camera.startMs) / 300,
-      (camera.endMs - position) / 300,
+      (position - camera.startMs) / ease,
+      (camera.endMs - position) / ease,
     );
     const blend = edge * edge * (3 - 2 * edge);
     cameraScale = 1 + (camera.scale - 1) * blend;
@@ -535,6 +548,13 @@ function applyAnimations(): void {
 }
 function syncAudio(): void {
   narrationPlayback.sync(bundle, position, playing, audioNeedsSeek);
+  motionAudio.sync(
+    bundle,
+    position,
+    playing,
+    audioNeedsSeek,
+    sceneLayer.cues(),
+  );
   audioNeedsSeek = false;
 }
 function update(): void {
@@ -564,6 +584,13 @@ function update(): void {
   restoreAnimations();
   applyOverrides();
   applyAnimations();
+  sceneLayer.update(position, totalDuration(bundle.edits));
+  const backdrop = sceneLayer.backdrop(bundle, position);
+  const filter =
+    backdrop.blur || backdrop.dim
+      ? `blur(${backdrop.blur.toFixed(2)}px) brightness(${(1 - backdrop.dim).toFixed(3)})`
+      : "";
+  if ($("#replay").style.filter !== filter) $("#replay").style.filter = filter;
   drawEffects();
   syncAudio();
   workbench?.updateTime();
@@ -637,6 +664,11 @@ async function reload(): Promise<void> {
       JSON.stringify([bundle.project.viewport, bundle.edits, bundle.css]) !==
         JSON.stringify([next.project.viewport, next.edits, next.css]);
     bundle = next;
+    sceneLayer.load(bundle);
+    // Sounds declared inside scene pages are known once the pages load.
+    void sceneLayer
+      .ready()
+      .then(() => timeline?.render(workbench?.agentMarks() ?? []));
     position = Math.min(position, totalDuration(bundle.edits));
     if (changedVisuals || !replayer) {
       pauseAudio();
@@ -690,9 +722,12 @@ async function reload(): Promise<void> {
       },
       openThread: (id) => workbench.openThread(id),
       frameUrl: (ms) =>
-        projectUrl(`/api/frame?t=${Math.round(ms)}&r=${bundle.revision}`),
+        renderMode
+          ? undefined
+          : projectUrl(`/api/frame?t=${Math.round(ms)}&r=${bundle.revision}`),
       waveform: (path) => transcript.waveform(path),
       sceneTitle: (i) => workbench.sceneTitle(i),
+      sceneCues: () => sceneLayer.cues(),
     });
     renderPanels();
     resize();
@@ -1077,7 +1112,7 @@ async function poll(): Promise<void> {
         error?: string;
         directory?: string;
       };
-    }>("/api/status");
+    }>(`/api/status?focused=${document.hasFocus() ? 1 : 0}`);
     fileError = status.error
       ? `Project files need attention; showing the last valid version. ${status.error}`
       : "";
@@ -1214,6 +1249,12 @@ window.__replayLab = {
     ready: !!bundle && !!replayer,
     captureId: workspaceData?.index.captureId,
   }),
+  scenesReady: () => sceneLayer.ready(),
+  sceneCues: () => sceneLayer.cues(),
+  snapshot: (target) => {
+    const element = findTargets(target)[0];
+    return element ? snapshotElement(element) : undefined;
+  },
 };
 void reload()
   .then(() => {

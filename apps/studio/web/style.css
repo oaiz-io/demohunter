@@ -1033,19 +1033,22 @@ body[data-tool="comment"] #select-layer {
   text-transform: uppercase;
   color: var(--color-graphite);
 }
-.track-labels span:nth-child(1) {
+.track-labels .ruler-label {
   --h: 20px;
 }
-.track-labels span:nth-child(2) {
+.track-labels .label-scenes {
   --h: 42px;
 }
-.track-labels span:nth-child(3) {
+.track-labels .label-camera {
   --h: var(--camera-h, 22px);
 }
-.track-labels span:nth-child(4) {
+.track-labels .label-voice {
   --h: 30px;
 }
-.track-labels span:nth-child(5) {
+.track-labels .label-sound {
+  --h: 22px;
+}
+.track-labels .label-notes {
   --h: 18px;
 }
 .lanes {
@@ -1089,6 +1092,46 @@ body[data-tool="comment"] #select-layer {
 }
 .lane-notes {
   height: 18px;
+}
+.lane-sound {
+  height: 22px;
+}
+.music-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-desk) 6%,
+    var(--color-desk) 94%,
+    transparent
+  );
+  color: var(--color-graphite);
+  font-size: var(--text-micro);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sfx-mark {
+  position: absolute;
+  top: 5px;
+  width: 6px;
+  height: 12px;
+  margin-left: -3px;
+  border-radius: 3px;
+  background: var(--color-ink);
+  opacity: 0.55;
+}
+.sfx-mark.scene-cue {
+  background: var(--color-agent);
+}
+.clip-block.scene .clip-thumb {
+  outline: 1px solid var(--color-line-strong);
 }
 .clip-block {
   position: absolute;
@@ -2499,4 +2542,26 @@ body[data-tool="comment"] #select-layer {
     max-width: calc(100% - 24px);
     overflow: hidden;
   }
+}
+
+/* HTML scenes and overlays: above the recording, outside the camera zoom. */
+#scene-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.scene-frame {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 0;
+  background: transparent;
+  visibility: hidden;
+}
+.scene-frame.visible {
+  visibility: visible;
+}
+#viewport:has(#scene-layer.covering) #select-layer {
+  pointer-events: none;
 }
