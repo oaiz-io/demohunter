@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { z } from "zod";
 import { loadBundle, safeFile, writeJson } from "./storage.js";
-import { validateBundle } from "./model.js";
+import { targetSchema, validateBundle } from "./model.js";
+import { elementPatchSchema } from "./element-edit.js";
 import { regenerateNarration } from "./narration.js";
 import { ReplayWorkspace, readOptional } from "./workspace.js";
 import { readActivity } from "./activity.js";
@@ -57,7 +58,8 @@ const selectionSchema = z
   .strict();
 
 let assetsPromise:
-  Promise<{ js: Uint8Array; html: string; css: Buffer }> | undefined;
+  | Promise<{ js: Uint8Array; html: string; css: Buffer }>
+  | undefined;
 function browserAssets() {
   return (assetsPromise ??= (async () => {
     const compiled = await build({
@@ -367,6 +369,22 @@ export async function createReplayHandler(
             ? await workspace.addComment(value)
             : await workspace.commentAction(value),
         );
+      }
+      if (req.method === "POST" && url.pathname === "/api/element-edit") {
+        const input = z
+          .object({
+            revision: z.string(),
+            target: targetSchema,
+            patch: elementPatchSchema,
+          })
+          .strict()
+          .parse(await body(req));
+        const result = await workspace.editElement(
+          input.revision,
+          input.target,
+          input.patch,
+        );
+        return json(res, { revision: result.revision });
       }
       if (req.method === "POST" && url.pathname === "/api/undo") {
         const value = z

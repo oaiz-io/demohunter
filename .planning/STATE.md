@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: none — milestone archived
 Plan: none
 Status: v1.0 complete
-Last activity: 2026-10-16 -- Quick task 261016-exp made Studio export ~20× faster
+Last activity: 2026-10-16 -- Quick task 261016-moj restored direct element editing
 Progress: [██████████] 100%
 
 ## Performance Metrics
@@ -43,6 +43,7 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
+| 2026-10-16 | 261016-moj | Restore direct element editing | Research/plan/implement loops: drag, resize, text/colors, hide/remove/reset, scene targets, disk autosave, revision-safe conflicts and undo. Full verify: 369 passed, 1 skipped; final browser regression and typecheck passed. |
 | 2026-10-16 | 261016-mjc | Controla flag comment | Changed the Swedish flag to the EU flag through MCP; checked the rendered replay at 31.049 s; inspect passed with no warnings; replied and resolved the comment. |
 | 2026-10-16 | 261016-exp | Faster Studio export | Parallel chunked rendering in new-headless Chromium, JPEG frames, still-frame reuse, one-pass loudness prepared during render: 67 s 1080p30 export 482 s → ~23 s. 66 Studio tests pass. |
 | 2026-10-16 | 261016-lft | Lift and commercial kit | Lift real UI out of the recording into scenes, overlay backdrop, kit show.js (liftShow, click-safe cursorClick, flip) with browser regression test, demohunter-commercial skill. |

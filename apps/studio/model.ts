@@ -143,13 +143,28 @@ export const targetSchema = z
     nodeId: z.number().int().positive().optional(),
     selector: z.string().min(1).optional(),
     documentId: z.number().int().positive().optional(),
+    scene: relativePath
+      .refine((p) => p.startsWith("scenes/"), "Use a scene file under scenes/.")
+      .optional(),
   })
   .strict()
   .refine(
     (t) =>
       [t.ref, t.nodeId, t.selector].filter((v) => v !== undefined).length === 1,
     "Choose exactly one ref, nodeId or selector.",
+  )
+  .refine(
+    (t) => !t.scene || (!!t.selector && t.documentId === undefined),
+    "Scene targets need a selector, without a recording document ID.",
   );
+export const elementTransformSchema = z
+  .object({
+    x: z.number().finite().min(-100000).max(100000).default(0),
+    y: z.number().finite().min(-100000).max(100000).default(0),
+    scaleX: z.number().finite().min(0.05).max(20).default(1),
+    scaleY: z.number().finite().min(0.05).max(20).default(1),
+  })
+  .strict();
 export const editsSchema = z
   .object({
     clips: z.array(clipSchema).min(1),
@@ -162,6 +177,7 @@ export const editsSchema = z
             text: z.string().optional(),
             hidden: z.boolean().optional(),
             style: z.record(z.string(), z.string()).optional(),
+            transform: elementTransformSchema.optional(),
           })
           .strict(),
       )

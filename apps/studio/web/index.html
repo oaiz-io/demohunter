@@ -192,6 +192,7 @@
             aria-label="Selected element"
             hidden
           >
+            <button id="toolbar-edit">Edit</button>
             <button id="toolbar-note" class="toolbar-note">
               <svg class="icon" aria-hidden="true">
                 <use href="#i-comment" /></svg
@@ -266,6 +267,7 @@
       </section>
       <aside class="inspector">
         <nav class="tabs" aria-label="Panels">
+          <button data-tab="edit" role="tab" aria-selected="false">Edit</button>
           <button
             data-tab="comments"
             class="active"
@@ -279,6 +281,7 @@
             Agent
           </button>
         </nav>
+        <section id="panel-edit" class="panel" hidden></section>
         <section id="panel-comments" class="panel">
           <div class="panel-row filter-row">
             <div class="segmented" id="comment-filter">

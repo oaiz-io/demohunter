@@ -217,6 +217,15 @@ export function describeChanges(
         (k) =>
           `${k} ${old?.style?.[k] ? `${old.style[k]} → ` : ""}${edit.style?.[k] ?? "removed"}`,
       );
+    if (JSON.stringify(edit.transform) !== JSON.stringify(old?.transform))
+      changes.push({
+        kind: "style",
+        label: "Position and scale",
+        file: "edits.json",
+        ref,
+        before: short(JSON.stringify(old?.transform)),
+        after: short(JSON.stringify(edit.transform)),
+      });
     if (styles.length)
       changes.push({
         kind: "style",

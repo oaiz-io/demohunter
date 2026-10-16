@@ -23,7 +23,11 @@ bun run studio list
 
 ## Work with your agent
 
-Studio is where you see and point; your agent (Claude Code, Codex or another MCP client) does the editing. Press `C` and click anything to add a **note**: it keeps the element and the moment. Click an element to get the selection toolbar: **Note** and **Copy for agent** (the element's reference, files and moment, ready to paste). `V` returns to selection, `⌘⇧C` copies the selection for your agent, Escape clears it. The editor has three panels: Notes, Script and Agent. Edits to the recording itself happen in code or through your agent.
+Select an element, then press **Edit** in its toolbar. You can also open the **Edit** panel and click an element. Drag to move it. Drag a corner to resize it; hold Shift to keep its proportions. Change text, text color, background color, font size, opacity, position, scale, width or height in the panel. Arrow keys move the selected element by one pixel (Shift: ten). **Hide** keeps its space; **Remove** closes the space. Find hidden elements in the element list, then choose **Restore** or **Reset edits**.
+
+The same controls work on recorded page elements, HTML scenes and overlays. Changes appear at once and save to `edits.json`. They apply wherever the element appears. The source recording and HTML stay intact. Undo restores saved changes. If an agent changes the project during an edit, Studio keeps your draft and asks you to apply it to the latest version or use the saved version. Export waits for pending element edits to save.
+
+Press `C` and click an element to add a **note** with its element and time. The selection toolbar has **Edit**, **Note** and **Copy for agent**. `V` returns to selection; double-click an element to open its text field. The editor has Edit, Notes, Script and Agent panels. Your agent can use the same saved overrides through MCP or project files.
 
 **Connect agent** shows the exact `claude mcp add …` and `codex mcp add …` commands (or JSON for other clients) for one server per repository. It edits the demo you have open in Studio (or one the agent names with `project`), plus the prompt to start with. No agent settings are changed automatically.
 

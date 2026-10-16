@@ -1,6 +1,12 @@
 import { initializeShell } from "./shell.js";
 import { NarrationPlayback } from "./audio.js";
 import { SceneLayer, type SceneCue } from "./scenes.js";
+import {
+  ElementEditor,
+  sceneSelector,
+  type Editable,
+} from "./element-editor.js";
+import { ElementOverrides } from "./element-overrides.js";
 import { MotionAudio } from "./motion-audio.js";
 import { snapshotElement, type Snapshot } from "./snapshot.js";
 import { projectUrl } from "./transport.js";
@@ -49,6 +55,8 @@ let position = 0,
 let interactionMode: "select" | "comment" = "select";
 const sceneLayer = new SceneLayer($("#scene-layer"));
 const motionAudio = new MotionAudio();
+const elementOverrides = new ElementOverrides();
+let elementEditor: ElementEditor | undefined;
 initializeShell();
 if ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
   document.body.classList.add("desktop");
@@ -108,6 +116,7 @@ $("#export-cancel").onclick = () =>
 $("#export-start").onclick = () =>
   void transcript
     .flushAll()
+    .then(() => elementEditor?.flushAll())
     .then(() => api("/api/export", { revision: bundle.revision }))
     .then(() => {
       $("#export-status").textContent = "Preparing saved replay…";
@@ -181,9 +190,9 @@ const transcript = new TranscriptEditor($("#narration-list"), {
 });
 
 function updateSaveIndicator(): void {
-  const count = transcript.dirtyCount;
+  const count = transcript.dirtyCount + (elementEditor?.dirtyCount ?? 0);
   $("#save-indicator").textContent = count
-    ? `${count} unsaved script change${count === 1 ? "" : "s"}`
+    ? `${count} unsaved change${count === 1 ? "" : "s"}`
     : "";
   $("#save-indicator").hidden = !count;
 }
@@ -249,6 +258,19 @@ function seek(ms: number): void {
 }
 
 function findTargets(target: Target): Element[] {
+  if (target.scene) {
+    try {
+      return sceneLayer
+        .documents(false)
+        .filter((layer) => layer.src === target.scene)
+        .flatMap((layer) => [
+          ...layer.document.querySelectorAll(target.selector!),
+        ])
+        .slice(0, 100);
+    } catch {
+      return [];
+    }
+  }
   if (target.ref) {
     const record = workspaceData?.index.elements.find(
       (e) => e.ref === target.ref,
@@ -303,30 +325,11 @@ function applyOverrides(): void {
     doc.head.append(style);
   }
   if (style.textContent !== bundle.css) style.textContent = bundle.css;
-  for (const edit of bundle.edits.elements)
-    for (const node of findTargets(edit.target)) {
-      const el = node as HTMLElement;
-      if (edit.text !== undefined) {
-        // Keep rrweb's mirrored nodes alive. Replacing innerHTML/textContent would
-        // detach nodes that later replay mutations still need to address.
-        const walker = doc.createTreeWalker(node, 4);
-        let leaf: Node | null;
-        const leaves: Node[] = [];
-        while ((leaf = walker.nextNode()))
-          if (!leaf.parentElement?.closest("script,style,noscript"))
-            leaves.push(leaf);
-        if (!leaves.length) node.append(doc.createTextNode(edit.text));
-        else
-          for (let i = 0; i < leaves.length; i++) {
-            const text = i === 0 ? edit.text : "";
-            if (leaves[i]!.nodeValue !== text) leaves[i]!.nodeValue = text;
-          }
-      }
-      if (edit.hidden)
-        el.style.setProperty("visibility", "hidden", "important");
-      for (const [name, value] of Object.entries(edit.style ?? {}))
-        el.style.setProperty(name, value, "important");
-    }
+  elementOverrides.restore();
+  elementOverrides.apply(
+    elementEditor?.edits() ?? bundle.edits.elements,
+    findTargets,
+  );
 }
 function drawEffects(): void {
   if (!bundle) return;
@@ -390,7 +393,7 @@ function drawEffects(): void {
     $("#effects").append(ring);
   }
   const box = selection ? boxOf(selectionTarget()) : undefined;
-  $("#selection-box").hidden = !selection || !box;
+  $("#selection-box").hidden = !selection || !box || !$("#panel-edit").hidden;
   if (box) {
     Object.assign($("#selection-box").style, {
       left: `${box.x}px`,
@@ -401,7 +404,8 @@ function drawEffects(): void {
     $("#selection-box .selection-label").textContent =
       `${selection!.tag} · ${selection!.elementRef ?? `node ${selection!.nodeId}`}`;
   }
-  placeToolbar(!!box && !playing && !renderMode);
+  elementEditor?.draw(!$("#panel-edit").hidden && !playing && !renderMode);
+  placeToolbar((!!box || !!elementEditor?.rect()) && !playing && !renderMode);
   const hoverBox = hoverRef ? boxOf({ ref: hoverRef }) : undefined;
   $("#hover-box").hidden = !hoverBox;
   if (hoverBox)
@@ -464,7 +468,8 @@ function placeToolbar(visible: boolean): void {
   toolbar.hidden = false;
   const wrap = $("#canvas-wrap").getBoundingClientRect();
   const stage = $("#stage").getBoundingClientRect();
-  const target = $("#selection-box").getBoundingClientRect();
+  const target =
+    elementEditor?.rect()?.box ?? $("#selection-box").getBoundingClientRect();
   const width = toolbar.offsetWidth,
     height = toolbar.offsetHeight;
   let left = target.right - wrap.left - width;
@@ -511,6 +516,7 @@ function restoreAnimations(): void {
       );
     else original.opacity = node.style.opacity;
   }
+  animated.clear();
 }
 function applyAnimations(): void {
   for (const effect of bundle.edits.animations ?? []) {
@@ -582,9 +588,10 @@ function update(): void {
   }
   lastSource = source;
   restoreAnimations();
+  elementOverrides.restore();
+  sceneLayer.update(position, totalDuration(bundle.edits));
   applyOverrides();
   applyAnimations();
-  sceneLayer.update(position, totalDuration(bundle.edits));
   const backdrop = sceneLayer.backdrop(bundle, position);
   const filter =
     backdrop.blur || backdrop.dim
@@ -592,6 +599,7 @@ function update(): void {
       : "";
   if ($("#replay").style.filter !== filter) $("#replay").style.filter = filter;
   drawEffects();
+  updateSaveIndicator();
   syncAudio();
   workbench?.updateTime();
   $("#time").textContent = clockMs(position);
@@ -663,6 +671,8 @@ async function reload(): Promise<void> {
       !bundle ||
       JSON.stringify([bundle.project.viewport, bundle.edits, bundle.css]) !==
         JSON.stringify([next.project.viewport, next.edits, next.css]);
+    restoreAnimations();
+    elementOverrides.restore();
     bundle = next;
     sceneLayer.load(bundle);
     // Sounds declared inside scene pages are known once the pages load.
@@ -682,7 +692,10 @@ async function reload(): Promise<void> {
         pauseAnimation: true,
         useVirtualDom: false,
       });
-      replayer.on("event-cast", applyOverrides);
+      replayer.on("event-cast", () => {
+        restoreAnimations();
+        applyOverrides();
+      });
       replayer.on("fullsnapshot-rebuilded", () => {
         applyOverrides();
         resize();
@@ -729,6 +742,26 @@ async function reload(): Promise<void> {
       sceneTitle: (i) => workbench.sceneTitle(i),
       sceneCues: () => sceneLayer.cues(),
     });
+    elementEditor ??= new ElementEditor($("#panel-edit"), {
+      bundle: () => bundle,
+      resolve: (target) => findTargets(target)[0],
+      frame: (node) =>
+        node.ownerDocument === replayer?.iframe.contentDocument
+          ? replayer.iframe
+          : sceneLayer
+              .documents(false)
+              .find((layer) => layer.document === node.ownerDocument)?.iframe,
+      entries: editableEntries,
+      context: () =>
+        sceneLayer
+          .documents()
+          .map((layer) => layer.src)
+          .join("|"),
+      select: selectEditable,
+      api,
+      reload,
+      update,
+    });
     renderPanels();
     resize();
     update();
@@ -754,6 +787,7 @@ function tab(name: string): void {
   }
   for (const panel of document.querySelectorAll<HTMLElement>(".panel"))
     panel.hidden = panel.id !== `panel-${name}`;
+  drawEffects();
 }
 function chooseTool(mode: "select" | "comment"): void {
   interactionMode = mode;
@@ -767,6 +801,7 @@ function chooseTool(mode: "select" | "comment"): void {
 }
 function clearSelection(): void {
   selection = undefined;
+  elementEditor?.select(undefined);
   hoverRef = undefined;
   chooseTool("select");
   workbench?.selectionChanged();
@@ -820,24 +855,104 @@ function selectRef(ref: string, time?: number): void {
     text: (node?.textContent ?? record.text).trim().slice(0, 4000),
     attributes: record.attributes,
   };
+  elementEditor?.select({
+    target: { ref },
+    label: `${record.tag} · ${record.text.slice(0, 70) || record.selector}`,
+  });
   workbench.selectionChanged();
   drawEffects();
   persistSelection();
 }
-$("#select-layer").onclick = (event: MouseEvent) => {
-  const node = pickNode(event);
-  if (!node || !replayer) return;
-  const nodeId = replayer.getMirror().getId(node),
-    documentId = currentDocumentId();
-  const record = workspaceData.index.elements.find(
-    (e) => e.nodeId === nodeId && e.documentId === documentId,
+function editableEntries(): Editable[] {
+  const entries: Editable[] = (workspaceData?.index.elements ?? []).map(
+    (e) => ({
+      target: { ref: e.ref },
+      label: `${e.tag} · ${e.text.slice(0, 70) || e.selector}`,
+    }),
   );
-  if (record) {
-    selectRef(record.ref, position);
-    if (interactionMode === "comment") {
-      tab("comments");
-      $<HTMLTextAreaElement>("#new-comment").focus();
+  for (const layer of sceneLayer.documents()) {
+    for (const node of layer.document.querySelectorAll("body, body *")) {
+      if (["SCRIPT", "STYLE", "LINK", "META", "BR"].includes(node.tagName))
+        continue;
+      entries.push({
+        target: { scene: layer.src, selector: sceneSelector(node) },
+        label: `${node.localName} · ${(node.textContent?.trim() || node.id || layer.src).slice(0, 70)}`,
+      });
     }
+  }
+  return entries;
+}
+function selectEditable(entry: Editable): void {
+  setPlaying(false);
+  if (entry.target.ref) selectRef(entry.target.ref);
+  else {
+    selection = undefined;
+    elementEditor?.select(entry);
+    workbench?.selectionChanged();
+    void api("/api/selection", { clear: true }).catch(report);
+  }
+  tab("edit");
+  drawEffects();
+}
+function pickEditable(event: MouseEvent): Editable | undefined {
+  for (const layer of sceneLayer.documents()) {
+    const rect = layer.iframe.getBoundingClientRect();
+    const node = layer.document.elementFromPoint(
+      ((event.clientX - rect.left) * layer.iframe.clientWidth) / rect.width,
+      ((event.clientY - rect.top) * layer.iframe.clientHeight) / rect.height,
+    );
+    if (node && !["HTML", "BODY"].includes(node.tagName))
+      return {
+        target: { scene: layer.src, selector: sceneSelector(node) },
+        label: `${node.localName} · ${(node.textContent?.trim() || node.id || layer.src).slice(0, 70)}`,
+      };
+    // An opaque HTML scene covers the recording; an overlay can pass through.
+    if (layer.iframe.classList.contains("scene"))
+      return node
+        ? {
+            target: { scene: layer.src, selector: "body" },
+            label: "Scene background",
+          }
+        : undefined;
+  }
+  const node = pickNode(event);
+  const record =
+    node &&
+    workspaceData.index.elements.find(
+      (e) =>
+        e.nodeId === replayer?.getMirror().getId(node) &&
+        e.documentId === currentDocumentId(),
+    );
+  return record
+    ? {
+        target: { ref: record.ref },
+        label: `${record.tag} · ${record.text.slice(0, 70) || record.selector}`,
+      }
+    : undefined;
+}
+$("#select-layer").addEventListener("pointerdown", (event) => {
+  if (interactionMode !== "select" || $("#panel-edit").hidden) return;
+  const entry = pickEditable(event);
+  if (!entry) return;
+  selectEditable(entry);
+  elementEditor?.begin(event);
+});
+$("#select-layer").onclick = (event: MouseEvent) => {
+  if (elementEditor?.consumeClick()) return;
+  const entry = pickEditable(event);
+  if (!entry) return;
+  if (entry.target.ref) selectRef(entry.target.ref, position);
+  else selectEditable(entry);
+  if (interactionMode === "comment") {
+    tab("comments");
+    $<HTMLTextAreaElement>("#new-comment").focus();
+  }
+};
+$("#select-layer").ondblclick = (event: MouseEvent) => {
+  const entry = pickEditable(event);
+  if (entry) {
+    selectEditable(entry);
+    $("#element-text").focus();
   }
 };
 $("#select-layer").onmousemove = (event: MouseEvent) => {
@@ -865,8 +980,37 @@ function showElement(ref: string): void {
   }, 1600);
 }
 // Selection toolbar ---------------------------------------------------------
+$("#toolbar-edit").onclick = () => {
+  chooseTool("select");
+  tab("edit");
+};
 $("#toolbar-note").onclick = () => workbench.focusComposer();
-$("#toolbar-copy").onclick = () => void workbench.copyReference().catch(report);
+$("#toolbar-copy").onclick = () => {
+  const entry = elementEditor?.selected;
+  if (!entry?.target.scene) {
+    void workbench.copyReference().catch(report);
+    return;
+  }
+  const node = findTargets(entry.target)[0];
+  void navigator.clipboard
+    .writeText(
+      JSON.stringify(
+        {
+          projectDir: workspaceData.projectDir,
+          revision: bundle.revision,
+          outputMs: position,
+          target: entry.target,
+          html: node?.outerHTML.slice(0, 16000),
+          instruction:
+            "Use apply_element_edit with this target and the latest expectedRevision.",
+        },
+        null,
+        2,
+      ),
+    )
+    .then(() => toast("Element context copied"))
+    .catch(report);
+};
 // Script audio status ----------------------------------------------------------
 function renderScriptStatus(): void {
   const segments = bundle.narration.segments.filter(
@@ -1234,7 +1378,8 @@ async function publishPreview(): Promise<void> {
   }
 }
 window.addEventListener("beforeunload", (event) => {
-  if (transcript.dirtyCount) event.preventDefault();
+  if (transcript.dirtyCount || elementEditor?.dirtyCount)
+    event.preventDefault();
 });
 window.__replayLab = {
   seek,

@@ -154,8 +154,7 @@ test("captures editable DOM replay and exports saved narration and video without
       expect(await page.locator("#panel-comments").isVisible()).toBe(true);
       expect(await page.locator("#scene-drawer").isVisible()).toBe(false);
       expect(await page.locator("#selection-toolbar").isVisible()).toBe(false);
-      // The editor is a review surface: no element/timing panels, find and
-      // replace, speed or export tuning.
+      // Direct element editing stays separate from timeline and export tuning.
       expect(
         await page
           .locator(
@@ -166,6 +165,7 @@ test("captures editable DOM replay and exports saved narration and video without
       expect(
         await page.locator('.tabs [role="tab"]').allTextContents(),
       ).toEqual([
+        expect.stringContaining("Edit"),
         expect.stringContaining("Notes"),
         expect.stringContaining("Script"),
         expect.stringContaining("Agent"),
@@ -190,6 +190,7 @@ test("captures editable DOM replay and exports saved narration and video without
       expect(
         await page.locator("#selection-toolbar button").allTextContents(),
       ).toEqual([
+        expect.stringContaining("Edit"),
         expect.stringContaining("Note"),
         expect.stringContaining("Copy for agent"),
       ]);

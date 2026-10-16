@@ -731,6 +731,30 @@ test("agents add, move and remove scene clips, overlays, music and sfx, and writ
         },
       }),
     ).toContain("outside scenes/");
+    // The same scene target and partial geometry work through real MCP.
+    result = await call("apply_element_edit", {
+      expectedRevision: await revision(),
+      target: { scene: "scenes/intro.html", selector: "h1" },
+      text: "Edited intro",
+      transform: { x: 20, scaleX: 1.5 },
+    });
+    result = await call("apply_element_edit", {
+      expectedRevision: result.revision,
+      target: { scene: "scenes/intro.html", selector: "h1" },
+      transform: { y: 30 },
+    });
+    expect((await loadBundle(dir)).edits.elements[0]!.transform).toEqual({
+      x: 20,
+      y: 30,
+      scaleX: 1.5,
+      scaleY: 1,
+    });
+    await call("apply_element_edit", {
+      expectedRevision: result.revision,
+      target: { scene: "scenes/intro.html", selector: "h1" },
+      reset: true,
+    });
+    expect((await loadBundle(dir)).edits.elements).toEqual([]);
     let edits = (await loadBundle(dir)).edits;
     expect(edits.overlays?.[0]?.id).toBe("badge");
     expect(edits.audio?.music[0]).toMatchObject({ id: "bed", volume: 0.3 });

@@ -101,6 +101,10 @@
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 9007199254740991
+              },
+              "scene": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "additionalProperties": false
@@ -119,6 +123,36 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "transform": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "default": 0,
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 100000
+              },
+              "y": {
+                "default": 0,
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 100000
+              },
+              "scaleX": {
+                "default": 1,
+                "type": "number",
+                "minimum": 0.05,
+                "maximum": 20
+              },
+              "scaleY": {
+                "default": 1,
+                "type": "number",
+                "minimum": 0.05,
+                "maximum": 20
+              }
+            },
+            "additionalProperties": false
           }
         },
         "required": ["id", "target"],
@@ -163,6 +197,10 @@
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 9007199254740991
+              },
+              "scene": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "additionalProperties": false
@@ -226,6 +264,10 @@
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 9007199254740991
+              },
+              "scene": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "additionalProperties": false
@@ -273,6 +315,10 @@
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 9007199254740991
+              },
+              "scene": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "additionalProperties": false
@@ -373,6 +419,30 @@
           },
           "title": {
             "type": "string"
+          },
+          "backdrop": {
+            "type": "object",
+            "properties": {
+              "blur": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0,
+                "maximum": 40
+              },
+              "dim": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "easeMs": {
+                "default": 450,
+                "type": "number",
+                "minimum": 0,
+                "maximum": 3000
+              }
+            },
+            "additionalProperties": false
           }
         },
         "required": ["id", "src", "startMs", "endMs"],

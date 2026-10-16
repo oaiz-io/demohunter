@@ -2562,6 +2562,166 @@ body[data-tool="comment"] #select-layer {
 .scene-frame.visible {
   visibility: visible;
 }
-#viewport:has(#scene-layer.covering) #select-layer {
+
+/* Direct element editor */
+#panel-edit {
+  overflow: hidden;
+}
+.direct-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px;
+  border-bottom: 1px solid var(--color-line);
+}
+#element-save-state {
+  font-size: 11px;
+  color: var(--color-graphite);
+}
+.direct-scroll {
+  padding: 16px;
+  overflow: auto;
+  min-height: 0;
+}
+.direct-field,
+.direct-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-graphite);
+}
+.direct-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+#panel-edit input,
+#panel-edit textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 6px;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  padding: 8px;
+  font: inherit;
+}
+#panel-edit textarea {
+  resize: vertical;
+  font-size: 13px;
+}
+.direct-color {
+  display: flex;
+  gap: 5px;
+}
+#panel-edit input[type="color"] {
+  width: 30px;
+  flex: none;
+  padding: 3px;
+  height: 33px;
+}
+.direct-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 16px 0 10px;
+}
+.direct-actions button,
+.direct-conflict button {
+  padding: 7px 9px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 6px;
+}
+.direct-conflict {
+  padding: 12px;
+  border: 1px solid #c99846;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.direct-elements {
+  margin-top: 18px;
+  border-top: 1px solid var(--color-line-strong);
+  padding-top: 14px;
+}
+.direct-elements summary {
+  cursor: pointer;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+#direct-elements-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+.direct-layer {
+  text-align: left;
+  padding: 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.direct-layer:hover {
+  background: var(--color-desk);
+}
+.direct-outline {
+  position: absolute;
+  z-index: 12;
+  border: 1px solid #a7bfff;
+  cursor: move;
+  touch-action: none;
+  box-sizing: border-box;
   pointer-events: none;
+}
+.direct-outline[hidden] {
+  display: none;
+}
+.direct-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid #304f9a;
+  border-radius: 2px;
+  background: #dce6ff;
+  pointer-events: auto;
+  touch-action: none;
+}
+.direct-handle.nw {
+  left: -5px;
+  top: -5px;
+  cursor: nwse-resize;
+}
+.direct-handle.ne {
+  right: -5px;
+  top: -5px;
+  cursor: nesw-resize;
+}
+.direct-handle.se {
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
+}
+.direct-handle.sw {
+  left: -5px;
+  bottom: -5px;
+  cursor: nesw-resize;
+}
+#select-layer {
+  touch-action: none;
+}
+
+.direct-heading {
+  flex-shrink: 0;
+}
+#element-name {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  margin: 0 0 14px;
 }

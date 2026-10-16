@@ -24,12 +24,14 @@ import {
   editsSchema,
   isScene,
   narrationSchema,
+  targetSchema,
 } from "./model.js";
 import { loadBundle, mutationAuthor, safeFile } from "./storage.js";
 import { regenerateNarration } from "./narration.js";
 import { renderReplayFrame } from "./render.js";
 import { liftElement } from "./lift.js";
 import { parseReference } from "./links.js";
+import { elementPatchSchema } from "./element-edit.js";
 
 const ref = z.string().min(1),
   revision = z.string().min(1),
@@ -107,7 +109,7 @@ export function createReplayMcp(
       capture,
       content,
     } = typeof options === "boolean" ? { write: options } : options;
-    const input = schema.extend({ project: projectArg });
+    const input = schema.safeExtend({ project: projectArg });
     const callback = async (args: unknown): Promise<CallToolResult> => {
       const raw = (args ?? {}) as Record<string, unknown>;
       let target: ProjectTarget;
@@ -136,6 +138,7 @@ export function createReplayMcp(
         };
         const hints = raw as {
           elementRef?: string;
+          target?: { ref?: string };
           threadId?: string;
           segment?: { id?: string };
           animation?: { target?: { ref?: string } };
@@ -149,6 +152,7 @@ export function createReplayMcp(
             tool: name,
             elementRef:
               hints?.elementRef ??
+              hints?.target?.ref ??
               hints?.animation?.target?.ref ??
               hints?.item?.value?.target?.ref,
             threadId: hints?.threadId,
@@ -451,39 +455,30 @@ export function createReplayMcp(
   );
   tool(
     "apply_element_edit",
-    "Apply or reset a persistent text, CSS property, or visibility override by stable element reference. Original captured events remain intact. Hidden preserves layout.",
-    z.object({
-      expectedRevision: revision,
-      elementRef: ref,
-      text: z.string().optional(),
-      hidden: z.boolean().optional(),
-      style: z.record(z.string(), z.string()).optional(),
-      reset: z.boolean().default(false),
-    }),
-    async ({ expectedRevision, elementRef, reset, ...changes }, t) => {
-      const w = t.workspace;
-      const id = `edit-${elementRef}`;
-      const result = await w.change(
+    "Apply/reset persistent text, CSS, visibility or position/scale overrides. Use elementRef for recorded elements, or target with scene and selector for HTML scenes. Preserves the captured events and authored HTML.",
+    z
+      .object({
+        expectedRevision: revision,
+        elementRef: ref.optional(),
+        target: targetSchema.optional(),
+        ...elementPatchSchema.shape,
+      })
+      .refine(
+        (v) => Number(!!v.elementRef) + Number(!!v.target) === 1,
+        "Give elementRef or target.",
+      ),
+    async ({ expectedRevision, elementRef, target, ...patch }, t) => {
+      const result = await t.workspace.editElement(
         expectedRevision,
-        `${reset ? "Reset" : "Edit"} ${w.element(elementRef).name}`,
-        (draft) => {
-          if (reset) {
-            draft.edits.elements = draft.edits.elements.filter(
-              (e) => e.id !== id,
-            );
-            return;
-          }
-          let edit = draft.edits.elements.find((e) => e.id === id);
-          if (!edit) {
-            edit = { id, target: { ref: elementRef } };
-            draft.edits.elements.push(edit);
-          }
-          if (changes.text !== undefined) edit.text = changes.text;
-          if (changes.hidden !== undefined) edit.hidden = changes.hidden;
-          if (changes.style) edit.style = { ...edit.style, ...changes.style };
-        },
+        target ?? { ref: elementRef! },
+        patch,
       );
-      return { revision: result.revision, elementRef, file: "edits.json" };
+      return {
+        revision: result.revision,
+        elementRef,
+        target: target ?? { ref: elementRef },
+        file: "edits.json",
+      };
     },
     true,
   );

@@ -18,6 +18,7 @@ type Layer = {
   startMs: number;
   endMs: number;
   zIndex: number;
+  src: string;
 };
 
 /**
@@ -38,6 +39,29 @@ export class SceneLayer {
     return this.active;
   }
 
+  documents(
+    visibleOnly = true,
+  ): { src: string; iframe: HTMLIFrameElement; document: Document }[] {
+    return [...this.layers.values()]
+      .sort(
+        (a, b) =>
+          Number(b.iframe.classList.contains("visible")) -
+            Number(a.iframe.classList.contains("visible")) ||
+          b.zIndex - a.zIndex,
+      )
+      .filter(
+        (l) =>
+          l.ready &&
+          (!visibleOnly || l.iframe.classList.contains("visible")) &&
+          l.iframe.contentDocument,
+      )
+      .map((l) => ({
+        src: l.src,
+        iframe: l.iframe,
+        document: l.iframe.contentDocument!,
+      }));
+  }
+
   load(bundle: ReplayBundle): void {
     const wanted = new Map<
       string,
@@ -49,6 +73,7 @@ export class SceneLayer {
       const startMs = clipStart(bundle.edits, clip.id) ?? 0;
       wanted.set(`scene:${clip.id}`, {
         key: `${clip.src}#${bundle.assetsRevision}`,
+        src: clip.src,
         kind: "scene",
         startMs,
         endMs: startMs + clip.durationMs,
@@ -58,6 +83,7 @@ export class SceneLayer {
     (bundle.edits.overlays ?? []).forEach((overlay, i) =>
       wanted.set(`overlay:${overlay.id}`, {
         key: `${overlay.src}#${bundle.assetsRevision}`,
+        src: overlay.src,
         kind: "overlay",
         startMs: overlay.startMs,
         endMs: overlay.endMs,
@@ -202,7 +228,8 @@ export class SceneLayer {
 function seekDocument(iframe: HTMLIFrameElement, localMs: number): void {
   const doc = iframe.contentDocument,
     win = iframe.contentWindow as
-      (Window & { demohunterScene?: { seek?: (ms: number) => void } }) | null;
+      | (Window & { demohunterScene?: { seek?: (ms: number) => void } })
+      | null;
   if (!doc || !win) return;
   for (const animation of doc.getAnimations()) {
     if (animation.playState !== "paused") {

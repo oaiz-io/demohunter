@@ -1,4 +1,10 @@
 import { ensureFormat } from "./format.js";
+import {
+  elementPatchSchema,
+  elementKey,
+  patchElement,
+  type ElementPatch,
+} from "./element-edit.js";
 import { contract } from "./contract.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -30,8 +36,11 @@ import {
   historySummary,
   undoProject,
   withProjectLock,
+  safeFile,
 } from "./storage.js";
 import {
+  targetSchema,
+  type Target,
   audioIsCurrent,
   narrationStart,
   totalDuration,
@@ -257,6 +266,26 @@ export class ReplayWorkspace {
             if (item.target?.ref) this.element(item.target.ref);
         for (const thread of draft.comments.threads)
           if (thread.elementRef) this.element(thread.elementRef);
+      },
+    );
+  }
+  async editElement(
+    expectedRevision: string,
+    target: Target,
+    patch: ElementPatch,
+  ) {
+    target = targetSchema.parse(target);
+    patch = elementPatchSchema.parse(patch);
+    if (target.ref) this.element(target.ref);
+    if (target.scene) await safeFile(this.dir, target.scene);
+    return this.change(
+      expectedRevision,
+      `${patch.reset ? "Reset" : patch.hidden ? "Hide" : "Edit"} ${target.ref ?? target.selector ?? "element"}`,
+      (draft) => {
+        const id = target.ref
+          ? `edit-${target.ref}`
+          : `edit-${createHash("sha256").update(elementKey(target)).digest("hex").slice(0, 16)}`;
+        patchElement(draft.edits.elements, target, patch, id);
       },
     );
   }
