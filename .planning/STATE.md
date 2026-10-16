@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: none — milestone archived
 Plan: none
 Status: v1.0 complete
-Last activity: 2026-10-15 -- Quick task 261015-nsz reviewed Studio, protected undo boundaries, and passed the full delivery checks
+Last activity: 2026-10-16 -- Quick task 261016-exp made Studio export ~20× faster
 Progress: [██████████] 100%
 
 ## Performance Metrics
@@ -43,6 +43,9 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
+| 2026-10-16 | 261016-exp | Faster Studio export | Parallel chunked rendering in new-headless Chromium, JPEG frames, still-frame reuse, one-pass loudness prepared during render: 67 s 1080p30 export 482 s → ~23 s. 66 Studio tests pass. |
+| 2026-10-16 | 261016-lft | Lift and commercial kit | Lift real UI out of the recording into scenes, overlay backdrop, kit show.js (liftShow, click-safe cursorClick, flip) with browser regression test, demohunter-commercial skill. |
+| 2026-10-15 | 261015-mot | Motion scenes, music and sound | HTML intro/outro scenes and overlays seeked per frame, music/SFX with ducking and −16 LUFS export, procedural score kit, workspace MCP following the open demo; OAIZ docs launch film exported. Studio tests 63 passed. |
 | 2026-10-15 | 261015-nsz | Final Studio review and delivery | Fixed undo across direct-file edits and accurate agent activity labels; full suite 322 passed, 2 skipped; builds, typechecks and publish dry-run passed. |
 | 2026-10-15 | 261015-ms5 | Clear comment IDs and agent links | Copy ID/link/context in every note state; MCP comment resolution and reliable canvas/card/timeline pins. Studio: 22 passed; typecheck passed. |
 | 2026-10-15 | 261015-onc | One Studio command | `bun run studio [workspace]` always opens the full library; removed `open`, `library` and the `replay` alias. Studio tests 21 passed. |
