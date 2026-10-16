@@ -1,0 +1,28 @@
+/* Review comment-484413f9: include the requested Spotify and Klarna wordmarks.
+   Keep the existing seven brands. Fit one full row within the short site shot. */
+div.flex.items-center.will-change-transform {
+  transform: none !important;
+  animation: none !important;
+  justify-content: center !important;
+  width: 100% !important;
+}
+div.flex.items-center.will-change-transform > ul[aria-hidden="true"] { display: none !important; }
+div.flex.items-center.will-change-transform > ul:not([aria-hidden="true"]) {
+  width: 100% !important;
+  padding: 0 64px !important;
+  gap: 32px !important;
+  justify-content: space-evenly !important;
+}
+div.flex.items-center.will-change-transform > ul:not([aria-hidden="true"])::before,
+div.flex.items-center.will-change-transform > ul:not([aria-hidden="true"])::after {
+  display: block;
+  flex-shrink: 0;
+  color: #5b5750;
+  font-family: Arial, sans-serif;
+  font-weight: 750;
+  font-size: 28px;
+  letter-spacing: -1px;
+  line-height: 1.2;
+}
+div.flex.items-center.will-change-transform > ul:not([aria-hidden="true"])::before { content: "Spotify"; }
+div.flex.items-center.will-change-transform > ul:not([aria-hidden="true"])::after { content: "Klarna."; }
