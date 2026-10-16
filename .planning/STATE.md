@@ -43,6 +43,7 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
+| 2026-10-16 | 261016-mjc | Controla flag comment | Changed the Swedish flag to the EU flag through MCP; checked the rendered replay at 31.049 s; inspect passed with no warnings; replied and resolved the comment. |
 | 2026-10-16 | 261016-exp | Faster Studio export | Parallel chunked rendering in new-headless Chromium, JPEG frames, still-frame reuse, one-pass loudness prepared during render: 67 s 1080p30 export 482 s → ~23 s. 66 Studio tests pass. |
 | 2026-10-16 | 261016-lft | Lift and commercial kit | Lift real UI out of the recording into scenes, overlay backdrop, kit show.js (liftShow, click-safe cursorClick, flip) with browser regression test, demohunter-commercial skill. |
 | 2026-10-15 | 261015-mot | Motion scenes, music and sound | HTML intro/outro scenes and overlays seeked per frame, music/SFX with ducking and −16 LUFS export, procedural score kit, workspace MCP following the open demo; OAIZ docs launch film exported. Studio tests 63 passed. |
