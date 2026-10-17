@@ -37,7 +37,12 @@ async function launch(userData: string, args: string[] = [], env: Record<string,
   return { app, page };
 }
 afterEach(async () => {
-  await app?.close().catch(() => {});
+  // A test that failed mid-way may leave the app busy: don't let closing it
+  // hang the next test.
+  const closing = app?.close().catch(() => {});
+  const proc = app?.process();
+  await Promise.race([closing, new Promise((r) => setTimeout(r, 10_000))]);
+  if (proc && proc.exitCode === null) proc.kill("SIGKILL");
   app = undefined;
   await Promise.all(temp.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 }, 30_000);
@@ -90,17 +95,17 @@ describe.skipIf(!runnable)("desktop app", () => {
     const title = await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getTitle());
     expect(title).toBe(`${path.basename(repo)} — DemoHunter Studio`);
     if (shots) await first.page.screenshot({ path: path.join(shots, "library.png") });
-    await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setBounds({ x: 120, y: 90, width: 1100, height: 640 }));
+    await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setBounds({ x: 120, y: 90, width: 980, height: 640 }));
     await first.app.close();
     app = undefined;
     const saved = JSON.parse(await readFile(path.join(userData, "settings.json"), "utf8"));
     expect(saved.recent[0].path).toBe(await realpath(repo));
-    expect(saved.window).toMatchObject({ width: 1100, height: 640 });
+    expect(saved.window).toMatchObject({ width: 980, height: 640 });
     // Next launch reopens the last repository at the same size.
     const second = await launch(userData);
     await second.page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45_000 });
     const bounds = await second.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());
-    expect(bounds).toMatchObject({ width: 1100, height: 640 });
+    expect(bounds).toMatchObject({ width: 980, height: 640 });
     // Close Repository returns to the welcome window with it listed.
     await second.app.evaluate(({ Menu }) => {
       const file = Menu.getApplicationMenu()!.items.find((i) => i.label === "File")!;
@@ -114,11 +119,11 @@ describe.skipIf(!runnable)("desktop app", () => {
 
   test("a saved size without a position still opens the window", async () => {
     const userData = await tmp("dh-desktop-data-");
-    await writeFile(path.join(userData, "settings.json"), JSON.stringify({ recent: ["/no/such/folder"], window: { width: 1000, height: 640 } }));
+    await writeFile(path.join(userData, "settings.json"), JSON.stringify({ recent: ["/no/such/folder"], window: { width: 980, height: 640 } }));
     const { app, page } = await launch(userData);
     await page.waitForURL("app://ui/welcome.html");
     const bounds = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());
-    expect(bounds).toMatchObject({ width: 1000, height: 640 });
+    expect(bounds).toMatchObject({ width: 980, height: 640 });
   }, 60_000);
 
   test("a repository shows every worktree's demos and the library holds still", async () => {
