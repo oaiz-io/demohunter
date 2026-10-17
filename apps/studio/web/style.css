@@ -2725,3 +2725,96 @@ body[data-tool="comment"] #select-layer {
   overflow-wrap: anywhere;
   margin: 0 0 14px;
 }
+
+/* Inline text editing: the editor lives inside the preview frame. */
+.direct-tip {
+  margin: 8px 0 0;
+  color: var(--color-graphite);
+  font-size: var(--text-micro);
+  line-height: var(--leading-tight);
+}
+.direct-warning {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--color-correction-soft);
+  color: var(--color-correction);
+  font-size: var(--text-micro);
+  line-height: var(--leading-tight);
+}
+.direct-warning[hidden] {
+  display: none;
+}
+body.inline-text-editing #select-layer,
+body.inline-text-editing #stage iframe {
+  pointer-events: none !important;
+}
+body.inline-text-editing #stage iframe.inline-text-frame {
+  pointer-events: auto !important;
+}
+.inline-text-ring {
+  position: absolute;
+  z-index: 13;
+  border-radius: var(--radius-xs);
+  box-shadow:
+    0 0 0 1.5px var(--color-agent),
+    0 0 0 4px var(--color-agent-soft);
+  pointer-events: none;
+}
+.inline-text-ring.warn {
+  box-shadow:
+    0 0 0 1.5px var(--color-correction),
+    0 0 0 4px var(--color-correction-soft);
+}
+.inline-text-status {
+  position: absolute;
+  z-index: 14;
+  max-width: 360px;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--color-ink);
+  color: #fff;
+  font-size: var(--text-micro);
+  line-height: var(--leading-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.inline-text-status.warn {
+  background: var(--color-correction);
+  white-space: normal;
+}
+.inline-text-ring[hidden],
+.inline-text-status[hidden] {
+  display: none;
+}
+.text-edit-marks {
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  pointer-events: none;
+}
+.text-edit-mark {
+  position: absolute;
+  border: 1px dashed rgba(47, 91, 234, 0.55);
+  border-radius: var(--radius-xs);
+}
+.text-edit-mark.hot {
+  border-style: solid;
+  background: rgba(47, 91, 234, 0.05);
+}
+.text-edit-mark.hot::after {
+  content: attr(data-label);
+  position: absolute;
+  left: -1px;
+  bottom: 100%;
+  margin-bottom: 3px;
+  padding: 0 5px;
+  border-radius: var(--radius-xs);
+  background: var(--color-agent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}

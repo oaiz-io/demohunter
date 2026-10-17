@@ -6,15 +6,41 @@ import {
   type ElementPatch,
   type ElementEdit,
 } from "../element-edit.js";
+import { isTextField } from "./element-overrides.js";
 export type Editable = { target: Target; label: string };
 type Draft = {
   target: Target;
   patch: ElementPatch;
   revision: string;
   version: number;
+  label?: string;
   error?: string;
   busy?: boolean;
   timer?: ReturnType<typeof setTimeout>;
+};
+/** Rewriting one element's text in place, on the canvas. */
+type Inline = {
+  entry: Editable;
+  key: string;
+  original: string;
+  text: string;
+  revision: string;
+  /** white-space to save with text that has line breaks. */
+  newline?: string;
+  doc?: Document;
+  host?: HTMLElement;
+  field?: HTMLTextAreaElement | HTMLInputElement;
+  frame?: HTMLIFrameElement;
+  selection: [number, number];
+  baseline?: Metrics;
+  warning: string;
+};
+type Metrics = {
+  width: number;
+  height: number;
+  overflowX: number;
+  overflowY: number;
+  clipped: boolean;
 };
 type Hooks = {
   bundle: () => ReplayBundle;
@@ -26,6 +52,12 @@ type Hooks = {
   api: <T>(route: string, data: unknown) => Promise<T>;
   reload: () => Promise<void>;
   update: () => void;
+  /** Stop playback while text is being rewritten. */
+  pause: () => void;
+  /** The editable target for a node in the recording or a scene page. */
+  editableOf: (node: Element) => Editable | undefined;
+  /** Documents visible on the current frame, top-most first. */
+  textLayers: () => Document[];
 };
 const defaults = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
 export class ElementEditor {
@@ -51,14 +83,24 @@ export class ElementEditor {
     changed: boolean;
   };
   private suppressClick = false;
+  private inline?: Inline;
+  private ring: HTMLDivElement;
+  private status: HTMLDivElement;
+  private marks: HTMLDivElement;
+  private guarded = new WeakSet<Document>();
+  private guardUntil = 0;
+  /** Pointer over the canvas, for the edited-text markers. */
+  pointer?: { x: number; y: number };
   constructor(
     private root: HTMLElement,
     private hooks: Hooks,
   ) {
     root.innerHTML = `<div class="direct-heading"><strong>Edit element</strong><span id="element-save-state" role="status">Select an element</span></div>
       <div class="direct-scroll"><p id="element-empty" class="hint">Click an element in the preview, or choose one below.</p>
+      <p class="direct-tip">Double-click text on the canvas to rewrite it.</p>
       <form id="element-form" hidden><p id="element-name" class="mono"></p>
       <label class="direct-field">Text<textarea id="element-text" rows="3" spellcheck="false"></textarea></label>
+      <p id="element-text-warning" class="direct-warning" role="status" hidden></p>
       <div class="direct-grid"><label>Text color<div class="direct-color"><input id="element-color-picker" type="color" aria-label="Pick text color"><input id="element-color" aria-label="Text color" placeholder="CSS color"></div></label>
       <label>Background<div class="direct-color"><input id="element-background-picker" type="color" aria-label="Pick background color"><input id="element-background" aria-label="Background color" placeholder="transparent"></div></label></div>
       <div class="direct-grid"><label>Font size<input id="element-font-size" aria-label="Font size" type="number" min="1" max="1000" step="1"></label><label>Opacity (%)<input id="element-opacity" aria-label="Opacity" type="number" min="0" max="100" step="1"></label>
@@ -81,7 +123,26 @@ export class ElementEditor {
     }
     this.outline.setAttribute("aria-label", "Drag selected element");
     this.outline.tabIndex = 0;
-    document.querySelector("#canvas-wrap")!.append(this.outline);
+    this.ring = document.createElement("div");
+    this.ring.className = "inline-text-ring";
+    this.ring.hidden = true;
+    this.status = document.createElement("div");
+    this.status.className = "inline-text-status";
+    this.status.setAttribute("role", "status");
+    this.status.hidden = true;
+    this.marks = document.createElement("div");
+    this.marks.className = "text-edit-marks";
+    document
+      .querySelector("#canvas-wrap")!
+      .append(this.outline, this.marks, this.ring, this.status);
+    // Clicking anywhere outside the inline editor saves it.
+    document.addEventListener(
+      "pointerdown",
+      () => {
+        if (this.inline) this.commitInline();
+      },
+      true,
+    );
     this.outline.addEventListener("pointerdown", (event) =>
       this.begin(event, (event.target as HTMLElement).dataset.corner ?? "move"),
     );
@@ -180,6 +241,17 @@ export class ElementEditor {
           event.stopImmediatePropagation();
           this.cancelGesture();
         }
+        // Keys typed into the inline editor stay in its frame; never let
+        // Delete or arrows act on the element while its text is open.
+        if (this.inline) {
+          if ((event.target as HTMLElement).closest("input,textarea,select"))
+            return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (event.code === "Escape") this.cancelInline();
+          else this.inline.field?.focus();
+          return;
+        }
         if (
           !this.selected ||
           this.root.hidden ||
@@ -231,7 +303,9 @@ export class ElementEditor {
     return this.selected && this.drafts.get(elementKey(this.selected.target));
   }
   get dirtyCount(): number {
-    return this.drafts.size;
+    const pending =
+      this.inline && this.inline.text !== this.inline.original ? 1 : 0;
+    return this.drafts.size + pending;
   }
   select(entry: Editable | undefined): void {
     this.selected = entry;
@@ -239,11 +313,30 @@ export class ElementEditor {
     this.refresh();
   }
   edits(elements = this.hooks.bundle().edits.elements): ElementEdit[] {
-    if (!this.drafts.size) return elements;
+    if (!this.drafts.size && !this.inline) return elements;
     const result = structuredClone(elements);
     let i = 0;
     for (const d of this.drafts.values())
       patchElement(result, d.target, d.patch, `preview-${i++}`);
+    // The live element shows the typed text and reflows; the editor above it
+    // draws the glyphs, so hide the element's own to avoid double text.
+    const inline = this.inline;
+    if (inline)
+      patchElement(
+        result,
+        inline.entry.target,
+        {
+          ...(inline.text !== inline.original ? { text: inline.text } : {}),
+          style: {
+            "-webkit-text-fill-color": "transparent",
+            "text-shadow": "none",
+            ...(inline.newline && inline.text.includes("\n")
+              ? { "white-space": inline.newline }
+              : {}),
+          },
+        },
+        "inline-preview",
+      );
     return result;
   }
   private currentEdit() {
@@ -259,6 +352,7 @@ export class ElementEditor {
     target: Target,
     patch: ElementPatch,
     immediately = false,
+    base?: { revision: string; label: string },
   ): void {
     const key = elementKey(target);
     let d = this.drafts.get(key);
@@ -266,8 +360,9 @@ export class ElementEditor {
       d = {
         target,
         patch: {},
-        revision: this.hooks.bundle().revision,
+        revision: base?.revision ?? this.hooks.bundle().revision,
         version: 0,
+        label: base?.label,
       };
       this.drafts.set(key, d);
     }
@@ -292,6 +387,7 @@ export class ElementEditor {
     this.refresh();
   }
   async flushAll(): Promise<void> {
+    if (this.inline) this.commitInline();
     for (const key of [...this.drafts.keys()]) await this.flush(key);
     if (this.drafts.size)
       throw new Error("Resolve element edit changes before continuing.");
@@ -318,6 +414,14 @@ export class ElementEditor {
       } catch (error) {
         draft.error = `${error instanceof Error ? error.message : String(error)} Your changes are kept. Apply them to the latest version or use the saved version.`;
         await this.hooks.reload().catch(() => {});
+        // An inline edit saved after Tab moved on: show its conflict choice.
+        if (
+          !this.inline &&
+          draft.label &&
+          this.selected &&
+          elementKey(this.selected.target) !== key
+        )
+          this.hooks.select({ target: draft.target, label: draft.label });
       } finally {
         draft.busy = false;
         this.rendered = "";
@@ -343,14 +447,26 @@ export class ElementEditor {
     this.field("element-form").hidden = !selected;
     this.field("element-save-state").textContent = d?.error
       ? "Changes need review"
-      : d?.busy
-        ? "Saving…"
-        : d
-          ? "Unsaved changes"
-          : selected
-            ? "Saved"
-            : "Select an element";
+      : this.inline && this.inline.key === key
+        ? "Editing on canvas"
+        : d?.busy
+          ? "Saving…"
+          : d
+            ? "Unsaved changes"
+            : selected
+              ? "Saved"
+              : "Select an element";
     this.field("element-conflict").hidden = !d?.error;
+    const warning =
+      selected && this.inline?.key === key
+        ? this.inline.warning
+        : selected && node && this.currentEdit()?.text !== undefined
+          ? overflowWarning(node)
+          : "";
+    if (this.field("element-text-warning").textContent !== warning) {
+      this.field("element-text-warning").textContent = warning;
+      this.field("element-text-warning").hidden = !warning;
+    }
     this.field("element-conflict-message").textContent = d?.error ?? "";
     if (
       selected &&
@@ -451,17 +567,22 @@ export class ElementEditor {
   }
   rect(): { box: DOMRect; scaleX: number; scaleY: number } | undefined {
     if (!this.selected) return;
-    const node = this.hooks.resolve(this.selected.target),
-      frame = node && this.hooks.frame(node);
+    const node = this.hooks.resolve(this.selected.target);
+    return node && this.screenRect(node);
+  }
+  /** A node's box (or `local`, in its document) in Studio window pixels. */
+  private screenRect(
+    node: Element,
+    local = node.getBoundingClientRect(),
+  ): { box: DOMRect; scaleX: number; scaleY: number } | undefined {
+    const frame = this.hooks.frame(node);
     if (
-      !node ||
       !frame ||
       (frame.classList.contains("scene-frame") &&
         !frame.classList.contains("visible"))
     )
       return;
-    const local = node.getBoundingClientRect(),
-      f = frame.getBoundingClientRect();
+    const f = frame.getBoundingClientRect();
     if (!local.width || !local.height) return;
     const scaleX = f.width / frame.clientWidth,
       scaleY = f.height / frame.clientHeight;
@@ -478,7 +599,9 @@ export class ElementEditor {
   }
   draw(enabled: boolean): void {
     this.refresh();
-    const rect = enabled && this.rect();
+    this.placeInline();
+    this.drawMarks(enabled && !this.inline && !!this.pointer);
+    const rect = enabled && !this.inline && this.rect();
     this.outline.hidden = !rect;
     if (!rect) return;
     const canvas = document
@@ -592,6 +715,419 @@ export class ElementEditor {
     this.hooks.update();
     this.refresh();
   }
+  // Inline text editing ------------------------------------------------------
+  /**
+   * Rewrite the text that owns `node` (or the text at `point`, in the node's
+   * document coordinates) in place. Returns false when there is no text.
+   */
+  editText(node: Element, point?: { x: number; y: number }): boolean {
+    let owner = textOwner(node, point),
+      entry: Editable | undefined;
+    while (owner && !["HTML", "BODY"].includes(owner.tagName)) {
+      entry = this.hooks.editableOf(owner);
+      if (entry) break;
+      owner = owner.parentElement ?? undefined;
+    }
+    if (!owner || !entry) return false;
+    const key = elementKey(entry.target);
+    if (this.inline?.key === key) {
+      this.inline.field?.focus();
+      return true;
+    }
+    if (this.inline) this.commitInline();
+    this.hooks.pause();
+    this.hooks.select(entry);
+    const live = this.hooks.resolve(entry.target) ?? owner,
+      style = live.ownerDocument.defaultView!.getComputedStyle(live),
+      // What is on screen, including nested elements' own edits.
+      original = displayedText(live);
+    this.inline = {
+      entry,
+      key,
+      original,
+      text: original,
+      revision: this.hooks.bundle().revision,
+      newline: isTextField(live)
+        ? undefined
+        : ["normal", "nowrap"].includes(style.whiteSpace)
+          ? style.whiteSpace === "nowrap"
+            ? "pre"
+            : "pre-line"
+          : undefined,
+      selection: [0, original.length],
+      warning: "",
+    };
+    this.mount(live);
+    document.body.classList.add("inline-text-editing");
+    this.hooks.update();
+    return true;
+  }
+  /** Save the inline text through the same targeted patch as the panel. */
+  commitInline(move?: 1 | -1): void {
+    const inline = this.inline;
+    if (!inline) return;
+    const from = this.hooks.resolve(inline.entry.target);
+    const next = move && from ? this.neighbour(from, move) : undefined;
+    this.closeInline();
+    if (inline.text !== inline.original)
+      this.patchTarget(
+        inline.entry.target,
+        {
+          text: inline.text,
+          ...(inline.newline && inline.text.includes("\n")
+            ? { style: { "white-space": inline.newline } }
+            : {}),
+        },
+        true,
+        { revision: inline.revision, label: inline.entry.label },
+      );
+    else this.hooks.update();
+    if (next) this.editText(next);
+  }
+  cancelInline(): void {
+    if (!this.inline) return;
+    this.closeInline();
+    this.rendered = "";
+    this.hooks.update();
+    this.refresh();
+  }
+  get editingText(): boolean {
+    return !!this.inline;
+  }
+  private closeInline(): void {
+    const inline = this.inline;
+    if (!inline) return;
+    this.inline = undefined;
+    inline.host?.remove();
+    inline.frame?.classList.remove("inline-text-frame");
+    document.body.classList.remove("inline-text-editing");
+    this.ring.hidden = this.status.hidden = true;
+    // Keyboard shortcuts belong to Studio again, not the preview frame.
+    if (document.activeElement === inline.frame)
+      (document.activeElement as HTMLElement).blur();
+    this.rendered = "";
+  }
+  private mount(node: Element): void {
+    const inline = this.inline!,
+      doc = node.ownerDocument;
+    const focused =
+      !inline.field ||
+      document.activeElement === document.body ||
+      document.activeElement === inline.frame ||
+      !inline.frame?.isConnected;
+    inline.host?.remove();
+    inline.frame?.classList.remove("inline-text-frame");
+    this.guard(doc);
+    // A shadow root keeps the page's CSS off the editor; same-document
+    // rendering keeps its fonts, layout and the preview/camera scale.
+    const host = doc.createElement("demohunter-text-editor");
+    host.setAttribute(
+      "style",
+      "all:initial!important;position:fixed!important;left:0!important;top:0!important;width:0!important;height:0!important;display:block!important;z-index:2147483647!important;pointer-events:none!important",
+    );
+    const root = host.attachShadow({ mode: "open" });
+    const css = doc.createElement("style");
+    css.textContent =
+      ".f{all:initial;position:fixed;display:block;box-sizing:border-box;margin:0;border-style:solid;border-color:transparent;background:transparent;outline:none;resize:none;overflow:hidden;pointer-events:auto;transform-origin:0 0;cursor:text}.f::selection{background:rgba(47,91,234,.3)}";
+    const multiline = node.localName !== "input";
+    const field = doc.createElement(multiline ? "textarea" : "input");
+    field.className = "f";
+    field.spellcheck = false;
+    field.setAttribute("aria-label", "Rewrite text");
+    field.value = inline.text;
+    root.append(css, field);
+    doc.documentElement.append(host);
+    Object.assign(inline, {
+      doc,
+      host,
+      field,
+      frame: this.hooks.frame(node),
+    });
+    inline.frame?.classList.add("inline-text-frame");
+    field.addEventListener("input", () => {
+      if (this.inline !== inline) return;
+      inline.text = field.value;
+      this.rememberSelection();
+      const panel = this.field<HTMLTextAreaElement>("element-text");
+      if (this.selected && elementKey(this.selected.target) === inline.key)
+        panel.value = inline.text;
+      this.hooks.update();
+    });
+    for (const type of ["select", "keyup", "pointerup"])
+      field.addEventListener(type, () => this.rememberSelection());
+    field.addEventListener("keydown", (event) => {
+      const e = event as KeyboardEvent;
+      e.stopPropagation();
+      if (e.isComposing || this.inline !== inline) return;
+      if (e.key === "Enter" && (!e.shiftKey || !multiline)) {
+        e.preventDefault();
+        this.commitInline();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        this.cancelInline();
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        this.commitInline(e.shiftKey ? -1 : 1);
+      }
+    });
+    this.placeInline();
+    if (focused) {
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(...inline.selection);
+    }
+  }
+  private rememberSelection(): void {
+    const field = this.inline?.field;
+    if (field)
+      this.inline!.selection = [
+        field.selectionStart ?? 0,
+        field.selectionEnd ?? 0,
+      ];
+  }
+  /** Block page clicks (links, buttons) in a frame while text is edited. */
+  private guard(doc: Document): void {
+    if (this.guarded.has(doc)) return;
+    this.guarded.add(doc);
+    for (const type of [
+      "pointerdown",
+      "mousedown",
+      "click",
+      "dblclick",
+      "auxclick",
+      "contextmenu",
+    ])
+      doc.addEventListener(
+        type,
+        (event) => {
+          if (!this.inline && performance.now() > this.guardUntil) return;
+          if (
+            this.inline?.host &&
+            event.composedPath().includes(this.inline.host)
+          )
+            return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (type === "pointerdown" && this.inline) {
+            this.guardUntil = performance.now() + 600;
+            this.commitInline();
+          }
+        },
+        true,
+      );
+  }
+  /** Lay the editor exactly over the element's text, every frame. */
+  private placeInline(): void {
+    const inline = this.inline;
+    if (!inline) return;
+    const node = this.hooks.resolve(inline.entry.target);
+    if (!node) {
+      // The replay is rebuilding (a save or agent edit); wait for the node.
+      if (inline.host)
+        inline.host.style.setProperty("display", "none", "important");
+      this.ring.hidden = this.status.hidden = true;
+      return;
+    }
+    if (node.ownerDocument !== inline.doc || !inline.host?.isConnected) {
+      this.mount(node);
+      return;
+    }
+    inline.host.style.setProperty("display", "block", "important");
+    const field = inline.field!,
+      view = node.ownerDocument.defaultView!,
+      cs = view.getComputedStyle(node),
+      rect = node.getBoundingClientRect(),
+      el = node as HTMLElement,
+      fs = field.style;
+    // offsetWidth is rounded: only use it to undo real (moved/scaled) transforms.
+    let transformed = false;
+    for (let a: Element | null = node; a && !transformed; a = a.parentElement)
+      transformed = view.getComputedStyle(a).transform !== "none";
+    const layoutW = transformed ? (el.offsetWidth ?? rect.width) : rect.width,
+      layoutH = transformed ? (el.offsetHeight ?? rect.height) : rect.height,
+      sx = layoutW && rect.width ? rect.width / layoutW : 1,
+      sy = layoutH && rect.height ? rect.height / layoutH : 1;
+    for (const name of typography)
+      fs.setProperty(name, cs.getPropertyValue(name));
+    const color = cs.color;
+    fs.color = /^(transparent|rgba\(.*,\s*0\))$/.test(color) ? "#111" : color;
+    fs.caretColor = fs.color;
+    fs.transform = `scale(${sx}, ${sy})`;
+    const text = textBox(node),
+      box =
+        isTextField(node) ||
+        /^(block|list-item|flow-root|inline-block|table-cell|table-caption|-webkit-box|table)$/.test(
+          cs.display,
+        );
+    const px = (name: string) => parseFloat(cs.getPropertyValue(name)) || 0;
+    // Range boxes start at the glyphs; the editor's lines start at the line
+    // box, half the leading above them.
+    const lineHeight = parseFloat(cs.lineHeight),
+      first = text.lines[0],
+      leading =
+        first && Number.isFinite(lineHeight)
+          ? (lineHeight - first.height / sy) / 2
+          : 0;
+    if (box) {
+      // Same border box, padding and width: the text wraps where it does.
+      const pad = {
+        top: px("padding-top"),
+        right: px("padding-right"),
+        bottom: px("padding-bottom"),
+        left: px("padding-left"),
+      };
+      const border = ["top", "right", "bottom", "left"].map(
+        (side) => `${px(`border-${side}-width`)}px`,
+      );
+      // Buttons and table cells centre their text vertically.
+      if (!isTextField(node) && text.lines.length) {
+        const dy =
+          (text.box.top - rect.top) / sy -
+          px("border-top-width") -
+          pad.top -
+          leading;
+        if (dy > 0.5) pad.top += dy;
+      }
+      Object.assign(fs, {
+        left: `${rect.left}px`,
+        top: `${rect.top}px`,
+        width: `${layoutW}px`,
+        height: `${layoutH}px`,
+        padding: `${pad.top}px ${pad.right}px ${pad.bottom}px ${pad.left}px`,
+        borderWidth: border.join(" "),
+        textAlign: cs.textAlign,
+        textIndent: cs.textIndent,
+        whiteSpace: ["nowrap", "pre"].includes(cs.whiteSpace)
+          ? "pre"
+          : "pre-wrap",
+      });
+      // Keep overflowing text readable while the warning explains it.
+      if (field.scrollHeight > field.clientHeight + 1)
+        fs.height = `${layoutH + field.scrollHeight - field.clientHeight}px`;
+      if (field.scrollWidth > field.clientWidth + 1 && fs.whiteSpace === "pre")
+        fs.width = `${layoutW + field.scrollWidth - field.clientWidth}px`;
+    } else {
+      // Inline and flex text: cover the text runs themselves.
+      const b = text.lines.length ? text.box : rect;
+      Object.assign(fs, {
+        left: `${b.left}px`,
+        top: `${b.top - leading * sy}px`,
+        width: `${Math.max(2, b.width / sx + 1)}px`,
+        height: `${Math.max(b.height / sy + leading * 2, parseFloat(cs.fontSize) || 0)}px`,
+        padding: "0",
+        borderWidth: "0",
+        textAlign: text.lines.length > 1 ? cs.textAlign : "left",
+        textIndent:
+          text.lines.length > 1 && first
+            ? `${(first.left - b.left) / sx}px`
+            : "0",
+        whiteSpace: text.lines.length > 1 ? "pre-wrap" : "pre",
+      });
+    }
+    const metrics = measure(node);
+    inline.baseline ??= metrics;
+    const base = inline.baseline;
+    inline.warning =
+      metrics.overflowX > base.overflowX + 1 ||
+      metrics.overflowY > base.overflowY + 1 ||
+      (metrics.clipped && !base.clipped)
+        ? "Text overflows its box and may be cut off."
+        : metrics.width > base.width + 1 || metrics.height > base.height + 1
+          ? "Text is larger than the original box. Nearby layout may shift."
+          : "";
+    const screen = this.screenRect(field);
+    const wrap = document
+      .querySelector("#canvas-wrap")!
+      .getBoundingClientRect();
+    this.ring.hidden = this.status.hidden = !screen;
+    if (!screen) return;
+    const s = screen.box;
+    Object.assign(this.ring.style, {
+      left: `${s.left - wrap.left - 3}px`,
+      top: `${s.top - wrap.top - 3}px`,
+      width: `${s.width + 6}px`,
+      height: `${s.height + 6}px`,
+    });
+    this.ring.classList.toggle("warn", !!inline.warning);
+    const message =
+      inline.warning ||
+      `Enter to save · ${field.localName === "textarea" ? "Shift+Enter new line · " : ""}Esc to cancel · Tab next`;
+    if (this.status.textContent !== message) this.status.textContent = message;
+    this.status.classList.toggle("warn", !!inline.warning);
+    const stage = document.querySelector("#stage")!.getBoundingClientRect(),
+      height = this.status.offsetHeight || 24;
+    const below = s.bottom + 8 + height < stage.bottom;
+    Object.assign(this.status.style, {
+      left: `${Math.max(stage.left, Math.min(s.left, stage.right - this.status.offsetWidth)) - wrap.left}px`,
+      top: `${(below ? s.bottom + 8 : Math.max(stage.top, s.top - 8 - height)) - wrap.top}px`,
+    });
+  }
+  /** The next text element in reading order on the current frame. */
+  private neighbour(from: Element, direction: 1 | -1): Element | undefined {
+    const items: { node: Element; box: DOMRect }[] = [];
+    for (const doc of this.hooks.textLayers())
+      for (const node of doc.body?.querySelectorAll("*") ?? []) {
+        if (node !== from && !ownsText(node)) continue;
+        const style = doc.defaultView!.getComputedStyle(node);
+        if (style.visibility !== "visible" || Number(style.opacity) === 0)
+          continue;
+        const local = node.getBoundingClientRect();
+        if (
+          !local.width ||
+          !local.height ||
+          local.right < 0 ||
+          local.bottom < 0 ||
+          local.left > doc.defaultView!.innerWidth ||
+          local.top > doc.defaultView!.innerHeight
+        )
+          continue;
+        const screen = this.screenRect(node, local);
+        if (screen) items.push({ node, box: screen.box });
+      }
+    const ordered = readingOrder(items);
+    const index = ordered.findIndex((item) => item.node === from);
+    if (index < 0) return;
+    for (let step = 1; step < ordered.length; step++) {
+      const n = ordered.length,
+        next = ordered[(((index + step * direction) % n) + n) % n]!;
+      if (this.hooks.editableOf(next.node)) return next.node;
+    }
+  }
+  /** Subtle outlines on elements with rewritten text while hovering. */
+  private drawMarks(show: boolean): void {
+    const boxes: DOMRect[] = [];
+    if (show)
+      for (const edit of this.edits()) {
+        if (edit.text === undefined) continue;
+        const node = this.hooks.resolve(edit.target),
+          screen = node && this.screenRect(node);
+        if (screen) boxes.push(screen.box);
+      }
+    const wrap = document
+      .querySelector("#canvas-wrap")!
+      .getBoundingClientRect();
+    while (this.marks.children.length > boxes.length)
+      this.marks.lastElementChild!.remove();
+    boxes.forEach((b, i) => {
+      let mark = this.marks.children[i] as HTMLElement | undefined;
+      if (!mark) {
+        mark = document.createElement("div");
+        mark.className = "text-edit-mark";
+        mark.dataset.label = "Text edited";
+        this.marks.append(mark);
+      }
+      const p = this.pointer!;
+      mark.classList.toggle(
+        "hot",
+        p.x >= b.left && p.x <= b.right && p.y >= b.top && p.y <= b.bottom,
+      );
+      Object.assign(mark.style, {
+        left: `${b.left - wrap.left - 2}px`,
+        top: `${b.top - wrap.top - 2}px`,
+        width: `${b.width + 4}px`,
+        height: `${b.height + 4}px`,
+      });
+    });
+  }
 }
 
 /** Deterministic selector for a scene's authored DOM, independent of edited text/style. */
@@ -613,4 +1149,201 @@ export function sceneSelector(node: Element): string {
     node = node.parentElement;
   }
   return `html > ${parts.join(" > ")}`;
+}
+
+const typography = [
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "font-stretch",
+  "font-variant",
+  "font-feature-settings",
+  "font-variation-settings",
+  "font-kerning",
+  "font-optical-sizing",
+  "line-height",
+  "letter-spacing",
+  "word-spacing",
+  "text-transform",
+  "direction",
+  "overflow-wrap",
+  "word-break",
+  "hyphens",
+  "tab-size",
+  "text-rendering",
+  "-webkit-font-smoothing",
+  "writing-mode",
+  "font-synthesis",
+  "text-decoration-line",
+  "text-decoration-style",
+  "text-decoration-color",
+  "text-decoration-thickness",
+  "text-underline-offset",
+];
+const skipped = "script,style,noscript,template,title";
+/** True when the element itself holds visible text (not only its children). */
+function ownsText(node: Element): boolean {
+  if (isTextField(node)) return true;
+  if (node.closest(skipped)) return false;
+  for (const child of node.childNodes)
+    if (child.nodeType === 3 && child.nodeValue?.trim()) return true;
+  return false;
+}
+/**
+ * The deepest element that owns the text under the pointer: only the `<b>`
+ * of `<p>Hello <b>world</b></p>` when "world" is double-clicked.
+ */
+function textOwner(
+  hit: Element,
+  point?: { x: number; y: number },
+): Element | undefined {
+  if (isTextField(hit) || (!point && ownsText(hit))) return hit;
+  const doc = hit.ownerDocument;
+  const caret = point && doc.caretRangeFromPoint?.(point.x, point.y);
+  const leaf = caret?.startContainer;
+  if (leaf?.nodeType === 3 && leaf.nodeValue?.trim() && leaf.parentElement) {
+    // An icon inside a button finds the button's label.
+    let near: Element | null = hit;
+    for (let i = 0; near && i < 4 && !near.contains(leaf); i++)
+      near = near.parentElement;
+    if (near?.contains(leaf) && !leaf.parentElement.closest(skipped))
+      return leaf.parentElement;
+  }
+  let node: Element | null = hit;
+  while (node && !ownsText(node) && !node.textContent?.trim())
+    node = node.parentElement;
+  return node ?? undefined;
+}
+/** The text as it reads on screen: collapsed whitespace, `<br>` as a new line. */
+function displayedText(node: Element): string {
+  if (isTextField(node)) return node.value;
+  const view = node.ownerDocument.defaultView!;
+  const walker = node.ownerDocument.createTreeWalker(node, 1 | 4);
+  let text = "",
+    leaf: Node | null;
+  while ((leaf = walker.nextNode())) {
+    if (leaf.nodeType === 1) {
+      if ((leaf as Element).localName === "br") text += "\u0000";
+      continue;
+    }
+    const parent = leaf.parentElement;
+    if (!parent || parent.closest(skipped)) continue;
+    const space = view.getComputedStyle(parent).whiteSpace;
+    let value = leaf.nodeValue ?? "";
+    if (["normal", "nowrap"].includes(space)) {
+      // Collapse like CSS, including across element boundaries.
+      value = value.replace(/[\t\n\r\f ]+/g, " ");
+      if (!text || /[ \u0000]$/.test(text)) value = value.replace(/^ /, "");
+    } else if (space === "pre-line")
+      value = value.replace(/[ \t]+/g, " ").replace(/ ?\n ?/g, "\n");
+    text += value;
+  }
+  return text
+    .replace(/ (?=\u0000)/g, "")
+    .replaceAll("\u0000", "\n")
+    .trim();
+}
+/** Line boxes of an element's own text, without icons or other children. */
+function textBox(node: Element): { box: DOMRect; lines: DOMRect[] } {
+  const doc = node.ownerDocument,
+    range = doc.createRange(),
+    lines: DOMRect[] = [];
+  const walker = doc.createTreeWalker(node, 4);
+  let leaf: Node | null;
+  while ((leaf = walker.nextNode())) {
+    if (!leaf.nodeValue?.trim() || leaf.parentElement?.closest(skipped))
+      continue;
+    range.selectNodeContents(leaf);
+    for (const r of range.getClientRects())
+      if (r.width || r.height) lines.push(r);
+  }
+  if (!lines.length) return { box: node.getBoundingClientRect(), lines };
+  const left = Math.min(...lines.map((r) => r.left)),
+    top = Math.min(...lines.map((r) => r.top)),
+    right = Math.max(...lines.map((r) => r.right)),
+    bottom = Math.max(...lines.map((r) => r.bottom));
+  // Line boxes of one line: merge text runs that share a line.
+  const merged: DOMRect[] = [];
+  for (const r of lines.sort((a, b) => a.top - b.top || a.left - b.left)) {
+    const last = merged.at(-1);
+    if (
+      last &&
+      Math.abs(last.top - r.top) < Math.min(last.height, r.height) / 2
+    )
+      merged[merged.length - 1] = new DOMRect(
+        Math.min(last.left, r.left),
+        Math.min(last.top, r.top),
+        Math.max(last.right, r.right) - Math.min(last.left, r.left),
+        Math.max(last.bottom, r.bottom) - Math.min(last.top, r.top),
+      );
+    else merged.push(r);
+  }
+  return {
+    box: new DOMRect(left, top, right - left, bottom - top),
+    lines: merged,
+  };
+}
+function measure(node: Element): Metrics {
+  const el = node as HTMLElement,
+    view = node.ownerDocument.defaultView!,
+    rect = node.getBoundingClientRect();
+  const own = view.getComputedStyle(node);
+  // Text fields scroll their value instead of showing overflow.
+  const field = isTextField(node);
+  const inline = !field && own.display === "inline";
+  // Only real clipping counts: overflow that stays visible is not cut off,
+  // and the viewport edge moves as the recording scrolls.
+  let clipped = false;
+  for (
+    let a = node.parentElement;
+    a && !clipped && a !== node.ownerDocument.body;
+    a = a.parentElement
+  ) {
+    const s = view.getComputedStyle(a);
+    if (s.overflowX === "visible" && s.overflowY === "visible") continue;
+    const r = a.getBoundingClientRect();
+    clipped =
+      rect.left < r.left - 1 ||
+      rect.top < r.top - 1 ||
+      rect.right > r.right + 1 ||
+      rect.bottom > r.bottom + 1;
+  }
+  return {
+    width: el.offsetWidth ?? rect.width,
+    height: el.offsetHeight ?? rect.height,
+    overflowX:
+      inline || (!field && own.overflowX === "visible")
+        ? 0
+        : Math.max(0, el.scrollWidth - el.clientWidth),
+    overflowY:
+      inline || (!field && own.overflowY === "visible")
+        ? 0
+        : Math.max(0, el.scrollHeight - el.clientHeight),
+    clipped,
+  };
+}
+/** Saved text that does not fit: the panel's warning. */
+function overflowWarning(node: Element): string {
+  const m = measure(node);
+  return m.overflowX > 1 || m.overflowY > 1 || m.clipped
+    ? "Text overflows its box and may be cut off."
+    : "";
+}
+/** Rows from top to bottom, then left to right within a row. */
+function readingOrder<T extends { box: DOMRect }>(items: T[]): T[] {
+  const rows: T[][] = [];
+  for (const item of [...items].sort((a, b) => a.box.top - b.box.top)) {
+    const row = rows.at(-1),
+      first = row?.[0]?.box;
+    if (
+      row &&
+      first &&
+      item.box.top + item.box.height / 2 < first.bottom &&
+      item.box.top + item.box.height / 2 > first.top
+    )
+      row.push(item);
+    else rows.push([item]);
+  }
+  return rows.flatMap((row) => row.sort((a, b) => a.box.left - b.box.left));
 }
