@@ -5,12 +5,17 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { build } from "esbuild";
 import { LocalLibrary } from "./library.js";
+import { SeenDemos } from "./seen.js";
 import { createReplayHandler } from "./server.js";
 import { contract } from "./contract.js";
 import { fontFile } from "./fonts.js";
 import { randomUUID } from "node:crypto";
 import { loadBundle } from "./storage.js";
-import { clearStudioSession, writeStudioSession } from "./workspace.js";
+import {
+  clearStudioSession,
+  libraryProjectId,
+  writeStudioSession,
+} from "./workspace.js";
 /** A tab that has not polled for this long no longer counts as viewing.
  * Hidden tabs may poll only once a minute under browser throttling. */
 const VIEWER_TIMEOUT_MS = 90_000,
@@ -20,7 +25,9 @@ export async function serveLibrary(
   options: { port?: number; host?: string } = {},
 ) {
   const library = await LocalLibrary.open(root);
-  await library.scan();
+  // Start scanning, but serve right away: the page shows and fills in.
+  void library.scan().catch(() => {});
+  const seen = new SeenDemos(library.root);
   const here = path.dirname(fileURLToPath(import.meta.url)),
     html = await readFile(path.join(here, "web/library.html")),
     css = await readFile(path.join(here, "web/library.css"));
@@ -42,6 +49,8 @@ export async function serveLibrary(
     string,
     { dir: string; host: string; seen: number; claimed: number }
   >();
+  const sessionRoots = new Set<string>();
+  let sessionOwner: string | undefined;
   let shown: string | undefined,
     shownAt = 0,
     writing = Promise.resolve();
@@ -65,22 +74,39 @@ export async function serveLibrary(
     shown = next;
     shownAt = now;
     const target = viewers.get(next)!;
+    // The opened folder and the worktree that owns the demo both record it,
+    // so an agent connected in either one edits the demo on screen.
+    const owner = library.rootOf(target.dir) ?? library.root;
+    const previous = sessionOwner;
+    sessionOwner = owner;
     writing = writing
-      .then(async () =>
-        writeStudioSession(library.root, {
-          protocolVersion: 1,
-          projectDir: path.relative(library.root, target.dir) || ".",
-          projectId: next,
-          title: await loadBundle(target.dir)
-            .then((b) => b.project.title)
-            .catch(() => path.basename(target.dir)),
-          url: target.host
-            ? `http://${target.host}/projects/${next}/`
-            : undefined,
-          updatedAt: new Date().toISOString(),
-          serverId,
-        }),
-      )
+      .then(async () => {
+        // The worktree that held the previous demo must not keep pointing
+        // its agents at a demo that is no longer on screen.
+        if (previous && previous !== owner && previous !== library.root)
+          await clearStudioSession(previous, serverId);
+        const title = await loadBundle(target.dir)
+          .then((b) => b.project.title)
+          .catch(() => path.basename(target.dir));
+        for (const root of new Set([library.root, owner])) {
+          const projectDir = path.relative(root, target.dir) || ".";
+          sessionRoots.add(root);
+          await writeStudioSession(root, {
+            protocolVersion: 1,
+            projectDir,
+            projectId:
+              root === library.root
+                ? next
+                : libraryProjectId(projectDir === "." ? "" : projectDir),
+            title,
+            url: target.host
+              ? `http://${target.host}/projects/${next}/`
+              : undefined,
+            updatedAt: new Date().toISOString(),
+            serverId,
+          });
+        }
+      })
       .catch(() => {});
   };
   const handlers = new Map<
@@ -129,8 +155,34 @@ export async function serveLibrary(
         return send(js, "text/javascript");
       if (req.method === "GET" && url.pathname === "/library.css")
         return send(css, "text/css");
-      if (req.method === "GET" && url.pathname === "/api/library")
-        return send(JSON.stringify(await library.scan()), "application/json");
+      if (req.method === "GET" && url.pathname === "/api/library") {
+        const scan = await library.scan();
+        return send(
+          JSON.stringify({
+            ...scan,
+            recordings: await seen.annotate(scan.recordings),
+          }),
+          "application/json",
+        );
+      }
+      if (req.method === "POST" && url.pathname === "/api/seen") {
+        // The library and the editor mark a demo as looked at.
+        let body = "";
+        for await (const chunk of req) body += chunk;
+        const id = (JSON.parse(body || "{}") as { id?: unknown }).id;
+        const recording =
+          typeof id === "string"
+            ? (await library.scan()).recordings.find((r) => r.id === id)
+            : undefined;
+        if (!recording)
+          return send(
+            JSON.stringify({ error: "Recording not found" }),
+            "application/json",
+            404,
+          );
+        await seen.mark(recording);
+        return send(JSON.stringify({ ok: true }), "application/json");
+      }
       if (req.method === "GET" && url.pathname === "/api/contract")
         return send(JSON.stringify(contract), "application/json");
       const match = /^\/projects\/([a-f0-9]{16})(\/.*)?$/.exec(url.pathname);
@@ -159,7 +211,8 @@ export async function serveLibrary(
           handler = createReplayHandler(dir, {
             basePath: `/projects/${id}`,
             library: true,
-            workspaceRoot: library.root,
+            // Agents connect in the worktree that holds the demo.
+            workspaceRoot: library.rootOf(dir) ?? library.root,
           });
           handlers.set(id, handler);
           handler.catch(() => handlers.delete(id));
@@ -193,7 +246,9 @@ export async function serveLibrary(
         [...handlers.values()].map(async (h) => (await h).close()),
       );
       await writing;
-      await clearStudioSession(library.root, serverId);
+      await Promise.all(
+        [...sessionRoots].map((root) => clearStudioSession(root, serverId)),
+      );
       // Idle keep-alive sockets would otherwise hold close() open.
       server.closeAllConnections();
       await new Promise<void>((r) => server.close(() => r()));

@@ -21,6 +21,8 @@
       <strong id="repo-name" class="repo-name"></strong>
       <span id="branch" class="chip mono" hidden></span>
     </header>
+    <div class="layout">
+    <nav id="projects" class="projects" aria-label="Projects" hidden></nav>
     <main>
       <div class="main-head">
         <h1>Demos</h1>
@@ -38,11 +40,15 @@
       </div>
       <div id="error" class="error" role="alert" hidden></div>
       <p id="warnings" class="warnings" hidden></p>
+      <p id="loading" class="loading">Looking for demos…</p>
       <div id="recordings" class="grid"></div>
       <div id="empty" class="empty" hidden>
         <h2 id="empty-title">No demos yet</h2>
+        <p id="empty-detail" class="empty-detail" hidden></p>
         <code id="empty-command">bun run studio capture &lt;tour.ts&gt;</code>
+        <button id="empty-open" class="open-project" type="button" hidden>Open another project…</button>
       </div>
     </main>
+    </div>
   </body>
 </html>

@@ -117,6 +117,20 @@ body.desktop .title-bar a {
   fill: var(--color-highlighter);
   stroke: none;
 }
+.repo-name.switch {
+  cursor: default;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin: -2px -6px;
+}
+.repo-name.switch::after {
+  content: " ⌄";
+  color: var(--color-graphite);
+  font-weight: 400;
+}
+.repo-name.switch:hover {
+  background: rgba(17, 17, 17, 0.06);
+}
 .repo-name {
   flex-shrink: 0;
   max-width: 60%;
@@ -191,6 +205,229 @@ h1 {
   color: var(--color-graphite);
 }
 
+/* Projects sidebar: the open project (with its worktrees) and recent ones */
+.layout {
+  display: flex;
+  min-height: 0;
+}
+.layout > main {
+  flex: 1;
+  min-width: 0;
+}
+.projects {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  width: 260px;
+  flex-shrink: 0;
+  height: calc(100vh - 52px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 32px 12px 24px 16px;
+  border-right: 1px solid var(--color-line);
+}
+.projects[hidden] {
+  display: none;
+}
+.projects-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 8px 8px;
+}
+.projects-head h2 {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-graphite);
+}
+.open-project {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: default;
+}
+.open-project:hover {
+  border-color: var(--color-ink);
+}
+.empty .open-project {
+  height: 32px;
+  margin-top: 4px;
+}
+.projects-recent {
+  margin: 20px 8px 4px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-graphite);
+}
+.project-row,
+.more-trees {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+/* One compact line per worktree: folder, branch, status. */
+.worktree {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+}
+.project-row:hover,
+.worktree:hover:not(:disabled),
+.more-trees:hover {
+  background: var(--color-desk);
+}
+.project-row[aria-pressed="true"],
+.worktree[aria-pressed="true"] {
+  background: var(--color-desk);
+  box-shadow: inset 2px 0 0 var(--color-ink);
+}
+.worktree:disabled {
+  opacity: 0.5;
+}
+.worktree.no-demos .wt-name {
+  color: var(--color-graphite);
+  font-weight: 400;
+}
+.wt-name {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 55%;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wt-branch {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-pencil);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wt-dirty {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-correction);
+}
+.worktree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 0 10px;
+  padding-left: 6px;
+  border-left: 1px solid var(--color-line);
+}
+.row-top,
+.row-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.row-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-row.other .row-name {
+  font-weight: 500;
+}
+.row-count {
+  flex-shrink: 0;
+  min-width: 14px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-graphite);
+}
+.row-sub {
+  font-size: 11px;
+  color: var(--color-graphite);
+}
+.row-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fresh {
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fresh.new {
+  background: var(--color-highlighter);
+}
+.fresh.updated {
+  background: rgba(47, 91, 234, 0.12);
+  color: var(--color-agent);
+}
+.tag.fresh-tag {
+  background: rgba(47, 91, 234, 0.12);
+  color: var(--color-agent);
+}
+.more-trees {
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--color-graphite);
+}
+.loading {
+  color: var(--color-graphite);
+}
+.loading[hidden] {
+  display: none;
+}
+@media (max-width: 860px) {
+  .projects {
+    display: none;
+  }
+}
+
 /* Recording cards */
 .grid {
   display: grid;
@@ -235,6 +472,9 @@ h1 {
 .recording-poster.loaded {
   opacity: 1;
 }
+.recording-poster.instant {
+  transition: none;
+}
 .duration {
   position: absolute;
   right: 10px;
@@ -274,6 +514,16 @@ h1 {
 .card-title:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+.card-where {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.card-branch {
+  flex-shrink: 0;
+  max-width: 55%;
 }
 .card-path {
   min-width: 0;
@@ -326,6 +576,9 @@ h1 {
   font-size: 16px;
   line-height: 24px;
   font-weight: 600;
+}
+.empty-detail {
+  color: var(--color-graphite);
 }
 .empty code {
   padding: 4px 8px;

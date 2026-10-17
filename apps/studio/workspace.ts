@@ -479,7 +479,19 @@ export class ProjectTargets {
     return this.bound ? "project" : "workspace";
   }
   private lib(): Promise<LocalLibrary> {
-    return (this.library ??= LocalLibrary.open(this.root));
+    // Scanned once up front so other worktrees of a repository are known.
+    return (this.library ??= LocalLibrary.open(this.root).then(async (l) => {
+      await l.scan();
+      return l;
+    }));
+  }
+  /** Inside a worktree of this repository; rescans once for worktrees
+   * added after this server started. */
+  private async inWorktree(dir: string): Promise<boolean> {
+    const library = await this.lib();
+    if (library.rootOf(dir)) return true;
+    await library.scan();
+    return !!library.rootOf(dir);
   }
   /** One ReplayWorkspace per project, reopened when the capture changes. */
   async workspaceFor(dir: string): Promise<ReplayWorkspace> {
@@ -542,7 +554,9 @@ export class ProjectTargets {
       const real = await realpath(requested).catch(() => undefined);
       if (
         real &&
-        (real === this.root || real.startsWith(this.root + path.sep)) &&
+        (real === this.root ||
+          real.startsWith(this.root + path.sep) ||
+          (await this.inWorktree(real))) &&
         (await isProjectDir(real))
       )
         dir = real;
@@ -559,10 +573,20 @@ export class ProjectTargets {
       return [{ id: t.id, path: t.path, title: t.title }];
     }
     const scan = await (await this.lib()).scan();
+    const branch = new Map(
+      (scan.worktrees ?? []).map((w) => [w.path, w.branch ?? w.head]),
+    );
     return scan.recordings.map((r) => ({
       id: r.id,
-      path: r.path,
+      // Relative to this workspace, so it works as a `project` argument even
+      // for demos in another worktree.
+      path: r.worktree
+        ? path.relative(this.root, path.join(r.worktree, r.path)) || "."
+        : r.path,
       title: r.title,
+      ...(r.worktree && r.worktree !== this.root
+        ? { worktree: r.worktree, branch: branch.get(r.worktree) }
+        : {}),
       captureId: r.captureId,
       durationMs: r.durationMs,
       openComments: r.comments,
@@ -593,7 +617,12 @@ export class ProjectTargets {
     ).catch(() => undefined);
     if (
       !dir ||
-      !(dir === this.root || dir.startsWith(this.root + path.sep)) ||
+      !(
+        dir === this.root ||
+        dir.startsWith(this.root + path.sep) ||
+        // Another worktree of this repository.
+        (!this.bound && (await this.inWorktree(dir)))
+      ) ||
       !(await isProjectDir(dir))
     )
       return { status: "missing", session };

@@ -69,11 +69,23 @@ const commands = new Set([
   "lift",
 ]);
 
+/** Bun 1.2 fails to spawn browsers with Playwright's pipes, which breaks
+ * thumbnails, lifts and exports; require a version known to work. */
+export function checkBun(version = (globalThis as { Bun?: { version: string } }).Bun?.version) {
+  if (!version) return;
+  const [major = 0, minor = 0] = version.split(".").map(Number);
+  if (major < 1 || (major === 1 && minor < 3))
+    throw new Error(
+      `DemoHunter Studio needs Bun 1.3 or newer (found ${version}). Run \`bun upgrade\`.`,
+    );
+}
+
 export async function main(args: string[]): Promise<void> {
   if (args[0] === "--help" || args[0] === "help") {
     console.log(help);
     return;
   }
+  checkBun();
   // Anything that is not a command opens Studio: `bun run studio [workspace]`.
   const [command, ...rest] = commands.has(args[0] ?? "")
     ? args
@@ -136,6 +148,26 @@ export async function main(args: string[]): Promise<void> {
       port,
       host: flags.get("host"),
     });
+    // The desktop app keeps stdin open; if it dies (even force-killed), the
+    // pipe closes and the service follows instead of lingering.
+    if (process.env.DEMOHUNTER_EXIT_WITH_STDIN === "1") {
+      process.stdin.on("end", () => void app.close().finally(() => process.exit(0)));
+      process.stdin.resume();
+    }
+    // Close cleanly (session files, browsers) when stopped by the desktop
+    // app or Ctrl-C.
+    for (const signal of ["SIGTERM", "SIGINT"] as const)
+      process.once(signal, () => {
+        void app.close().finally(() => process.exit(0));
+        setTimeout(() => process.exit(0), 3000).unref();
+      });
+    // One failed render or browser launch must not take the service down.
+    process.on("uncaughtException", (error) =>
+      console.error("Studio error:", error),
+    );
+    process.on("unhandledRejection", (error) =>
+      console.error("Studio error:", error),
+    );
     console.log(
       `DemoHunter Studio: ${app.url}\nWorkspace: ${app.library.root}\nNo account or hosted service required.`,
     );

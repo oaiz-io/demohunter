@@ -90,6 +90,17 @@ async function motionFingerprint(dir: string): Promise<string> {
   }
   return parts.join("\n");
 }
+/** Cheap change stamp for scene/audio files (size and time, no reads), for
+ * caches that must notice any edit, however deep. */
+export async function assetStamp(dir: string): Promise<string> {
+  const parts: string[] = [];
+  for (const folder of ["scenes", "audio"])
+    for (const name of await listFiles(path.join(dir, folder))) {
+      const info = await stat(path.join(dir, folder, name)).catch(() => undefined);
+      if (info?.isFile()) parts.push(`${folder}/${name}:${info.size}:${info.mtimeMs}`);
+    }
+  return parts.sort().join("|");
+}
 /** Files under a folder, without following symlinks (no loops, no escapes). */
 async function listFiles(root: string, prefix = ""): Promise<string[]> {
   const entries = await readdir(path.join(root, prefix), {
