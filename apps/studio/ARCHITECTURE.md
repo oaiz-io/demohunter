@@ -6,6 +6,8 @@ The application is an independent, private Bun workspace. The published DemoHunt
 flowchart LR
   UI[Browser UI / desktop window] -->|Project-scoped HTTP| HTTP[Local service adapter]
   MCP[External agent / MCP stdio] --> WS[ReplayWorkspace]
+  HTTP -->|ACP stdio| ACP[In-Studio agent: Claude Code / Codex]
+  ACP -->|Studio's MCP| MCP
   CLI[Capture / inspect / export CLI] --> WS
   HTTP --> WS
   WS --> Files[Portable project files]
@@ -22,6 +24,7 @@ flowchart LR
 - **Library:** LocalLibrary scans an explicit workspace, skips dependency/cache directories and symlinks, bounds depth/entry count, tolerates damaged captures, and returns relative paths. Routes resolve real paths within that workspace. Posters and scene thumbnails (`/api/frame`) are derived, cached per revision in a private per-user cache outside the project (never written into repositories) and rendered through one globally bounded queue. The library links recordings to tours, and reads git status (branch, changed files) without writing. It never runs captures; recording stays in the CLI.
 - **Render jobs:** render.ts supplies the same read-only player to PNG and MP4 export. It runs no source app scripts. Export encodes timestamped frames, mixes only current speech, writes captions/checksums, checks source revision throughout, stages results and refuses an existing destination. UI export jobs are process-local; CLI export is the durable CI interface.
 - **Activity and review:** disposable operation records bridge separate MCP/service processes without coupling content revision to presence. Heartbeats and terminal states drive reduced-motion-aware presence (title bar, canvas target, timeline, script, note thread). MCP tool calls run inside an author context, so tracked history entries name the agent session; the editor groups them into review turns. User selection/playhead remain independent unless the person opts into Follow agent.
+- **In-Studio agents:** agents.ts starts the person's own coding agent (Claude Code or Codex ACP adapter, run with Studio's Bun runtime) in the demo's worktree, passes Studio's MCP server in `session/new`, and relays messages, plans, tool calls and permission requests to the editor over a per-session event stream (agent-routes.ts, library service only). The agent keeps its own login, model and settings; Studio calls no model and stores no credentials. Studio builds the context preamble (title, time, selection, notes) on the server from project files, so the page cannot inject text as Studio. Read-only DemoHunter tools (their `readOnlyHint`) are approved automatically; everything else asks the person. Folders the desktop app hasn't trusted refuse to start agents.
 - **Direct editing:** web/element-editor.ts owns selection, pointer gestures and pending patches. element-edit.ts shares patch semantics between browser, HTTP and MCP. web/element-overrides.ts restores and reapplies DOM changes each frame, preserving rrweb text nodes and authored scene state. Scene targets use a source path and selector; geometry uses source pixels. Drafts remain in memory until revision-checked saves succeed.
 - **Interface fonts:** Geist, Geist Mono and Literata ship as local packages and are served by the service; no CDN.
 

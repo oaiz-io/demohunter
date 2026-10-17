@@ -29,7 +29,17 @@ To rewrite text, double-click it on the canvas. An editor opens over the text in
 
 The same controls work on recorded page elements, HTML scenes and overlays. Changes appear at once and save to `edits.json`. They apply wherever the element appears. The source recording and HTML stay intact. Undo restores saved changes. If an agent changes the project during an edit, Studio keeps your draft and asks you to apply it to the latest version or use the saved version. Export waits for pending element edits to save.
 
-Press `C` and click an element to add a **note** with its element and time. The selection toolbar has **Edit**, **Note** and **Copy for agent**. `V` returns to selection; double-click text to rewrite it in place. The editor has Edit, Notes, Script and Agent panels. Your agent can use the same saved overrides through MCP or project files.
+Press `C` and click an element to add a **note** with its element and time. The selection toolbar has **Edit**, **Note** and **Copy for agent**. `V` returns to selection; double-click text to rewrite it in place. The editor has Edit, Notes, Script and Agents panels. Your agent can use the same saved overrides through MCP or project files.
+
+### Agents inside Studio
+
+The **Agents** panel runs your own Claude Code or Codex inside Studio, with no extra setup or sign-in. Click **Claude Code** (or just type and press Enter) and Studio starts it as a subprocess over the [Agent Client Protocol](https://agentclientprotocol.com) in the demo's worktree: the repository checkout or linked worktree the demo lives in, so it works on that branch's files. It uses the login and settings you already have in the terminal; Studio never asks for keys and never calls a model itself. If the agent isn't signed in, the panel says so: run `claude` (or `codex`) once in a terminal, then start it again. Studio hands the session its own MCP server, so the agent can use every DemoHunter tool on the demo you have open.
+
+Each message carries Studio's view: the time on screen, the selected element and any notes you send, shown as chips under your message. Replies, plans and tool calls stream into the panel. The agent asks before running its own tools or changing the demo: approve or deny from the card in the thread (the tab shows a yellow dot while it waits). DemoHunter tools that only read the demo don't ask. **Stop** cancels the current turn. One agent session runs per worktree and agent kind, and it keeps running while you switch demos in that worktree; it stops when Studio closes.
+
+Notes have **Send to agent**. Turn on **Send new notes to … automatically** under the composer to hand every new note to the agent as you add it. This setting and the preferred agent are saved per worktree in `.demohunter/studio/agents.json`, which is git-ignored. Agents never start in a folder the desktop app hasn't trusted, because they run code there. Activity from agents you connect yourself (below) appears under **Activity & changes**.
+
+### Connect an outside agent
 
 **Connect agent** shows the exact `claude mcp add …` and `codex mcp add …` commands (or JSON for other clients) for one server per repository. It edits the demo you have open in Studio (or one the agent names with `project`), plus the prompt to start with. No agent settings are changed automatically.
 
@@ -37,7 +47,7 @@ Each note shows its stable comment ID. Click the ID to copy it, use **Copy link*
 
 While an agent works, Studio shows it from real activity records only: the title bar pill, a target outline on the canvas (a light scan while it reads, a marching outline while it edits, a short settle when it is done, red when a call fails), stripes on the scene it changes and a checklist of tool calls in the related note. Your playhead and selection never move unless you press **Show on canvas**. Notes show their state: open, agent working, agent replied, resolved.
 
-The **Agent** panel groups tracked agent changes into turns (one MCP session without a long pause) with a readable change list. **Undo turn** undoes the newest turn in one locked step and refuses to overwrite later direct-file edits.
+**Activity & changes** in the Agents panel groups tracked agent changes into turns (one MCP session without a long pause) with a readable change list. **Undo turn** undoes the newest turn in one locked step and refuses to overwrite later direct-file edits.
 
 ```sh
 bun run studio mcp            # the workspace; follows the demo open in Studio

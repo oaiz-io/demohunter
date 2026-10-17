@@ -26,6 +26,7 @@ import {
 import type { Replayer, eventWithTime } from "rrweb";
 import { TranscriptEditor, type ScriptPatch } from "./transcript.js";
 import { AgentWorkbench, toast, type WorkspaceData } from "./workbench.js";
+import { AgentChat, standaloneAgents } from "./agent-chat.js";
 import { parseReference } from "../links.js";
 import { Timeline, clockMs } from "./timeline.js";
 import type { HistoryItem } from "./agent.js";
@@ -116,6 +117,7 @@ const narrationPlayback = new NarrationPlayback(report);
 let audioNeedsSeek = true;
 let workspaceData: WorkspaceData, workbench: AgentWorkbench;
 let timeline: Timeline | undefined;
+let agentChat: AgentChat | undefined;
 /** What the current replayer was built from; see runReload. */
 let builtReplay = "";
 let hoverRef: string | undefined,
@@ -945,7 +947,39 @@ async function runReload(): Promise<void> {
         reload,
         error: report,
         showElement,
+        sendToAgent: (id) =>
+          void agentChat
+            ?.sendNotes([id])
+            .then(() => tab("agent"))
+            .catch(report),
+        noteAdded: (id) => {
+          if (!agentChat?.settings?.autoSendNotes) return;
+          void agentChat
+            .sendNotes([id])
+            .then(() => toast("Sent to your agent"))
+            .catch(report);
+        },
       });
+    // In-Studio agents (library service only; not in headless renders).
+    if (!agentChat && libraryDemo && !renderMode)
+      agentChat = new AgentChat({
+        project: () => libraryDemo,
+        time: () => position,
+        selection: () =>
+          selection?.elementRef
+            ? {
+                ref: selection.elementRef,
+                label: `${selection.tag} · ${selection.text.slice(0, 40)}`.trim(),
+              }
+            : undefined,
+        error: report,
+        status: (status) => {
+          const dot = $("#agent-dot");
+          dot.hidden = status !== "working" && status !== "waiting";
+          dot.classList.toggle("waiting", status === "waiting");
+        },
+      });
+    else if (!agentChat && !document.body.classList.contains("no-agent-chat")) standaloneAgents();
     workbench.onReview = () => timeline?.render(workbench.agentMarks());
     timeline ??= new Timeline({
       bundle: () => bundle,

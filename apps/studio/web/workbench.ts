@@ -45,6 +45,10 @@ type Hooks = {
   reload: () => Promise<void>;
   error: (e: unknown) => void;
   showElement: (ref: string) => void;
+  /** Hand a note to the in-Studio agent. */
+  sendToAgent?: (id: string) => void;
+  /** A note was just added here (auto-send). */
+  noteAdded?: (id: string) => void;
 };
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) =>
   document.querySelector<T>(selector)!;
@@ -554,6 +558,7 @@ export class AgentWorkbench {
       this.activeThread = result.id;
       await this.hooks.reload();
       toast("Note saved — your agent can read it through MCP");
+      this.hooks.noteAdded?.(result.id);
     } finally {
       this.addingComment = false;
       $<HTMLButtonElement>("#add-comment").disabled = false;
@@ -790,7 +795,9 @@ export class AgentWorkbench {
       "comment-resolve button small primary",
       "Resolve",
     );
-    right.append(copy, show, replyButton, undo, resolve);
+    const send = make("button", "comment-send quiet small-text", "Send to agent");
+    send.onclick = () => this.hooks.sendToAgent?.(id);
+    right.append(send, copy, show, replyButton, undo, resolve);
     actions.append(left, right);
     copy.prepend(icon("copy"));
     copy.onclick = () => void this.copyComment(id).catch(this.hooks.error);
@@ -972,6 +979,13 @@ export class AgentWorkbench {
         make("p", "review-empty", "Agent changes appear here, by turn."),
       );
     replaceKeepingFocus($("#review-list"), cards);
+    // Outside agents' activity opens this section once, unless an agent is
+    // chatting in Studio (then it stays folded under the thread).
+    const details = document.querySelector<HTMLDetailsElement>("#agent-activity-details");
+    if (details && !details.dataset.decided && (last || turns.length)) {
+      details.dataset.decided = "1";
+      if (!document.body.classList.contains("agent-chatting")) details.open = true;
+    }
   }
   private turnCard(
     turn: Turn,

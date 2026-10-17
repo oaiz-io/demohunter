@@ -6,6 +6,8 @@ import path from "node:path";
 import { build } from "esbuild";
 import { LocalLibrary } from "./library.js";
 import { SeenDemos } from "./seen.js";
+import { AgentHub } from "./agents.js";
+import { handleAgentRoute } from "./agent-routes.js";
 import { hostAllowed, restrictFolder } from "./trust.js";
 import { createReplayHandler } from "./server.js";
 import { contract } from "./contract.js";
@@ -35,6 +37,8 @@ export async function serveLibrary(
   // Start scanning, but serve right away: the page shows and fills in.
   void library.scan().catch(() => {});
   const seen = new SeenDemos(library.root);
+  // Coding agents the person starts from the editor (one per worktree).
+  const agents = new AgentHub();
   const here = path.dirname(fileURLToPath(import.meta.url)),
     html = await readFile(path.join(here, "web/library.html")),
     css = await readFile(path.join(here, "web/library.css"));
@@ -179,6 +183,7 @@ export async function serveLibrary(
           "application/json",
         );
       }
+      if (await handleAgentRoute(req, res, url, library, agents)) return;
       if (req.method === "POST" && url.pathname === "/api/seen") {
         // The library and the editor mark a demo as looked at.
         let body = "";
@@ -262,6 +267,7 @@ export async function serveLibrary(
     library,
     url: `http://${options.host && options.host !== "0.0.0.0" ? options.host : "127.0.0.1"}:${port}`,
     close: async () => {
+      agents.stopAll();
       await Promise.all(
         [...handlers.values()].map(async (h) => (await h).close()),
       );
