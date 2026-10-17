@@ -1,7 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { LibraryRecording } from "./library.js";
-import { writeJson } from "./storage.js";
+import { ensureIgnoredFolder, readProjectFile, writeJson } from "./storage.js";
 
 type Mark = {
   captureId?: string;
@@ -27,7 +26,7 @@ export class SeenDemos {
   /** A missing or damaged file means "first run" (null), never a cached
    * rejection: the next save replaces it. */
   private load() {
-    return (this.marks ??= readFile(this.file, "utf8")
+    return (this.marks ??= readProjectFile(this.root, ".demohunter/studio/seen.json")
       .then((text) => {
         const value = JSON.parse(text);
         if (!value || typeof value !== "object" || Array.isArray(value))
@@ -47,10 +46,8 @@ export class SeenDemos {
     this.marks = Promise.resolve(marks);
     this.writing = this.writing
       .then(async () => {
-        await mkdir(path.dirname(this.file), { recursive: true });
-        await writeFile(path.join(path.dirname(this.file), ".gitignore"), "*\n", {
-          flag: "wx",
-        }).catch(() => {});
+        // Refuses a `.demohunter` or `studio` folder that is a link.
+        await ensureIgnoredFolder(this.root, ".demohunter/studio");
         await writeJson(this.file, marks);
       })
       .catch(() => {});

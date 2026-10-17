@@ -22,7 +22,7 @@
     "uninstall:global": "bun run --cwd packages/cli unlink:global",
     "studio": "bun apps/studio/cli.ts",
     "test:studio": "bun test apps/studio",
-    "typecheck:studio": "bun x tsc -p apps/studio/tsconfig.json",
+    "typecheck:studio": "bun x tsc -p apps/studio/tsconfig.test.json",
     "desktop": "bun run --cwd apps/desktop start",
     "desktop:app": "bun run --cwd apps/desktop build && open \"apps/desktop/out/DemoHunter Studio.app\"",
     "test:desktop": "bun test apps/desktop"

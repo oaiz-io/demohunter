@@ -1,8 +1,8 @@
-import { mkdir, readFile, readdir, unlink } from "node:fs/promises";
+import { readdir, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { activitySchema, type AgentActivity } from "./contract.js";
-import { writeJson } from "./storage.js";
+import { ensureRealFolders, readProjectFile, writeJson } from "./storage.js";
 const labels: Record<string, string> = {
   get_selection: "Inspecting selection",
   get_html: "Reading captured HTML",
@@ -47,14 +47,18 @@ export async function beginActivity(
     status: "running",
     updatedAt: new Date().toISOString(),
   };
-  const folder = path.join(dir, ".studio/activity");
-  await mkdir(folder, { recursive: true });
+  // `.studio` comes from the repository: never write through a link.
+  const folder = await ensureRealFolders(dir, ".studio/activity");
   const file = path.join(folder, `${event.id}.json`);
-  await writeJson(file, event);
+  const save = async () => {
+    await ensureRealFolders(dir, ".studio/activity");
+    await writeJson(file, event);
+  };
+  await save();
   let pending = Promise.resolve();
   const timer = setInterval(() => {
     event.updatedAt = new Date().toISOString();
-    pending = pending.then(() => writeJson(file, event)).catch(() => {});
+    pending = pending.then(save).catch(() => {});
   }, 2500);
   timer.unref();
   return async (error?: unknown) => {
@@ -66,14 +70,15 @@ export async function beginActivity(
       event.error = (
         error instanceof Error ? error.message : String(error)
       ).slice(0, 500);
-    await writeJson(file, event);
-    await prune(folder);
+    await save();
+    await prune(dir, folder);
   };
 }
 export async function readActivity(dir: string): Promise<AgentActivity[]> {
   const folder = path.join(dir, ".studio/activity");
   let names: string[];
   try {
+    await ensureRealFolders(dir, ".studio/activity", false);
     names = await readdir(folder);
   } catch {
     return [];
@@ -85,7 +90,7 @@ export async function readActivity(dir: string): Promise<AgentActivity[]> {
         .map(async (n) => {
           try {
             const parsed = activitySchema.safeParse(
-              JSON.parse(await readFile(path.join(folder, n), "utf8")),
+              JSON.parse(await readProjectFile(dir, `.studio/activity/${n}`)),
             );
             return parsed.success ? parsed.data : null;
           } catch {
@@ -104,10 +109,11 @@ export async function readActivity(dir: string): Promise<AgentActivity[]> {
         : e,
     );
 }
-async function prune(folder: string) {
+async function prune(dir: string, folder: string) {
+  await ensureRealFolders(dir, ".studio/activity", false);
   const names = await readdir(folder);
   if (names.length < 80) return;
-  const events = await readActivity(path.resolve(folder, "../.."));
+  const events = await readActivity(dir);
   const keep = new Set(events.map((e) => `${e.id}.json`));
   await Promise.all(
     names

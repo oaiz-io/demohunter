@@ -356,7 +356,7 @@ export class Timeline {
     return state.el;
   }
   private loadThumb(
-    state: { el: HTMLElement; token: number },
+    state: { el: HTMLElement; token: number; visual?: string },
     token: number,
     cacheKey: string,
     url: string,
@@ -373,7 +373,9 @@ export class Timeline {
         if (state.token === token)
           state.el.style.backgroundImage = `url("${url}")`;
       } catch {
-        /* No thumbnail; the block still shows its title. */
+        // No thumbnail this time (the block still shows its title); the next
+        // render tries again instead of treating this frame as loaded.
+        if (state.token === token) state.visual = "";
       }
     };
     this.thumbQueue.push(load);
@@ -435,7 +437,7 @@ function visualKey(bundle: ReplayBundle): string {
     bundle.project.viewport,
     bundle.css,
     edits,
-    pages ? bundle.assetsRevision : undefined,
+    pages ? (bundle.scenesRevision ?? bundle.assetsRevision) : undefined,
   ]);
   // A short stable hash keeps the per-frame cache keys small.
   let hash = 2166136261;

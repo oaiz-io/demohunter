@@ -25,14 +25,20 @@ on:
       - ".github/workflows/desktop-alpha.yml"
   workflow_dispatch:
 
-concurrency:
-  group: desktop-alpha-${{ github.ref }}
-  cancel-in-progress: true
+# Builds run pull request code with a read-only token; only the release job
+# (which never checks out code) can write.
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 40
+    # A newer push supersedes a build in progress (the release job has its
+    # own, non-cancelling group).
+    concurrency:
+      group: desktop-alpha-build-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -61,6 +67,11 @@ jobs:
           ditto "apps/desktop/out/DemoHunter Studio.app" "$RUNNER_TEMP/pkg/DemoHunter Studio.app"
           bun apps/desktop/scripts/smoke.ts "$RUNNER_TEMP/pkg/DemoHunter Studio.app"
 
+      - name: Checksums
+        run: |
+          cd apps/desktop/out
+          shasum -a 256 *.dmg *.zip | tee SHA256SUMS.txt
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
@@ -68,13 +79,20 @@ jobs:
           path: |
             apps/desktop/out/*.dmg
             apps/desktop/out/*.zip
+            apps/desktop/out/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
 
   release:
-    if: github.event_name != 'pull_request'
+    # Only the main branch and the alpha branch publish; manual runs from
+    # other refs only build.
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/t3code/research-editable-demo-capture')
     needs: build
     runs-on: ubuntu-latest
+    # Never cancelled halfway (between deleting and recreating the release).
+    concurrency:
+      group: desktop-alpha-release
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:

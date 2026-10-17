@@ -3,7 +3,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { readFile, unlink } from "node:fs/promises";
+import { lstat, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -139,6 +139,9 @@ export async function createReplayHandler(
     try {
       if (!hostAllowed(req, options.host))
         return json(res, { error: "Unknown host." }, 421);
+      // Other sites may link to Studio (a page navigation) but never call it.
+      if (req.headers["sec-fetch-site"] === "cross-site" && req.headers["sec-fetch-mode"] !== "navigate")
+        return json(res, { error: "Cross-site requests are disabled." }, 403);
       const url = new URL(req.url ?? "/", "http://localhost");
       if (req.method === "GET" && vendor[url.pathname]) {
         const [file, type] = vendor[url.pathname]!;
@@ -194,7 +197,13 @@ export async function createReplayHandler(
           connection: options.workspaceRoot
             ? {
                 command: process.execPath,
-                args: [path.join(here, "cli.ts"), "mcp", options.workspaceRoot],
+                // Agents' renders (screenshots, lifts) obey the same trust.
+                args: [
+                  path.join(here, "cli.ts"),
+                  "mcp",
+                  options.workspaceRoot,
+                  ...(scenesTrusted(dir) ? [] : ["--restricted"]),
+                ],
                 scope: "workspace",
                 name: `demohunter-${
                   path
@@ -207,7 +216,12 @@ export async function createReplayHandler(
               }
             : {
                 command: process.execPath,
-                args: [path.join(here, "cli.ts"), "mcp", dir],
+                args: [
+                  path.join(here, "cli.ts"),
+                  "mcp",
+                  dir,
+                  ...(scenesTrusted(dir) ? [] : ["--restricted"]),
+                ],
                 scope: "project",
               },
           // Scene pages run scripts only in trusted folders.
@@ -276,7 +290,13 @@ export async function createReplayHandler(
             409,
           );
         }
-        const destination = path.join(dir, "exports", `export-${Date.now()}`);
+        // A repository can't redirect exports elsewhere with a link.
+        const exportsDir = path.join(dir, "exports");
+        if ((await lstat(exportsDir).catch(() => undefined))?.isSymbolicLink()) {
+          exportState = previous;
+          return json(res, { error: "exports/ must be a folder inside the project, not a link." }, 400);
+        }
+        const destination = path.join(exportsDir, `export-${Date.now()}`);
         const job = import("./export.js")
           .then(({ exportReplay }) =>
             exportReplay(dir, destination, {
@@ -520,7 +540,7 @@ export async function createReplayHandler(
           // folders that aren't trusted the editor sandboxes them (no scripts).
           res.setHeader(
             "Content-Security-Policy",
-            `default-src 'self'; script-src 'self'${scenesTrusted(dir) ? " 'unsafe-inline'" : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'self'`,
+            `${scenesTrusted(dir) ? "" : "sandbox allow-same-origin; "}default-src 'self'; script-src 'self'${scenesTrusted(dir) ? " 'unsafe-inline'" : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'self'`,
           );
           if (!scenesTrusted(dir) && [".js", ".mjs"].includes(extension))
             return json(res, { error: "Scene scripts are off for this folder." }, 403);
@@ -540,7 +560,11 @@ export async function createReplayHandler(
           data = Buffer.from(
             data.toString().replace(assetUrl, `${basePath}/files/assets/`),
           );
-        const type = mime[path.extname(file)] ?? "application/octet-stream";
+        // The type follows the requested name, and a link may not change it
+        // (a.json pointing at b.js must not be served as a script).
+        if (path.extname(file).toLowerCase() !== extension)
+          return json(res, { error: "Unknown file." }, 404);
+        const type = mime[extension] ?? "application/octet-stream";
         res.setHeader("Accept-Ranges", "bytes");
         if (req.headers.range) {
           const match = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range);

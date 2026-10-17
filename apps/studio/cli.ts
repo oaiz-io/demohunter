@@ -24,6 +24,8 @@ import { loadBundle } from "./storage.js";
 import { totalDuration, audioIsCurrent } from "./model.js";
 import type { DemoHunterTour } from "@demohunter/sdk";
 import { runReplayMcp } from "./mcp.js";
+import { restrictFolder } from "./trust.js";
+import { listWorktrees } from "./git.js";
 import { ReplayWorkspace } from "./workspace.js";
 import { createInvoiceDemo } from "./invoice-demo.js";
 
@@ -193,6 +195,12 @@ export async function main(args: string[]): Promise<void> {
   }
   if (command === "mcp") {
     if (positions.length > 1) throw new Error(help);
+    // Scene scripts stay off in this agent's renders too.
+    if (flags.has("restricted")) {
+      const root = path.resolve(positions[0] ?? process.cwd());
+      restrictFolder(root);
+      for (const w of (await listWorktrees(root)) ?? []) restrictFolder(w.path);
+    }
     await runReplayMcp(positions[0] ?? process.cwd());
     return;
   }

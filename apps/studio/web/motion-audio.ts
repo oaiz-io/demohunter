@@ -29,16 +29,18 @@ export class MotionAudio {
     const total = totalDuration(bundle.edits),
       voice = voiceSpans(bundle),
       music = bundle.edits.audio?.music ?? [];
-    // A rewritten file keeps its path, so the asset stamp is part of the key.
-    const stamp = bundle.assetsRevision ?? "";
-    const wanted = new Set(music.map((m) => `${m.id}:${m.src}#${stamp}`));
+    // A rewritten file keeps its path, so its own stamp is part of the key
+    // (other audio changing, e.g. new narration, leaves the bed playing).
+    const stamp = (src: string) =>
+      bundle.assetStamps?.[src] ?? bundle.assetsRevision ?? "";
+    const wanted = new Set(music.map((m) => `${m.id}:${m.src}#${stamp(m.src)}`));
     for (const [key, player] of this.beds)
       if (!wanted.has(key)) {
         player.pause();
         this.beds.delete(key);
       }
     for (const bed of music) {
-      const key = `${bed.id}:${bed.src}#${stamp}`;
+      const key = `${bed.id}:${bed.src}#${stamp(bed.src)}`;
       let player = this.beds.get(key);
       if (!player) {
         player = new Audio(this.url(bundle, bed.src));
@@ -97,6 +99,8 @@ export class MotionAudio {
   }
 
   private url(bundle: ReplayBundle, src: string): string {
-    return projectUrl(`/files/${src}?v=${bundle.assetsRevision ?? ""}`);
+    return projectUrl(
+      `/files/${src}?v=${bundle.assetStamps?.[src] ?? bundle.assetsRevision ?? ""}`,
+    );
   }
 }

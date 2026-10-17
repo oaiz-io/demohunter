@@ -144,6 +144,12 @@ const unsafeTags = new Set([
   "base",
   "meta",
   "portal",
+  // Raw-text elements serialise their text unescaped, so recorded text like
+  // "</xmp><img onerror=…>" would become markup when the file is parsed.
+  "xmp",
+  "noembed",
+  "noframes",
+  "plaintext",
 ]);
 const droppedAttributes = new Set([
   "id",
@@ -171,7 +177,7 @@ function copy(source: Element, view: Window): Element | undefined {
     if (
       name.startsWith("on") ||
       droppedAttributes.has(name) ||
-      /^\s*(javascript|vbscript|data:text\/html)/i.test(attribute.value)
+      /^\s*(javascript|vbscript)\s*:|^\s*data:text\/html/i.test(attribute.value)
     )
       clone.removeAttribute(attribute.name);
   }
@@ -201,6 +207,28 @@ function copy(source: Element, view: Window): Element | undefined {
 }
 
 /** Snapshot `element` from the replay document; rect is in replay viewport px. */
+/** Parse the serialised copy again (inertly) and strip anything executable
+ * that only appears after a parse round trip; the file is what scenes load. */
+function inert(html: string): string {
+  const parsed = new DOMParser().parseFromString(`<body>${html}`, "text/html");
+  for (const node of parsed.body.querySelectorAll("*")) {
+    if (unsafeTags.has(node.localName)) {
+      node.remove();
+      continue;
+    }
+    for (const attribute of [...node.attributes]) {
+      const name = attribute.name.toLowerCase();
+      if (
+        name.startsWith("on") ||
+        droppedAttributes.has(name) ||
+        /^\s*(javascript|vbscript)\s*:|^\s*data:text\/html/i.test(attribute.value)
+      )
+        node.removeAttribute(attribute.name);
+    }
+  }
+  return parsed.body.innerHTML;
+}
+
 export function snapshotElement(element: Element): Snapshot {
   const doc = element.ownerDocument,
     view = doc.defaultView!;
@@ -222,7 +250,7 @@ export function snapshotElement(element: Element): Snapshot {
       /* Cross-origin sheet; captured pages inline theirs. */
     }
   return {
-    html: clone.outerHTML,
+    html: inert(clone.outerHTML),
     rect: {
       x: Math.round(rect.x * 10) / 10,
       y: Math.round(rect.y * 10) / 10,

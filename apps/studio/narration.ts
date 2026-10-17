@@ -1,8 +1,14 @@
-import { copyFile, mkdir } from "node:fs/promises";
+import { constants, existsSync } from "node:fs";
+import { copyFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_DEMOHUNTER_CONFIG } from "@demohunter/sdk";
 import { resolveNarrationSegment } from "../../packages/generator-playwright/src/narration/resolve-narration.js";
-import { acquireLock, loadBundle, mutateProject } from "./storage.js";
+import {
+  acquireLock,
+  ensureRealFolders,
+  loadBundle,
+  mutateProject,
+} from "./storage.js";
 import { clipDuration, narrationRequestKey } from "./model.js";
 
 export async function regenerateNarration(
@@ -57,8 +63,11 @@ export async function regenerateNarration(
       });
       const extension = path.extname(resolved.audioPath) || ".mp3";
       const audioPath = `audio/${resolved.cacheKey}${extension}`;
-      await mkdir(path.join(dir, "audio"), { recursive: true });
-      await copyFile(resolved.audioPath, path.join(dir, audioPath));
+      await copyIntoFolder(
+        resolved.audioPath,
+        await ensureRealFolders(dir, "audio"),
+        `${resolved.cacheKey}${extension}`,
+      );
       // Merge just this result into the latest files. Never overwrite concurrent agent edits.
       await mutateProject(
         dir,
@@ -117,6 +126,23 @@ export async function regenerateNarration(
     await lock.release();
   }
 }
+/** Copy to a fresh temp file beside the target, then rename into place. A
+ * plain copyFile follows a symlink committed at the destination name and would
+ * overwrite whatever it points to; rename replaces the link itself. */
+async function copyIntoFolder(source: string, folder: string, name: string) {
+  const temp = path.join(
+    folder,
+    `.${name}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`,
+  );
+  try {
+    // COPYFILE_EXCL: fail rather than touch anything already at the temp name.
+    await copyFile(source, temp, constants.COPYFILE_EXCL);
+    await rename(temp, path.join(folder, name));
+  } catch (error) {
+    await unlink(temp).catch(() => {});
+    throw error;
+  }
+}
 /** The workspace's shared speech cache: `<root>/.demohunter/cache` for a
  * project at `<root>/.demohunter/replays/x`, not wherever the process runs. */
 export function defaultCacheDir(projectDir: string): string {
@@ -129,5 +155,11 @@ export function defaultCacheDir(projectDir: string): string {
     if (parent === current) break;
     current = parent;
   }
-  return path.resolve(resolved, "../..", ".demohunter/cache");
+  // A demo saved elsewhere: share the repository's cache, never a folder
+  // outside it (or "/" for shallow paths).
+  for (let dir = resolved; ; dir = path.dirname(dir)) {
+    if (existsSync(path.join(dir, ".git"))) return path.join(dir, ".demohunter", "cache");
+    if (path.dirname(dir) === dir) break;
+  }
+  return path.join(resolved, ".demohunter", "cache");
 }

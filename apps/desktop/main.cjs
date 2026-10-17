@@ -60,19 +60,20 @@ function remember(dir) {
  * opens restricted. */
 const isTrusted = (dir) => (settings().trusted ?? []).includes(dir);
 async function trustFolder() {
-  if (!workspace || isTrusted(workspace)) return false;
+  // The folder on screen when asked — not whatever opens while the sheet is up.
+  const target = workspace;
+  if (!target || isTrusted(target)) return false;
   const { response } = await dialog.showMessageBox(window, {
     type: "question",
     buttons: ["Trust Folder", "Cancel"],
     defaultId: 1,
     cancelId: 1,
-    message: `Trust “${path.basename(workspace)}”?`,
-    detail:
-      "Scene pages in this folder's demos are code: trusting it lets their scripts run, and Studio starts inside the folder with its Bun settings and .env file. Only trust folders whose authors you trust.",
+    message: `Trust “${path.basename(target)}”?`,
+    detail: `${target}\n\nScene pages in this folder's demos are code: trusting it lets their scripts run, and Studio starts inside the folder with its Bun settings and .env file. Only trust folders whose authors you trust.`,
   });
   if (response !== 0) return false;
-  save({ trusted: [...new Set([...(settings().trusted ?? []), workspace])] });
-  await openRepository(workspace);
+  save({ trusted: [...new Set([...(settings().trusted ?? []), target])] });
+  if (workspace === target) await openRepository(target);
   return true;
 }
 function isDirectory(p) {
@@ -322,8 +323,9 @@ function createWindow() {
     return { action: "deny" };
   });
   // Top-level navigation stays on the shell and Studio; links the person
-  // followed in Studio's own page open in the browser. Navigations started by
-  // embedded frames (scene pages) are blocked.
+  // followed in Studio's own page open in the browser, and top-level
+  // navigations started by embedded frames (scene pages) are blocked. Frames'
+  // own navigation is limited by the editor's CSP (frame-src 'self').
   window.webContents.on("will-frame-navigate", (event) => {
     if (!event.isMainFrame || isOwnPage(event.url)) return;
     event.preventDefault();

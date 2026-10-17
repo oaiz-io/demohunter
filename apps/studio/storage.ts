@@ -2,17 +2,14 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import {
-  readFile,
   writeFile,
   rename,
   realpath,
   open,
   unlink,
-  link,
   mkdir,
   readdir,
   lstat,
-  stat,
 } from "node:fs/promises";
 import path from "node:path";
 import { readFormat } from "./format.js";
@@ -24,7 +21,8 @@ export async function atomicWrite(
 ): Promise<void> {
   const temp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   try {
-    await writeFile(temp, content);
+    // "wx": never write through something that already sits at the temp name.
+    await writeFile(temp, content, { flag: "wx" });
     await rename(temp, file);
   } catch (error) {
     // Never leave temp files behind (full disk, rename onto a directory…).
@@ -72,6 +70,52 @@ export async function readProjectFile(
     await handle.close();
   }
 }
+const NOT_A_FOLDER = (relative: string, link: boolean) =>
+  link
+    ? `${relative}/ must be a folder inside the project, not a link`
+    : `${relative}/ must be a folder inside the project`;
+/** Walk `relative` (e.g. ".demohunter/studio") below `root`, refusing any
+ * component that is a symlink or not a folder, and creating missing ones. A
+ * cloned repository can commit `.studio -> ~/Documents`; mkdir/readdir/write
+ * would follow it out of the project. Returns the folder path. */
+export async function ensureRealFolders(
+  root: string,
+  relative: string,
+  create = true,
+): Promise<string> {
+  let current = root;
+  let walked = "";
+  for (const part of relative.split("/")) {
+    current = path.join(current, part);
+    walked = walked ? `${walked}/${part}` : part;
+    let info = await lstat(current).catch((error) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!info) {
+      if (!create) return current;
+      await mkdir(current).catch((error) => {
+        if (error.code !== "EEXIST") throw error;
+      });
+      info = await lstat(current);
+    }
+    if (info.isSymbolicLink() || !info.isDirectory())
+      throw new Error(NOT_A_FOLDER(walked, info.isSymbolicLink()));
+  }
+  return current;
+}
+/** A runtime-state folder (`.demohunter/studio`, …) that keeps itself out of
+ * git. `wx` never follows a symlink planted at `.gitignore`. */
+export async function ensureIgnoredFolder(
+  root: string,
+  relative: string,
+): Promise<string> {
+  const folder = await ensureRealFolders(root, relative);
+  await writeFile(path.join(folder, ".gitignore"), "*\n", { flag: "wx" }).catch(
+    () => {},
+  );
+  return folder;
+}
 export async function writeJson(file: string, value: unknown): Promise<void> {
   await atomicWrite(file, `${JSON.stringify(value, null, 2)}\n`);
 }
@@ -96,7 +140,7 @@ export async function loadBundle(dir: string): Promise<ReplayBundle> {
     .digest("hex")
     .slice(0, 16);
   // Scene pages and audio are project content too: agents edit them directly.
-  const motion = await motionFingerprint(dir);
+  const { text: motion, stamps } = await motionFingerprint(dir);
   files.push(motion);
   const revision = createHash("sha256")
     .update(files.join("\0"))
@@ -115,6 +159,11 @@ export async function loadBundle(dir: string): Promise<ReplayBundle> {
         .update(motion)
         .digest("hex")
         .slice(0, 16),
+      scenesRevision: createHash("sha256")
+        .update(motion.split("\n").filter((l) => l.startsWith("scenes/")).join("\n"))
+        .digest("hex")
+        .slice(0, 16),
+      assetStamps: stamps,
     });
   } catch (error) {
     throw new Error(
@@ -123,52 +172,95 @@ export async function loadBundle(dir: string): Promise<ReplayBundle> {
   }
 }
 
+/** A huge or hostile `scenes/` or `audio/` must not stall every request that
+ * loads the project: bound the walk, and hash only modest files. */
+const MAX_WALK_ENTRIES = 2000;
+const MAX_WALK_DEPTH = 10;
+const MAX_HASHED_BYTES = 5 * 1024 * 1024;
 /** Scene/overlay files by content, audio by size and time (they can be big). */
-async function motionFingerprint(dir: string): Promise<string> {
+async function motionFingerprint(
+  dir: string,
+): Promise<{ text: string; stamps: Record<string, string> }> {
   const parts: string[] = [];
-  for (const [folder, byContent] of [
+  const stamps: Record<string, string> = {};
+  const folders = [
     ["scenes", true],
     ["audio", false],
-  ] as const) {
-    for (const name of (await listFiles(path.join(dir, folder))).sort()) {
+  ] as const;
+  // Refuse links before reading anything: a linked folder would pull in (and
+  // hash, and later serve) files from outside the project.
+  for (const [folder] of folders) await ensureRealFolders(dir, folder, false);
+  for (const [folder, byContent] of folders) {
+    for (const name of await listFiles(path.join(dir, folder))) {
       const file = path.join(dir, folder, name);
-      const info = await stat(file).catch(() => undefined);
+      const info = await lstat(file).catch(() => undefined);
       if (!info?.isFile()) continue;
-      parts.push(
-        `${folder}/${name}:${
-          byContent
-            ? createHash("sha256")
-                .update(await readFile(file))
-                .digest("hex")
-            : `${info.size}:${Math.round(info.mtimeMs)}`
-        }`,
-      );
+      const stamp =
+        byContent && info.size <= MAX_HASHED_BYTES
+          ? await hashFile(file)
+          : `${info.size}:${Math.round(info.mtimeMs)}`;
+      if (stamp === undefined) continue;
+      stamps[`${folder}/${name}`] = stamp.slice(0, 16);
+      parts.push(`${folder}/${name}:${stamp}`);
     }
   }
-  return parts.join("\n");
+  return { text: parts.join("\n"), stamps };
+}
+async function hashFile(file: string): Promise<string | undefined> {
+  const handle = await open(
+    file,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+  ).catch(() => undefined);
+  if (!handle) return undefined;
+  try {
+    if (!(await handle.stat()).isFile()) return undefined;
+    return createHash("sha256").update(await handle.readFile()).digest("hex");
+  } catch {
+    return undefined;
+  } finally {
+    await handle.close();
+  }
 }
 /** Cheap change stamp for scene/audio files (size and time, no reads), for
- * caches that must notice any edit, however deep. */
+ * caches that must notice any edit, however deep. A linked folder is not
+ * walked; loadBundle reports it. */
 export async function assetStamp(dir: string): Promise<string> {
   const parts: string[] = [];
-  for (const folder of ["scenes", "audio"])
+  for (const folder of ["scenes", "audio"]) {
+    const ok = await ensureRealFolders(dir, folder, false).then(
+      () => true,
+      () => false,
+    );
+    if (!ok) {
+      parts.push(`${folder}:unusable`);
+      continue;
+    }
     for (const name of await listFiles(path.join(dir, folder))) {
-      const info = await stat(path.join(dir, folder, name)).catch(() => undefined);
+      const info = await lstat(path.join(dir, folder, name)).catch(() => undefined);
       if (info?.isFile()) parts.push(`${folder}/${name}:${info.size}:${info.mtimeMs}`);
     }
+  }
   return parts.sort().join("|");
 }
-/** Files under a folder, without following symlinks (no loops, no escapes). */
-async function listFiles(root: string, prefix = ""): Promise<string[]> {
-  const entries = await readdir(path.join(root, prefix), {
-    withFileTypes: true,
-  }).catch(() => []);
+/** Files under a folder, without following symlinks (no loops, no escapes),
+ * in a stable order and capped. Interrupted-write temp files are skipped. */
+async function listFiles(root: string): Promise<string[]> {
   const files: string[] = [];
-  for (const entry of entries) {
-    const name = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) files.push(...(await listFiles(root, name)));
-    else if (entry.isFile()) files.push(name);
-  }
+  let budget = MAX_WALK_ENTRIES;
+  const walk = async (prefix: string, depth: number) => {
+    const entries = await readdir(path.join(root, prefix), {
+      withFileTypes: true,
+    }).catch(() => []);
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      if (budget-- <= 0) return;
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (depth < MAX_WALK_DEPTH) await walk(name, depth + 1);
+      } else if (entry.isFile() && !entry.name.endsWith(".tmp")) files.push(name);
+    }
+  };
+  await walk("", 0);
   return files;
 }
 export class RevisionConflict extends Error {
@@ -186,84 +278,162 @@ const pidAlive = (pid: number) => {
     return (error as NodeJS.ErrnoException).code !== "ESRCH";
   }
 };
-/** Removes a lock whose owner died or went silent. Reports whether the file
- * is now gone (or was already). */
-async function clearStaleLock(file: string): Promise<boolean> {
-  let text: string;
+const LOCK_READ_BYTES = 4096;
+const notRegular = (file: string) =>
+  new Error(`Lock file is not a regular file: ${file}`);
+/** Read a lock without following links or blocking on a FIFO a repository
+ * planted there. undefined: gone. Throws for anything but a regular file. */
+async function readLock(
+  file: string,
+): Promise<{ text: string; ino: number; mtimeMs: number } | undefined> {
+  const info = await lstat(file).catch((error) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!info) return undefined;
+  if (!info.isFile()) throw notRegular(file);
+  let handle: Awaited<ReturnType<typeof open>>;
   try {
-    text = await readFile(file, "utf8");
+    // O_NONBLOCK: even if the file is swapped for a FIFO after the lstat,
+    // open must not hang.
+    handle = await open(
+      file,
+      constants.O_RDONLY |
+        (constants.O_NOFOLLOW ?? 0) |
+        (constants.O_NONBLOCK ?? 0),
+    );
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT";
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return undefined;
+    if (code === "ELOOP") throw notRegular(file);
+    throw error;
   }
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile()) throw notRegular(file);
+    const buffer = Buffer.alloc(LOCK_READ_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, LOCK_READ_BYTES, 0);
+    return {
+      text: buffer.toString("utf8", 0, bytesRead),
+      ino: opened.ino,
+      mtimeMs: opened.mtimeMs,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+/** Can the lock be taken over: owner process gone, or nobody refreshed it. */
+function lockIsStale(read: { text: string; mtimeMs: number }): boolean {
   let pid: number | undefined, at: number | undefined;
   try {
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(read.text);
     if (parsed && typeof parsed === "object") {
       pid = Number(parsed.pid);
       at = Date.parse(parsed.at);
     } else pid = Number(parsed); // older versions wrote a bare pid
   } catch {}
   // Just created (not written yet) or from an older version: use the file time.
-  if (at === undefined || Number.isNaN(at))
-    at = (await stat(file).catch(() => undefined))?.mtimeMs;
-  if (at === undefined) return true;
+  if (at === undefined || Number.isNaN(at)) at = read.mtimeMs;
+  // A clock-skewed or forged future stamp must not keep a lock alive forever.
+  at = Math.min(at, Date.now());
   const dead = Number.isInteger(pid) && pid! > 0 && !pidAlive(pid!);
-  if (!dead && Date.now() - at < LOCK_STALE_MS) return false;
-  // Move it aside first: of several takers only one rename succeeds.
-  const moved = `${file}.stale-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  return dead || Date.now() - at >= LOCK_STALE_MS;
+}
+/** Removes a lock whose owner died or went silent. "gone": the file is now
+ * absent; "live": a real owner holds it; "retry": another taker is busy with
+ * the takeover, ask again shortly. */
+async function clearStaleLock(file: string): Promise<"gone" | "live" | "retry"> {
+  const first = await readLock(file);
+  if (!first) return "gone";
+  if (!lockIsStale(first)) return "live";
+  // Takeover runs under a second exclusive lock: renaming the lock aside and
+  // linking it back leaves a window with no lock at all, in which a second
+  // taker creates its own and both hold it.
+  const reap = `${file}.reap`;
+  let reaper: Awaited<ReturnType<typeof open>>;
   try {
-    await rename(file, moved);
+    reaper = await open(reap, "wx");
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT";
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const info = await lstat(reap).catch(() => undefined);
+    if (info && !info.isFile()) throw notRegular(reap);
+    // A taker that died mid-takeover: its reap lock expires like any other.
+    if (info && Date.now() - Math.min(info.mtimeMs, Date.now()) > LOCK_STALE_MS)
+      await unlink(reap).catch(() => {});
+    return "retry";
   }
-  if ((await readFile(moved, "utf8").catch(() => text)) !== text) {
-    // A new owner took the lock between our read and the move: give it back.
-    await link(moved, file).catch(() => {});
-    await unlink(moved).catch(() => {});
-    return false;
+  try {
+    // Decide again with the takeover lock held: the owner may have changed.
+    const current = await readLock(file);
+    if (!current) return "gone";
+    if (!lockIsStale(current)) return "live";
+    // Same file we judged (not a successor that appeared meanwhile).
+    const now = await lstat(file).catch(() => undefined);
+    if (!now) return "gone";
+    if (now.ino !== current.ino) return "retry";
+    await unlink(file).catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+    return "gone";
+  } finally {
+    await reaper.close().catch(() => {});
+    await unlink(reap).catch(() => {});
   }
-  await unlink(moved).catch(() => {});
-  return true;
 }
 /** Exclusive lock file holding the owner's pid and time. A lock whose process
  * is gone, or that nobody refreshed for 30 s, is taken over. Resolves
  * undefined while a live owner holds it; other errors are thrown as-is. */
 export async function acquireLock(file: string): Promise<FileLock | undefined> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    let handle: Awaited<ReturnType<typeof open>>;
+  let attempts = 0,
+    waits = 0;
+  let handle: Awaited<ReturnType<typeof open>>;
+  for (;;) {
     try {
       handle = await open(file, "wx");
+      break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (await clearStaleLock(file)) continue;
-      return undefined;
     }
-    const stamp = () => JSON.stringify({ pid: process.pid, at: new Date().toISOString() });
-    try {
-      await handle.writeFile(stamp());
-    } catch (error) {
-      await handle.close().catch(() => {});
-      await unlink(file).catch(() => {});
-      throw error;
-    }
-    // Long jobs (speech generation) keep the lock fresh while they run.
-    let beat = Promise.resolve();
-    const timer = setInterval(() => {
-      beat = beat.then(() => handle.write(stamp(), 0)).then(() => {}, () => {});
-    }, LOCK_BEAT_MS);
-    timer.unref();
-    return {
-      async release() {
-        clearInterval(timer);
-        await beat;
-        await handle.close();
-        await unlink(file).catch((error) => {
-          if (error.code !== "ENOENT") throw error;
-        });
-      },
-    };
+    const state = await clearStaleLock(file);
+    if (state === "live") return undefined;
+    if (state === "retry") {
+      if (++waits > 100) return undefined;
+      await new Promise((resolve) => setTimeout(resolve, 10 + Math.random() * 10));
+    } else if (++attempts >= 3) return undefined;
   }
-  return undefined;
+  // The token identifies this holder: a holder that stalled past the stale
+  // limit and lost the lock must not delete its successor's file.
+  const token = Math.random().toString(36).slice(2, 12).padEnd(10, "0");
+  const stamp = () => JSON.stringify({ pid: process.pid, at: new Date().toISOString(), token });
+  try {
+    await handle.writeFile(stamp());
+  } catch (error) {
+    await handle.close().catch(() => {});
+    await unlink(file).catch(() => {});
+    throw error;
+  }
+  // Long jobs (speech generation) keep the lock fresh while they run.
+  let beat = Promise.resolve();
+  const timer = setInterval(() => {
+    beat = beat.then(() => handle.write(stamp(), 0)).then(() => {}, () => {});
+  }, LOCK_BEAT_MS);
+  timer.unref();
+  return {
+    async release() {
+      clearInterval(timer);
+      await beat;
+      await handle.close();
+      const current = (await readLock(file).catch(() => undefined))?.text ?? "";
+      let owner: unknown;
+      try {
+        owner = JSON.parse(current)?.token;
+      } catch {}
+      if (owner !== token) return; // taken over (or gone): not ours to remove
+      await unlink(file).catch((error) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    },
+  };
 }
 export async function withProjectLock<T>(
   dir: string,

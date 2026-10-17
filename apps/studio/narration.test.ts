@@ -5,7 +5,11 @@ import { resolveNarrationSegment } from "../../packages/generator-playwright/src
 import type { NarrationProvider } from "../../packages/tts-core/src/contracts.js";
 import { regenerateNarration } from "./narration.js";
 import { loadBundle, writeJson } from "./storage.js";
-import { audioIsCurrent, narrationRequestKey } from "./model.js";
+import {
+  audioIsCurrent,
+  narrationRequestKey,
+  type RecordingClip,
+} from "./model.js";
 import { projectFixture, wavBytes } from "./test-support.js";
 
 describe("replay narration regeneration", () => {
@@ -126,7 +130,7 @@ describe("replay narration regeneration", () => {
       expect(result.generated).toBe(1);
       expect(calls).toBe(1);
       const latest = await loadBundle(dir);
-      expect(latest.edits.clips[0]!.holdMs).toBe(0);
+      expect((latest.edits.clips[0] as RecordingClip).holdMs).toBe(0);
       expect(latest.narration.segments[1]).toEqual(other);
       await expect(
         regenerateNarration(dir, { segmentIds: ["missing"] }),

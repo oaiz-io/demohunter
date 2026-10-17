@@ -1,0 +1,7 @@
+{
+  // Application code plus tests (the base config excludes *.test.ts).
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["bun", "node"] },
+  "include": ["*.ts", "web/*.ts"],
+  "exclude": []
+}

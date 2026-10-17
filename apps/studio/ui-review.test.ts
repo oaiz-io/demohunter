@@ -275,10 +275,10 @@ test("saving does not rebuild the replay; paused frames are skipped; scenes surv
         true,
       );
 
-      // Audio changes reload the scene pages behind the visible ones: the
-      // scene never disappears while the replacement loads.
+      // Audio changes leave scene pages alone; a changed scene page loads
+      // behind the visible one, so the scene never disappears.
       await page.locator("#timeline-toggle").waitFor({ state: "attached" });
-      const sampled = page.evaluate(
+      const sample = () => page.evaluate(
         () =>
           new Promise<{ min: number; swapped: boolean }>((resolve) => {
             const started = performance.now();
@@ -300,9 +300,19 @@ test("saving does not rebuild the replay; paused frames are skipped; scenes surv
             sample();
           }),
       );
+      let sampled = sample();
       await Bun.sleep(100);
       await writeFile(path.join(dir, "audio/changed.wav"), wavBytes());
-      const result = await sampled;
+      let result = await sampled;
+      expect(result.min).toBe(1);
+      expect(result.swapped).toBe(false);
+      sampled = sample();
+      await Bun.sleep(100);
+      await writeFile(
+        path.join(dir, "scenes/title.html"),
+        '<!doctype html><html><body style="margin:0;background:#f5f1e8"><h1 id="hero">Scene v2</h1></body></html>',
+      );
+      result = await sampled;
       expect(result.min).toBe(1);
       expect(result.swapped).toBe(true);
       expect(await page.locator(".scene-frame.scene").count()).toBe(1);

@@ -1,8 +1,61 @@
-import { mkdir, readFile, readdir, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { chmod, lstat, mkdir, open, readdir, realpath, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { loadBundle, atomicWrite, writeJson } from "./storage.js";
 import { openReplayRenderer, renderReplayFrame } from "./render.js";
 import { clipStart, isScene, totalDuration } from "./model.js";
+
+/** Derived images live in a per-user cache, never inside the project: a cloned
+ * repository can commit `.studio/frames -> ~/Documents`, and a cache that
+ * prunes or reads through that link would delete or serve the user's files. */
+export function studioCacheRoot(): string {
+  const xdg = process.env.XDG_CACHE_HOME;
+  const base = xdg
+    ? xdg
+    : process.platform === "darwin"
+      ? path.join(homedir(), "Library", "Caches")
+      : path.join(homedir(), ".cache");
+  return path.join(base, "demohunter-studio");
+}
+/** The folder for one project's derived images (not created). */
+export async function projectCacheFolder(dir: string): Promise<string> {
+  const id = createHash("sha256").update(await realpath(dir)).digest("hex");
+  return path.join(studioCacheRoot(), "frames", id.slice(0, 24));
+}
+async function ensureCacheFolder(dir: string): Promise<string> {
+  const folder = await projectCacheFolder(dir);
+  await mkdir(folder, { recursive: true, mode: 0o700 });
+  const info = await lstat(folder);
+  // Ours alone: a link, or a folder someone else owns, is not a cache.
+  if (
+    !info.isDirectory() ||
+    (process.getuid && info.uid !== process.getuid())
+  )
+    throw new Error("Studio cache folder is not a private folder.");
+  if ((info.mode & 0o077) !== 0) await chmod(folder, 0o700);
+  return folder;
+}
+const FRAME_NAME = /^[0-9a-f]{16}-\d+\.png$/;
+const MAX_CACHED_BYTES = 32 * 1024 * 1024;
+/** A cached regular file, or undefined. Never follows a link. */
+async function readCached(file: string): Promise<Buffer | undefined> {
+  const handle = await open(
+    file,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+  ).catch(() => undefined);
+  if (!handle) return undefined;
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MAX_CACHED_BYTES) return undefined;
+    return await handle.readFile();
+  } catch {
+    return undefined;
+  } finally {
+    await handle.close();
+  }
+}
 // Derived work is bounded globally, with one in-flight render per project.
 let queue = Promise.resolve();
 const pending = new Map<string, Promise<Buffer>>();
@@ -89,13 +142,15 @@ function posterTime(bundle: Awaited<ReturnType<typeof loadBundle>>) {
 }
 export async function projectPoster(dir: string): Promise<Buffer> {
   const bundle = await loadBundle(dir),
-    folder = path.join(dir, ".studio");
+    folder = await projectCacheFolder(dir);
   try {
     const cache = JSON.parse(
-      await readFile(path.join(folder, "poster.json"), "utf8"),
+      (await readCached(path.join(folder, "poster.json")))?.toString("utf8") ?? "",
     );
-    if (cache.revision === bundle.revision && cache.rendererVersion === 3)
-      return await readFile(path.join(folder, "poster.png"));
+    if (cache.revision === bundle.revision && cache.rendererVersion === 3) {
+      const png = await readCached(path.join(folder, "poster.png"));
+      if (png) return png;
+    }
   } catch {}
   const existing = pending.get(dir);
   if (existing) return existing;
@@ -105,12 +160,15 @@ export async function projectPoster(dir: string): Promise<Buffer> {
       const frame = await renderReplayFrame(dir, {
         outputMs: Math.min(posterTime(bundle), totalDuration(bundle.edits)),
       });
-      await mkdir(folder, { recursive: true });
-      await atomicWrite(path.join(folder, "poster.png"), frame.bytes);
-      await writeJson(path.join(folder, "poster.json"), {
-        revision: frame.revision,
-        rendererVersion: 3,
-      });
+      // The cache is an optimisation: a failure to store must not fail the image.
+      try {
+        const store = await ensureCacheFolder(dir);
+        await atomicWrite(path.join(store, "poster.png"), frame.bytes);
+        await writeJson(path.join(store, "poster.json"), {
+          revision: frame.revision,
+          rendererVersion: 3,
+        });
+      } catch {}
       return frame.bytes;
     })
     .finally(() => pending.delete(dir));
@@ -128,15 +186,14 @@ export async function projectFrame(
   outputMs: number,
 ): Promise<Buffer> {
   const bundle = await loadBundle(dir),
-    folder = path.join(dir, ".studio/frames"),
+    folder = await projectCacheFolder(dir),
     ms = Math.min(
       Math.floor(totalDuration(bundle.edits)),
       Math.max(0, Math.round(outputMs)),
     ),
     file = path.join(folder, `${bundle.revision}-${ms}.png`);
-  try {
-    return await readFile(file);
-  } catch {}
+  const cached = await readCached(file);
+  if (cached) return cached;
   const key = `${dir}#${bundle.revision}#${ms}`;
   const existing = pending.get(key);
   if (existing) return existing;
@@ -152,15 +209,24 @@ export async function projectFrame(
           if (attempt >= 2 || (error as { status?: number }).status !== 409)
             throw error;
         }
-      await mkdir(folder, { recursive: true });
-      // Thumbnails for older revisions are disposable.
-      for (const name of await readdir(folder).catch(() => [] as string[]))
-        if (!name.startsWith(`${frame.revision}-`))
-          await unlink(path.join(folder, name)).catch(() => {});
-      await atomicWrite(
-        path.join(folder, `${frame.revision}-${ms}.png`),
-        frame.bytes,
-      );
+      try {
+        const store = await ensureCacheFolder(dir);
+        // Thumbnails for older revisions are disposable. Only plain files that
+        // look like ours are removed; anything else in the folder is left be.
+        for (const entry of await readdir(store, { withFileTypes: true }).catch(
+          () => [],
+        ))
+          if (
+            entry.isFile() &&
+            FRAME_NAME.test(entry.name) &&
+            !entry.name.startsWith(`${frame.revision}-`)
+          )
+            await unlink(path.join(store, entry.name)).catch(() => {});
+        await atomicWrite(
+          path.join(store, `${frame.revision}-${ms}.png`),
+          frame.bytes,
+        );
+      } catch {}
       return frame.bytes;
     })
     .finally(() => pending.delete(key));

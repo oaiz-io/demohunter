@@ -326,6 +326,19 @@ export async function captureReplay(
         for (const addition of event.data.adds ?? [])
           dropRemoteHeadLinks(addition.node);
     }
+    // After an event-cap cutoff, narration spoken later has nothing to play
+    // over: drop it (and say so) instead of placing it after the video ends.
+    if (cutoffMs !== undefined) {
+      const beyond = segments.filter(
+        (s) => ((s as NarrationSegment & { sourceMs?: number }).sourceMs ?? 0) >= durationMs,
+      );
+      if (beyond.length) {
+        for (const s of beyond) segments.splice(segments.indexOf(s), 1);
+        warnings.add(
+          `${beyond.length} narration line${beyond.length === 1 ? "" : "s"} after the recording stopped ${beyond.length === 1 ? "was" : "were"} left out.`,
+        );
+      }
+    }
     const sourceMarkers = segments.map(
       (s) => (s as NarrationSegment & { sourceMs: number }).sourceMs,
     );

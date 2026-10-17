@@ -90,17 +90,17 @@ describe.skipIf(!runnable)("desktop app", () => {
     const title = await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getTitle());
     expect(title).toBe(`${path.basename(repo)} — DemoHunter Studio`);
     if (shots) await first.page.screenshot({ path: path.join(shots, "library.png") });
-    await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setBounds({ x: 120, y: 90, width: 1200, height: 760 }));
+    await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setBounds({ x: 120, y: 90, width: 1100, height: 640 }));
     await first.app.close();
     app = undefined;
     const saved = JSON.parse(await readFile(path.join(userData, "settings.json"), "utf8"));
     expect(saved.recent[0].path).toBe(await realpath(repo));
-    expect(saved.window).toMatchObject({ width: 1200, height: 760 });
+    expect(saved.window).toMatchObject({ width: 1100, height: 640 });
     // Next launch reopens the last repository at the same size.
     const second = await launch(userData);
     await second.page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45_000 });
     const bounds = await second.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());
-    expect(bounds).toMatchObject({ width: 1200, height: 760 });
+    expect(bounds).toMatchObject({ width: 1100, height: 640 });
     // Close Repository returns to the welcome window with it listed.
     await second.app.evaluate(({ Menu }) => {
       const file = Menu.getApplicationMenu()!.items.find((i) => i.label === "File")!;
@@ -114,11 +114,11 @@ describe.skipIf(!runnable)("desktop app", () => {
 
   test("a saved size without a position still opens the window", async () => {
     const userData = await tmp("dh-desktop-data-");
-    await writeFile(path.join(userData, "settings.json"), JSON.stringify({ recent: ["/no/such/folder"], window: { width: 1000, height: 700 } }));
+    await writeFile(path.join(userData, "settings.json"), JSON.stringify({ recent: ["/no/such/folder"], window: { width: 1000, height: 640 } }));
     const { app, page } = await launch(userData);
     await page.waitForURL("app://ui/welcome.html");
     const bounds = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());
-    expect(bounds).toMatchObject({ width: 1000, height: 700 });
+    expect(bounds).toMatchObject({ width: 1000, height: 640 });
   }, 60_000);
 
   test("a repository shows every worktree's demos and the library holds still", async () => {
@@ -137,12 +137,20 @@ describe.skipIf(!runnable)("desktop app", () => {
     temp.push(fixture.root);
     const demo = path.join(feature, ".demohunter/replays/demo");
     await cp(fixture.dir, demo, { recursive: true });
-    // The fixture has no recorded frames to render; seed its poster cache.
+    // The fixture has no recorded frames to render; seed its poster in a
+    // private cache (Studio keeps posters outside projects).
     const { loadBundle } = await import("../studio/storage.js");
-    await mkdir(path.join(demo, ".studio"), { recursive: true });
-    await writeFile(path.join(demo, ".studio/poster.png"), await readFile(path.join(here, "build/icon.png")));
-    await writeFile(path.join(demo, ".studio/poster.json"), JSON.stringify({ revision: (await loadBundle(demo)).revision, rendererVersion: 3 }));
-    const { page } = await launch(userData, [repo]);
+    const cacheHome = await tmp("dh-desktop-cache-");
+    const previous = process.env.XDG_CACHE_HOME;
+    process.env.XDG_CACHE_HOME = cacheHome;
+    const { projectCacheFolder } = await import("../studio/poster.js");
+    const folder = await projectCacheFolder(demo);
+    await mkdir(folder, { recursive: true, mode: 0o700 });
+    if (previous === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = previous;
+    await writeFile(path.join(folder, "poster.png"), await readFile(path.join(here, "build/icon.png")));
+    await writeFile(path.join(folder, "poster.json"), JSON.stringify({ revision: (await loadBundle(demo)).revision, rendererVersion: 3 }));
+    const { page } = await launch(userData, [repo], { XDG_CACHE_HOME: cacheHome });
     await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45_000 });
     await page.locator(".recording-card").first().waitFor();
     // Projects: the open repository with its worktrees nested under it.

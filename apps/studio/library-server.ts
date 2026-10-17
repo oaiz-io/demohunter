@@ -135,6 +135,8 @@ export async function serveLibrary(
     try {
       if (!hostAllowed(req, options.host))
         return send(JSON.stringify({ error: "Unknown host." }), "application/json", 421);
+      if (req.headers["sec-fetch-site"] === "cross-site" && req.headers["sec-fetch-mode"] !== "navigate")
+        return send(JSON.stringify({ error: "Cross-site requests are disabled." }), "application/json", 403);
       // Every worktree of a restricted project is restricted, including ones
       // found after start (posters render before a demo is opened).
       if (options.restricted) for (const r of library.roots) restrictFolder(r);
@@ -216,7 +218,9 @@ export async function serveLibrary(
           host = req.headers.host ?? "";
         if (req.method === "GET" && sub === "/") {
           // Headless renders are not a person viewing the demo.
-          if (!url.searchParams.has("render")) noteViewer(id, dir, true, host);
+          // A link from another site doesn't retarget connected agents.
+          if (!url.searchParams.has("render") && req.headers["sec-fetch-site"] !== "cross-site")
+            noteViewer(id, dir, true, host);
         } else if (req.method === "GET" && sub === "/api/status")
           noteViewer(id, dir, url.searchParams.get("focused") === "1", host);
         else if (req.method === "POST" && sub.startsWith("/api/"))

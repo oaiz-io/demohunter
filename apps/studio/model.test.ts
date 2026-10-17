@@ -8,6 +8,7 @@ import {
   validateBundle,
 } from "./model.js";
 import { fixture } from "./test-support.js";
+import type { RecordingClip } from "./model.js";
 
 describe("editable replay time model", () => {
   test("cuts skip visible time while speed and holds map to the correct source state", () => {
@@ -23,7 +24,7 @@ describe("editable replay time model", () => {
     const { edits, narration } = fixture();
     const segment = narration.segments[0]!;
     expect(narrationStart(edits, segment)).toBe(1100);
-    edits.clips[0]!.holdMs = 700;
+    (edits.clips[0] as RecordingClip).holdMs = 700;
     expect(narrationStart(edits, segment)).toBe(1800);
     edits.clips.reverse();
     expect(narrationStart(edits, segment)).toBe(100);
@@ -40,7 +41,7 @@ describe("editable replay time model", () => {
       requestKey: narrationRequestKey(project, segment),
     };
     expect(audioIsCurrent(project, segment)).toBe(true);
-    edits.clips[0]!.holdMs = 1000;
+    (edits.clips[0] as RecordingClip).holdMs = 1000;
     expect(audioIsCurrent(project, segment)).toBe(true);
     segment.text += " Changed.";
     expect(audioIsCurrent(project, segment)).toBe(false);
@@ -50,7 +51,7 @@ describe("editable replay time model", () => {
   });
   test("rejects invalid targets, duplicate IDs, non-finite timing and out-of-capture clips", () => {
     const data = fixture();
-    data.edits.clips[0]!.sourceEndMs = 5000;
+    (data.edits.clips[0] as RecordingClip).sourceEndMs = 5000;
     expect(() => validateBundle(data)).toThrow("captured duration");
     const duplicate = fixture();
     duplicate.edits.clips[1]!.id = "a";
@@ -62,7 +63,7 @@ describe("editable replay time model", () => {
     });
     expect(() => validateBundle(invalid)).toThrow("exactly one");
     const nan = fixture();
-    nan.edits.clips[0]!.rate = NaN;
+    (nan.edits.clips[0] as RecordingClip).rate = NaN;
     expect(() => validateBundle(nan)).toThrow();
   });
 });

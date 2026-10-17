@@ -372,6 +372,11 @@ export type ReplayBundle = {
   contentRevision?: string;
   /** Changes only when scene pages or audio files change. */
   assetsRevision?: string;
+  /** Changes only when scene pages change (visuals, thumbnails). */
+  scenesRevision?: string;
+  /** Per-file stamp of scenes/ and audio/ files, so one changed file
+   * reloads only itself. */
+  assetStamps?: Record<string, string>;
 };
 
 export function clipDuration(clip: Clip): number {
@@ -485,6 +490,8 @@ export function validateBundle(value: {
   revision?: string;
   contentRevision?: string;
   assetsRevision?: string;
+  scenesRevision?: string;
+  assetStamps?: Record<string, string>;
 }): ReplayBundle {
   const project = projectSchema.parse(value.project);
   const edits = editsSchema.parse(value.edits);
@@ -521,6 +528,8 @@ export function validateBundle(value: {
     revision: value.revision ?? "",
     contentRevision: value.contentRevision,
     assetsRevision: value.assetsRevision,
+    scenesRevision: value.scenesRevision,
+    assetStamps: value.assetStamps,
   };
 }
 

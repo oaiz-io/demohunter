@@ -10,12 +10,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
   mkdir,
-  readFile,
   readdir,
   realpath,
   stat,
   unlink,
-  writeFile,
 } from "node:fs/promises";
 import path from "node:path";
 import { LocalLibrary } from "./library.js";
@@ -28,6 +26,7 @@ import {
 import { elementUri, parseReference, previewLink } from "./links.js";
 import {
   atomicWrite,
+  ensureIgnoredFolder,
   loadBundle,
   readProjectFile,
   mutateProject,
@@ -420,19 +419,19 @@ export async function writeStudioSession(
   root: string,
   session: StudioSession,
 ): Promise<void> {
-  const file = sessionFile(root);
-  await mkdir(path.dirname(file), { recursive: true });
-  // Runtime state: keep it out of git without touching the user's .gitignore.
-  await writeFile(path.join(path.dirname(file), ".gitignore"), "*\n", {
-    flag: "wx",
-  }).catch(() => {});
-  await writeJson(file, session);
+  // Runtime state, kept out of git without touching the user's .gitignore. A
+  // repository can commit `.demohunter` or `.demohunter/studio` as a link:
+  // refuse it rather than write outside the workspace.
+  const folder = await ensureIgnoredFolder(root, ".demohunter/studio");
+  await writeJson(path.join(folder, "session.json"), session);
 }
 export async function readStudioSession(
   root: string,
 ): Promise<StudioSession | null> {
   try {
-    const value = JSON.parse(await readFile(sessionFile(root), "utf8"));
+    const value = JSON.parse(
+      await readProjectFile(root, ".demohunter/studio/session.json"),
+    );
     return typeof value?.projectDir === "string" &&
       typeof value?.updatedAt === "string"
       ? (value as StudioSession)
@@ -786,6 +785,9 @@ export async function projectMediaFiles(
 ): Promise<{ scenes: string[]; audio: string[] }> {
   const list = async (folder: string, pattern: RegExp) => {
     const found: string[] = [];
+    // A linked folder would list files from outside the project.
+    const info = await lstat(path.join(dir, folder)).catch(() => undefined);
+    if (!info?.isDirectory()) return found;
     const walk = async (relative: string, depth: number) => {
       if (depth > 6 || found.length >= 200) return;
       const entries = await readdir(path.join(dir, relative), {

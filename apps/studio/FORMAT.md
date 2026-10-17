@@ -28,7 +28,7 @@ Copied references use `demohunter://capture/<captureId>/element/<ref>?t=<output-
 
 Comment references use `demohunter://capture/<captureId>/comment/<threadId>?t=<output-ms>`. HTTP note links add `comment=<threadId>` to the fragment and open that exact thread, including resolved notes. `resolve_reference` also accepts a bare `comment-…` ID within its bound project. It returns the current thread, replies, status and output time, plus captured HTML when the note has an element. Comment identity takes priority over an optional element in the same link.
 
-Runtime files are not canonical: selection.json, preview-state.json, preview-command.json, lock files, .history/, .studio/ (activity/poster cache), and exports/. Runtime/derived writes do not alter content revision. They may be discarded when moving a project. Keep audio/ and bundled assets for portable playback.
+Runtime files are not canonical: selection.json, preview-state.json, preview-command.json, lock files, .history/, .studio/ (activity), and exports/. Runtime/derived writes do not alter content revision. They may be discarded when moving a project. Keep audio/ and bundled assets for portable playback.
 
 ## Time and mutations
 

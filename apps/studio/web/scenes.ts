@@ -96,7 +96,8 @@ export class SceneLayer {
       >
     >();
     const { width, height } = bundle.project.viewport;
-    const version = bundle.assetsRevision ?? "";
+    // Scene pages only: new narration audio must not reload every scene.
+    const version = bundle.scenesRevision ?? bundle.assetsRevision ?? "";
     for (const clip of bundle.edits.clips) {
       if (!isScene(clip)) continue;
       const startMs = clipStart(bundle.edits, clip.id) ?? 0;
@@ -175,6 +176,9 @@ export class SceneLayer {
           existing.src = src;
           existing.trusted = nextTrusted;
           existing.pending = undefined;
+          // The first page may never have finished loading before it was
+          // replaced; the swapped-in one is ready.
+          existing.ready = true;
           this.changes++;
           old.remove();
           if (next.iframe.classList.contains("visible"))

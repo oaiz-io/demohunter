@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { lstat, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { atomicWrite, writeJson, safeFile, readProjectFile } from "./storage.js";
+import {
+  atomicWrite,
+  ensureRealFolders,
+  writeJson,
+  safeFile,
+  readProjectFile,
+} from "./storage.js";
 
 export type CapturedNode = {
   id: number;
@@ -85,10 +91,19 @@ export async function ensureElementIndex(dir: string): Promise<ElementIndex> {
     captureHash: hash,
     elements: result.elements,
   };
-  await mkdir(path.join(dir, "sources"), { recursive: true });
+  // A repository can commit `sources` (or a snippet) as a link; a write must
+  // never leave the project through it. Check every target before writing any.
+  const sources = await ensureRealFolders(dir, "sources");
+  for (const { ref } of result.snippets) {
+    const existing = await lstat(path.join(sources, `${ref}.html`)).catch(
+      () => undefined,
+    );
+    if (existing && !existing.isFile())
+      throw new Error(`sources/${ref}.html exists and is not a regular file.`);
+  }
   await Promise.all(
     result.snippets.map(({ ref, html }) =>
-      atomicWrite(path.join(dir, "sources", `${ref}.html`), html),
+      atomicWrite(path.join(sources, `${ref}.html`), html),
     ),
   );
   await writeJson(path.join(dir, "elements.json"), index);

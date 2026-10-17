@@ -7,6 +7,7 @@ import { readFormat } from "./format.js";
 import { totalDuration, audioIsCurrent } from "./model.js";
 import { historySummary } from "./storage.js";
 import { readActivity } from "./activity.js";
+import { scenesTrusted } from "./trust.js";
 import {
   cachedList,
   cachedWorktreeState,
@@ -252,7 +253,11 @@ export class LocalLibrary {
             current: w.path === this.root,
             main: w.main,
             // Refreshed in the background; never holds up the library.
-            ...(w.missing ? { changed: 0 } : cachedWorktreeState(w.path)),
+            // Not in restricted folders: `git status` runs filters a crafted
+            // repository can configure (code execution before any trust).
+            ...(w.missing || !scenesTrusted(w.path)
+              ? { changed: 0 }
+              : cachedWorktreeState(w.path)),
             recordings: recordings.filter((r) => r.worktree === w.path).length,
             tours: tours.filter((t) => t.worktree === w.path).length,
           })),

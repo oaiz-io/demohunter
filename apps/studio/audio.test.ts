@@ -63,7 +63,7 @@ class Media {
   }
 }
 
-function withLocation(run: () => unknown) {
+function withLocation(run: () => void): void {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "location");
   Object.defineProperty(globalThis, "location", {
     configurable: true,

@@ -31,6 +31,12 @@ import {
   parseReference,
 } from "./links.js";
 import { indexEvents } from "./elements.js";
+/** The comment-reference shape of ReplayWorkspace.resolve's result. */
+type Resolved = {
+  comment?: { id: string; status: string; body: string; replies: { body: string }[] };
+  outputMs?: number;
+  capturedHtml?: { html: string };
+};
 import { sampleAnimation } from "./model.js";
 
 const snapshot = (title = "Invoice") => ({
@@ -126,14 +132,16 @@ test("comment links resolve the exact thread, including resolved and recording-w
         anchored.id,
       ),
     ]) {
-      const result = await w.resolve(reference);
+      const result = (await w.resolve(reference)) as unknown as Resolved;
       expect(result.comment?.id).toBe(anchored.id);
       expect(result.comment?.status).toBe("resolved");
       expect(result.comment?.replies[0]?.body).toBe("Checked the result");
       expect(result.outputMs).toBe(120);
       expect(result.capturedHtml?.html).toContain("Invoice");
     }
-    const result = await w.resolve(commentUri(w.index.captureId, general.id));
+    const result = (await w.resolve(
+      commentUri(w.index.captureId, general.id),
+    )) as unknown as Resolved;
     expect(result.comment?.body).toBe("Shorten the whole recording");
     expect(result.outputMs).toBe(200);
     expect(result.capturedHtml).toBeUndefined();

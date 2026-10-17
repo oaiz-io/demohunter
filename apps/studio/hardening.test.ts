@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import {
   cp,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -247,21 +248,34 @@ test("narration lock: stale is taken over, live is busy, other errors surface as
     await rm(lock);
     const missing = await regenerateNarration(path.join(root, "nope"), {
       resolve,
-    }).catch((error) => error as NodeJS.ErrnoException);
-    expect(missing.code).toBe("ENOENT");
-    expect(missing.message).not.toContain("already regenerating");
+    }).then(
+      () => undefined,
+      (error) => error as NodeJS.ErrnoException,
+    );
+    expect(missing?.code).toBe("ENOENT");
+    expect(missing?.message).not.toContain("already regenerating");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("narration speech cache defaults to the workspace's .demohunter folder", () => {
+test("narration speech cache defaults to the workspace's .demohunter folder", async () => {
   expect(defaultCacheDir("/work/repo/.demohunter/replays/x")).toBe(
     "/work/repo/.demohunter/cache",
   );
-  expect(defaultCacheDir("/work/repo/demos/x")).toBe(
-    "/work/repo/.demohunter/cache",
-  );
+  // Elsewhere in a repository: the repository's cache, never above it.
+  const root = await mkdtemp(path.join(tmpdir(), "dh-cache-"));
+  try {
+    await mkdir(path.join(root, ".git"));
+    await mkdir(path.join(root, "demos/x"), { recursive: true });
+    expect(defaultCacheDir(path.join(root, "demos/x"))).toBe(
+      path.join(root, ".demohunter/cache"),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+  // Outside any repository: next to the demo, not in its parent folders.
+  expect(defaultCacheDir("/nowhere/x")).toBe("/nowhere/x/.demohunter/cache");
 });
 
 // ---------------------------------------------------------------------- MCP
@@ -423,11 +437,12 @@ test("scene writes refuse symlinked folders and files, and honour the revision",
     const revision = async () => (await loadBundle(dir)).revision;
     // scenes/ itself is a symlink.
     await symlink(outside, path.join(dir, "scenes"));
+    // The project cannot even be loaded while scenes/ is a link.
     await expect(
-      writeUnderScenes(dir, await revision(), [
+      writeUnderScenes(dir, "any", [
         { relative: "scenes/lifts/a.html", content: "x" },
       ]),
-    ).rejects.toThrow("not a folder");
+    ).rejects.toThrow("must be a folder inside the project");
     await rm(path.join(dir, "scenes"));
     // scenes/lifts is a symlink.
     await mkdir(path.join(dir, "scenes"));
@@ -808,3 +823,436 @@ test("capture records a warning and stops cleanly at the event limit", async () 
   }
 }, 60000);
 
+
+test("a holder that lost a stale lock does not remove its successor's lock", async () => {
+  const { acquireLock } = await import("./storage.js");
+  const root = await mkdtemp(path.join(tmpdir(), "dh-lock-"));
+  try {
+    const file = path.join(root, ".project.lock");
+    const a = await acquireLock(file);
+    expect(a).toBeDefined();
+    // A stalls (e.g. laptop sleep): its stamp ages past the stale limit.
+    const stamp = JSON.parse(await readFile(file, "utf8"));
+    await writeFile(file, JSON.stringify({ ...stamp, at: new Date(Date.now() - 60_000).toISOString() }));
+    const b = await acquireLock(file);
+    expect(b).toBeDefined();
+    await a!.release();
+    // B still owns the lock: a third writer must wait.
+    expect(await acquireLock(file)).toBeUndefined();
+    await b!.release();
+    expect(await acquireLock(file)).toBeDefined();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------- symlinks and hostile files
+
+const withCacheHome = async <T>(root: string, work: () => Promise<T>) => {
+  const before = process.env.XDG_CACHE_HOME;
+  process.env.XDG_CACHE_HOME = path.join(root, "xdg-cache");
+  try {
+    return await work();
+  } finally {
+    if (before === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = before;
+  }
+};
+
+test("thumbnail and poster caches live outside the project and ignore a linked .studio", async () => {
+  const { projectFrame, projectPoster, projectCacheFolder } = await import(
+    "./poster.js"
+  );
+  const { root, dir } = await setup();
+  try {
+    await withCacheHome(root, async () => {
+      const outside = path.join(root, "outside");
+      await mkdir(outside);
+      await writeFile(path.join(outside, "victim.png"), "keep");
+      await writeFile(path.join(outside, "secret.json"), "not a cache");
+      // What a cloned repository could commit.
+      const revision = (await loadBundle(dir)).revision;
+      await mkdir(path.join(dir, ".studio"));
+      await symlink(outside, path.join(dir, ".studio/frames"));
+      await symlink(
+        path.join(outside, "victim.png"),
+        path.join(dir, ".studio/poster.png"),
+      );
+      await writeFile(
+        path.join(outside, "poster-json"),
+        JSON.stringify({ revision, rendererVersion: 3 }),
+      );
+      await symlink(
+        path.join(outside, "poster-json"),
+        path.join(dir, ".studio/poster.json"),
+      );
+      const outsideBefore = (await readdir(outside)).sort();
+
+      const frame = await projectFrame(dir, 0);
+      expect(frame.subarray(1, 4).toString()).toBe("PNG");
+      const poster = await projectPoster(dir);
+      // Not the linked file's bytes.
+      expect(poster.subarray(1, 4).toString()).toBe("PNG");
+
+      const cache = await projectCacheFolder(dir);
+      expect(cache.startsWith(root)).toBe(true); // under XDG_CACHE_HOME here
+      expect(cache.startsWith(dir)).toBe(false);
+      expect(((await stat(cache)).mode & 0o777).toString(8)).toBe("700");
+      expect((await readdir(cache)).sort()).toEqual(
+        [`${revision}-0.png`, "poster.json", "poster.png"].sort(),
+      );
+      // Nothing behind the links changed.
+      expect((await readdir(outside)).sort()).toEqual(outsideBefore);
+      expect(await readFile(path.join(outside, "victim.png"), "utf8")).toBe("keep");
+
+      // Revision-keyed reuse: the cached file is served, not re-rendered.
+      await writeFile(path.join(cache, `${revision}-0.png`), "CACHED");
+      expect((await projectFrame(dir, 0)).toString()).toBe("CACHED");
+
+      // A new frame prunes other revisions' thumbnails, and only those: other
+      // names and links are left alone.
+      await writeFile(path.join(cache, "0123456789abcdef-5.png"), "old");
+      await writeFile(path.join(cache, "notes.txt"), "mine");
+      await symlink(
+        path.join(outside, "victim.png"),
+        path.join(cache, "fedcba9876543210-1.png"),
+      );
+      await projectFrame(dir, 100);
+      const names = (await readdir(cache)).sort();
+      expect(names).toContain("notes.txt");
+      expect(names).toContain("fedcba9876543210-1.png");
+      expect(names).toContain(`${revision}-100.png`);
+      expect(names).not.toContain("0123456789abcdef-5.png");
+      expect(await readFile(path.join(outside, "victim.png"), "utf8")).toBe("keep");
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 120000);
+
+test("a linked scenes/ or audio/ is refused, not followed; the walk is bounded", async () => {
+  const { assetStamp } = await import("./storage.js");
+  const { root, dir } = await projectFixture();
+  try {
+    const outside = path.join(root, "outside");
+    await mkdir(outside);
+    await writeFile(path.join(outside, "x.html"), "secret");
+    for (const name of ["scenes", "audio"]) {
+      await symlink(outside, path.join(dir, name));
+      await expect(loadBundle(dir)).rejects.toThrow(
+        `${name}/ must be a folder inside the project, not a link`,
+      );
+      // The cheap stamp does not walk it either.
+      expect(await assetStamp(dir)).toContain(`${name}:unusable`);
+      expect(await assetStamp(dir)).not.toContain("x.html");
+      await rm(path.join(dir, name));
+    }
+    expect((await loadBundle(dir)).assetStamps).toEqual({});
+
+    // Many files: only the first 2000 (by name) are fingerprinted.
+    await mkdir(path.join(dir, "scenes"));
+    await Promise.all(
+      Array.from({ length: 2100 }, (_, i) =>
+        writeFile(path.join(dir, "scenes", `s${String(i).padStart(4, "0")}.html`), "x"),
+      ),
+    );
+    expect(Object.keys((await loadBundle(dir)).assetStamps!).length).toBe(2000);
+    await rm(path.join(dir, "scenes"), { recursive: true });
+
+    // A big scene file is stamped by size and time, not read and hashed.
+    await mkdir(path.join(dir, "scenes"));
+    await writeFile(path.join(dir, "scenes/big.html"), Buffer.alloc(6 * 1024 * 1024));
+    await writeFile(path.join(dir, "scenes/small.html"), "x");
+    const stamps = (await loadBundle(dir)).assetStamps!;
+    expect(stamps["scenes/big.html"]).toMatch(/^6291456:/);
+    expect(stamps["scenes/small.html"]).toMatch(/^[0-9a-f]{16}$/);
+    // Interrupted-write temp files are not content.
+    await writeFile(path.join(dir, "scenes/a.html.1.x.tmp"), "x");
+    expect(Object.keys((await loadBundle(dir)).assetStamps!)).not.toContain(
+      "scenes/a.html.1.x.tmp",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30000);
+
+test("element sources are never written through a linked folder or file", async () => {
+  const { ensureElementIndex, indexEvents } = await import("./elements.js");
+  const { root, dir } = await projectFixture();
+  try {
+    const events = [{ type: 4, timestamp: 1000, data: {} }, snapshot];
+    await writeJson(path.join(dir, "events.json"), events);
+    const ref = indexEvents(events).snippets[0]!.ref;
+    const outside = path.join(root, "outside");
+    await mkdir(outside);
+    // sources -> elsewhere.
+    await symlink(outside, path.join(dir, "sources"));
+    await expect(ensureElementIndex(dir)).rejects.toThrow("not a link");
+    expect(await readdir(outside)).toEqual([]);
+    await rm(path.join(dir, "sources"));
+    // sources/<ref>.html -> a file elsewhere: refused before anything is written.
+    await mkdir(path.join(dir, "sources"));
+    await writeFile(path.join(outside, "victim.html"), "keep");
+    await symlink(
+      path.join(outside, "victim.html"),
+      path.join(dir, "sources", `${ref}.html`),
+    );
+    await expect(ensureElementIndex(dir)).rejects.toThrow("not a regular file");
+    expect(await readFile(path.join(outside, "victim.html"), "utf8")).toBe("keep");
+    await expect(stat(path.join(dir, "elements.json"))).rejects.toThrow();
+    // Honest project: written atomically, no temp files left.
+    await rm(path.join(dir, "sources"), { recursive: true });
+    const index = await ensureElementIndex(dir);
+    expect(index.elements.length).toBeGreaterThan(0);
+    expect((await readdir(path.join(dir, "sources"))).sort()).toEqual(
+      indexEvents(events).snippets.map((s) => `${s.ref}.html`).sort(),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("narration audio is copied beside the target and renamed, never through a link", async () => {
+  const { root, dir } = await projectFixture();
+  const resolve = fakeVoice(root) as typeof resolveNarrationSegment;
+  try {
+    const outside = path.join(root, "outside");
+    await mkdir(outside);
+    // audio/ itself is a link.
+    await symlink(outside, path.join(dir, "audio"));
+    await expect(regenerateNarration(dir, { resolve })).rejects.toThrow(
+      "not a link",
+    );
+    expect(await readdir(outside)).toEqual([]);
+    await rm(path.join(dir, "audio"));
+    // The destination file is a link to a file elsewhere.
+    await mkdir(path.join(dir, "audio"));
+    await writeFile(path.join(outside, "victim.wav"), "keep");
+    await symlink(
+      path.join(outside, "victim.wav"),
+      path.join(dir, "audio/key-Thesameamount.wav"),
+    );
+    // (The linked name makes the fingerprint read it as "not a file": fine.)
+    expect((await regenerateNarration(dir, { resolve })).generated).toBe(1);
+    expect(await readFile(path.join(outside, "victim.wav"), "utf8")).toBe("keep");
+    const placed = await lstat(path.join(dir, "audio/key-Thesameamount.wav"));
+    expect(placed.isFile()).toBe(true);
+    expect(placed.size).toBe(wavBytes().length);
+    expect(
+      (await readdir(path.join(dir, "audio"))).filter((n) => n.endsWith(".tmp")),
+    ).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("studio session, seen marks and activity refuse linked runtime folders", async () => {
+  const { writeStudioSession, readStudioSession, clearStudioSession } =
+    await import("./workspace.js");
+  const { beginActivity, trackActivity, readActivity } = await import(
+    "./activity.js"
+  );
+  const { root, dir } = await projectFixture();
+  const session = {
+    protocolVersion: 1 as const,
+    projectDir: "x",
+    projectId: "y",
+    title: "T",
+    updatedAt: new Date().toISOString(),
+    serverId: "s1",
+  };
+  try {
+    const outside = path.join(root, "outside");
+    const workspace = path.join(root, "ws");
+    await mkdir(outside);
+    await mkdir(workspace);
+
+    // .demohunter -> elsewhere.
+    await symlink(outside, path.join(workspace, ".demohunter"));
+    await expect(writeStudioSession(workspace, session)).rejects.toThrow("not a link");
+    const library = { id: "a", captureId: "c", agentChanges: 0 } as never;
+    await new SeenDemos(workspace).mark(library); // best effort: must not throw
+    expect(await readdir(outside)).toEqual([]);
+    await rm(path.join(workspace, ".demohunter"));
+
+    // .demohunter/studio -> elsewhere.
+    await mkdir(path.join(workspace, ".demohunter"));
+    await symlink(outside, path.join(workspace, ".demohunter/studio"));
+    await expect(writeStudioSession(workspace, session)).rejects.toThrow("not a link");
+    await new SeenDemos(workspace).mark(library);
+    expect(await readdir(outside)).toEqual([]);
+    await rm(path.join(workspace, ".demohunter/studio"));
+
+    // A session file someone else planted behind a link is neither read nor removed.
+    await writeFile(path.join(outside, "session.json"), JSON.stringify(session));
+    await symlink(outside, path.join(workspace, ".demohunter/studio"));
+    expect(await readStudioSession(workspace)).toBeNull();
+    await clearStudioSession(workspace, "s1");
+    expect(await readdir(outside)).toEqual(["session.json"]);
+    await rm(path.join(workspace, ".demohunter/studio"));
+
+    // A linked .gitignore is not written through; the session still lands.
+    await mkdir(path.join(workspace, ".demohunter/studio"));
+    await writeFile(path.join(outside, "ignore-target"), "keep");
+    await symlink(
+      path.join(outside, "ignore-target"),
+      path.join(workspace, ".demohunter/studio/.gitignore"),
+    );
+    await writeStudioSession(workspace, session);
+    expect(await readFile(path.join(outside, "ignore-target"), "utf8")).toBe("keep");
+    expect((await readStudioSession(workspace))?.serverId).toBe("s1");
+    // A linked session.json is replaced, not written through.
+    await rm(path.join(workspace, ".demohunter/studio/session.json"));
+    await symlink(
+      path.join(outside, "ignore-target"),
+      path.join(workspace, ".demohunter/studio/session.json"),
+    );
+    await writeStudioSession(workspace, session);
+    expect(await readFile(path.join(outside, "ignore-target"), "utf8")).toBe("keep");
+
+    // Activity: .studio -> elsewhere, then .studio/activity -> elsewhere.
+    await rm(outside, { recursive: true });
+    await mkdir(outside);
+    await symlink(outside, path.join(dir, ".studio"));
+    await expect(
+      beginActivity(dir, "s", "agent", "get_selection", {}),
+    ).rejects.toThrow("not a link");
+    const finish = await trackActivity(dir, "s", "agent", "get_selection", {});
+    await finish();
+    expect(await readdir(outside)).toEqual([]);
+    expect(await readActivity(dir)).toEqual([]);
+    await rm(path.join(dir, ".studio"));
+    await mkdir(path.join(dir, ".studio"));
+    await symlink(outside, path.join(dir, ".studio/activity"));
+    await expect(
+      beginActivity(dir, "s", "agent", "get_selection", {}),
+    ).rejects.toThrow("not a link");
+    expect(await readdir(outside)).toEqual([]);
+    // Honest folders still work.
+    await rm(path.join(dir, ".studio/activity"));
+    const done = await beginActivity(dir, "s", "agent", "get_selection", {});
+    await done();
+    expect((await readActivity(dir))[0]?.status).toBe("succeeded");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------------- lock hardening
+
+test("lock takeover: concurrent takers of a dead lock never both hold it", async () => {
+  const { acquireLock } = await import("./storage.js");
+  const root = await mkdtemp(path.join(tmpdir(), "dh-lock-"));
+  const file = path.join(root, ".project.lock");
+  const dead = deadPid();
+  try {
+    let maxHolders = 0;
+    for (let round = 0; round < 50; round++) {
+      await writeFile(
+        file,
+        JSON.stringify({ pid: dead, at: new Date().toISOString() }),
+      );
+      let holders = 0,
+        won = 0;
+      await Promise.all(
+        Array.from({ length: 12 }, async () => {
+          const lock = await acquireLock(file);
+          if (!lock) return;
+          won++;
+          maxHolders = Math.max(maxHolders, ++holders);
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          holders--;
+          await lock.release();
+        }),
+      );
+      expect(won).toBeGreaterThan(0);
+      expect(maxHolders).toBe(1);
+      await expect(stat(`${file}.reap`)).rejects.toThrow();
+      await rm(file, { force: true });
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 120000);
+
+test("locks: a FIFO, a link or a device is an error, never opened or followed", async () => {
+  const { acquireLock } = await import("./storage.js");
+  const root = await mkdtemp(path.join(tmpdir(), "dh-lock-"));
+  const file = path.join(root, ".project.lock");
+  try {
+    // FIFO: reading it would block forever.
+    expect(spawnSync("mkfifo", [file]).status).toBe(0);
+    await expect(acquireLock(file)).rejects.toThrow("not a regular file");
+    await rm(file);
+    // Symlink to a file elsewhere (and a dangling one).
+    const target = path.join(root, "target");
+    await writeFile(target, JSON.stringify({ pid: deadPid(), at: "2000-01-01" }));
+    await symlink(target, file);
+    await expect(acquireLock(file)).rejects.toThrow("not a regular file");
+    expect(await readFile(target, "utf8")).toContain("2000-01-01");
+    await rm(file);
+    await symlink(path.join(root, "missing"), file);
+    await expect(acquireLock(file)).rejects.toThrow("not a regular file");
+    await rm(file);
+    // A directory.
+    await mkdir(file);
+    await expect(acquireLock(file)).rejects.toThrow("not a regular file");
+    await rm(file, { recursive: true });
+    // A FIFO planted as the takeover lock.
+    await writeFile(
+      file,
+      JSON.stringify({ pid: deadPid(), at: new Date().toISOString() }),
+    );
+    expect(spawnSync("mkfifo", [`${file}.reap`]).status).toBe(0);
+    await expect(acquireLock(file)).rejects.toThrow("not a regular file");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 15000);
+
+test("locks: future stamps, huge files and abandoned takeover locks", async () => {
+  const { acquireLock } = await import("./storage.js");
+  const { utimes } = await import("node:fs/promises");
+  const root = await mkdtemp(path.join(tmpdir(), "dh-lock-"));
+  const file = path.join(root, ".project.lock");
+  const ago = (ms: number) => new Date(Date.now() - ms);
+  try {
+    // A forged future stamp from a live process does not make a lock
+    // untouchable forever: it counts as "now", so it ages out.
+    await writeFile(
+      file,
+      JSON.stringify({ pid: process.pid, at: new Date(Date.now() + 3_600_000).toISOString() }),
+    );
+    expect(await acquireLock(file)).toBeUndefined(); // fresh as of now
+    // ...and a dead owner's future-dated lock is taken at once.
+    await writeFile(
+      file,
+      JSON.stringify({ pid: deadPid(), at: new Date(Date.now() + 3_600_000).toISOString() }),
+    );
+    const taken = await acquireLock(file);
+    expect(taken).toBeDefined();
+    await taken!.release();
+
+    // Only the first 4 KB is read: a megabyte of junk is judged by file time.
+    await writeFile(file, "x".repeat(1_000_000));
+    expect(await acquireLock(file)).toBeUndefined();
+    await utimes(file, ago(60_000), ago(60_000));
+    const old = await acquireLock(file);
+    expect(old).toBeDefined();
+    await old!.release();
+
+    // A takeover lock left by a crashed taker expires; a fresh one is respected.
+    const dead = JSON.stringify({ pid: deadPid(), at: new Date().toISOString() });
+    await writeFile(file, dead);
+    await writeFile(`${file}.reap`, "");
+    expect(await acquireLock(file)).toBeUndefined(); // another taker is busy
+    expect(await readFile(file, "utf8")).toBe(dead);
+    await utimes(`${file}.reap`, ago(60_000), ago(60_000));
+    const after = await acquireLock(file);
+    expect(after).toBeDefined();
+    await after!.release();
+    await expect(stat(`${file}.reap`)).rejects.toThrow();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30000);

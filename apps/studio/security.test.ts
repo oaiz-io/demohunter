@@ -154,6 +154,15 @@ describe("lift snapshots", () => {
       await page.setContent(
         `<div id="card"><img src="x.png" onerror="alert(1)" alt="Logo"><a href="javascript:alert(1)" onclick="alert(2)">Link</a><iframe srcdoc="<script>alert(3)</script>"></iframe><button formaction="https://evil.example" onfocus="alert(4)">Go</button><svg><a xlink:href="javascript:alert(5)"><text>t</text></a></svg><p data-x="1">Text</p></div>`,
       );
+      // Recorded pages deliver text through the DOM; raw-text elements would
+      // serialise it unescaped (mutation XSS).
+      await page.evaluate(() => {
+        for (const tag of ["xmp", "noembed", "noframes"]) {
+          const el = document.createElement(tag);
+          el.textContent = `</${tag}><img src=x onerror="window.pwned=1">`;
+          document.getElementById("card")!.append(el);
+        }
+      });
       await page.addScriptTag({ content: bundle.outputFiles[0]!.text });
       const html = await page.evaluate(() => (window as any).snap(document.getElementById("card")).html as string);
       expect(html).toContain("Text");
@@ -162,6 +171,39 @@ describe("lift snapshots", () => {
       expect(html).not.toMatch(/javascript:|srcdoc|formaction|<iframe/i);
     } finally {
       await browser.close();
+    }
+  });
+});
+
+describe("round 2 hardening", () => {
+  test("cross-site calls are refused; links are not served as scripts; exports can't be redirected", async () => {
+    const { root, dir } = await projectFixture();
+    try {
+      await mkdir(path.join(dir, "scenes"));
+      await writeFile(path.join(dir, "scenes/b.js"), "window.pwned = 1");
+      await symlink(path.join(dir, "scenes/b.js"), path.join(dir, "scenes/a.json"));
+      await mkdir(path.join(root, "elsewhere"));
+      await symlink(path.join(root, "elsewhere"), path.join(dir, "exports"));
+      const app = await serveReplay(dir, { port: 0 });
+      try {
+        const cross = await raw(`${app.url}/api/project`, { headers: { "sec-fetch-site": "cross-site", "sec-fetch-mode": "cors" } });
+        expect(cross.status).toBe(403);
+        const nav = await raw(`${app.url}/`, { headers: { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate" } });
+        expect(nav.status).toBe(200);
+        expect((await fetch(app.url + "/files/scenes/a.json")).status).toBe(404);
+        const bundle = await fetch(app.url + "/api/project").then((r) => r.json());
+        const exported = await fetch(app.url + "/api/export", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ revision: bundle.revision }),
+        });
+        expect(exported.status).toBe(400);
+        expect((await exported.json()).error).toContain("not a link");
+      } finally {
+        await app.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

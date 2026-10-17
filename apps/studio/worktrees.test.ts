@@ -146,3 +146,26 @@ describe("repository libraries", () => {
     expect(await readStudioSession(main)).toBeNull();
   });
 });
+
+test("a crafted worktree entry pointing elsewhere is never scanned", async () => {
+  const decoy = path.join(base, "decoy");
+  await mkdir(path.join(decoy, ".demohunter/replays"), { recursive: true });
+  await addDemo(decoy, "stolen", "Decoy demo");
+  // .git/worktrees/evil/gitdir is plain text in the repository.
+  const entry = path.join(main, ".git/worktrees/evil");
+  await mkdir(entry, { recursive: true });
+  await writeFile(path.join(entry, "gitdir"), path.join(decoy, ".git") + "\n");
+  await writeFile(path.join(entry, "commondir"), "../..\n");
+  await writeFile(path.join(entry, "HEAD"), "ref: refs/heads/main\n");
+  try {
+    expect(git(main, "worktree", "list")).toContain(decoy);
+    const library = await LocalLibrary.open(main);
+    const scan = await library.scan();
+    expect(scan.recordings.map((r) => r.title)).not.toContain("Decoy demo");
+    expect(library.roots).not.toContain(decoy);
+    expect(scan.worktrees?.find((w) => w.path.endsWith("decoy"))?.missing).toBe(true);
+  } finally {
+    await rm(entry, { recursive: true, force: true });
+    await rm(decoy, { recursive: true, force: true });
+  }
+});

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
-import { realpath } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 
 export type GitStatus = {
   /** Repository folder name, e.g. "demohunter". */
@@ -113,6 +113,21 @@ export type Worktree = {
   main?: boolean;
 };
 
+/** The worktree at `dir` is a checkout of the repository at `common`. */
+async function belongsTo(dir: string, common: string, main: boolean) {
+  const dotGit = path.join(dir, ".git");
+  if (main) return (await realpath(dotGit).catch(() => "")) === common;
+  try {
+    const text = await readFile(dotGit, "utf8");
+    const pointer = /^gitdir:\s*(.+)$/m.exec(text)?.[1]?.trim();
+    if (!pointer) return false;
+    const target = await realpath(path.resolve(dir, pointer));
+    return target.startsWith(path.join(common, "worktrees") + path.sep);
+  } catch {
+    return false;
+  }
+}
+
 /** Worktrees of the repository whose top level is `dir`, main first. Only a
  * repository root qualifies: subfolders and plain folders return undefined,
  * so Studio never goes looking for repositories on its own. */
@@ -148,10 +163,19 @@ export async function listWorktrees(
       else if (key === "locked") current.locked = true;
       else if (key === "prunable") current.missing = true;
     }
+    // Worktree paths come from .git/worktrees/*/gitdir, which a crafted
+    // repository controls: only accept folders whose own .git points back
+    // into this repository, so Studio never scans or writes elsewhere.
+    const common = await realpath(
+      path.resolve(dir, (await git(dir, ["rev-parse", "--git-common-dir"])).trim()),
+    ).catch(() => undefined);
     for (const w of list) {
       const real = await realpath(w.path).catch(() => undefined);
-      if (real) w.path = real;
-      else w.missing = true;
+      if (!real || !common || !(await belongsTo(real, common, !!w.main))) {
+        w.missing = true;
+        continue;
+      }
+      w.path = real;
     }
     return list.length ? list : undefined;
   } catch {

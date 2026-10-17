@@ -309,7 +309,8 @@ async function api<T>(url: string, data?: unknown): Promise<T> {
           headers: { "Content-Type": "application/json" },
           body,
           // Small saves started while the page closes still reach the server.
-          keepalive: body.length < 60000,
+          // Chromium caps keepalive bodies (bytes, shared across requests).
+          keepalive: new TextEncoder().encode(body).length < 30_000,
         },
   );
   const result = await response.json();
@@ -914,6 +915,11 @@ async function runReload(): Promise<void> {
         applyOverrides();
         resize();
       });
+      replayer.pause(replaySource());
+      lastSource = -1;
+    } else if (!playing) {
+      // Clip edits can map the same output time to another source moment;
+      // a paused canvas must show it without waiting for a seek.
       replayer.pause(replaySource());
       lastSource = -1;
     }
@@ -1659,8 +1665,10 @@ let publishing = false,
 /** Agents treat a preview as connected if it reported within 8 s. */
 const PUBLISH_REFRESH_MS = 5000;
 async function publishPreview(): Promise<void> {
-  if (publishing || !bundle || reloading || renderMode || document.hidden)
-    return;
+  if (publishing || !bundle || reloading || renderMode) return;
+  // A hidden window (behind the agent's terminal) still sends the periodic
+  // heartbeat, so agents keep seeing the preview as connected.
+  if (document.hidden && Date.now() - publishedAt < PUBLISH_REFRESH_MS) return;
   const key = [
     position,
     playing,
@@ -1730,7 +1738,11 @@ const hasDrafts = () =>
   transcript.dirtyCount + (elementEditor?.dirtyCount ?? 0) > 0;
 // Leaving the page must not lose what was typed in the last second.
 if (!renderMode) {
-  addEventListener("pagehide", () => void flushDrafts().catch(() => {}));
+  // On pagehide there is no second round trip: start both flushes at once.
+  addEventListener("pagehide", () => {
+    void transcript.flushAll().catch(() => {});
+    void elementEditor?.flushAll().catch(() => {});
+  });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) return;
     // A hidden tab neither shows nor needs playback; stop instead of racing

@@ -47,10 +47,15 @@ function copyTree(from, to, base = from) {
   }
 }
 // Studio runs TypeScript from source and imports packages/*/src directly.
-const packages = fs.readdirSync(path.join(repo, "packages")).filter((p) => fs.existsSync(path.join(repo, "packages", p, "package.json")));
-for (const dir of ["apps/studio", ...packages.map((p) => `packages/${p}`)]) {
-  fs.mkdirSync(path.join(stage, dir), { recursive: true });
-  copyTree(path.join(repo, dir), path.join(stage, dir));
+// Only files git tracks are bundled, so local .env files, logs or captures
+// in the checkout never end up in a download.
+const tracked = execFileSync("git", ["ls-files", "-z", "--", "apps/studio", "packages"], { cwd: repo })
+  .toString()
+  .split("\0")
+  .filter((rel) => rel && !skip(rel) && fs.existsSync(path.join(repo, rel)));
+for (const rel of tracked) {
+  fs.mkdirSync(path.dirname(path.join(stage, rel)), { recursive: true });
+  fs.copyFileSync(path.join(repo, rel), path.join(stage, rel));
 }
 fs.mkdirSync(path.join(stage, "apps/desktop/build"), { recursive: true });
 for (const file of ["main.cjs", "preload.cjs", "build/icon.png"])

@@ -406,7 +406,10 @@ function render() {
         b.modifiedAt.localeCompare(a.modifiedAt) || a.id.localeCompare(b.id),
     );
   const els = shown.map((r) => {
-    const sig = JSON.stringify([r, showBranch, worktreeOf(r)]);
+    // Only what the card shows: git counts arriving in the background must
+    // not rebuild it.
+    const w = worktreeOf(r);
+    const sig = JSON.stringify([r, showBranch, w && [w.name, branchLabel(w), w.path]]);
     const hit = cards.get(r.id);
     if (hit?.sig === sig) {
       // Reused cards still keep their relative time current.
@@ -416,7 +419,11 @@ function render() {
       // A poster that failed to load is retried on the next render.
       const art = hit.el.querySelector(".recording-art");
       const img = poster(r);
-      if (art && !art.contains(img)) art.prepend(img);
+      if (art && !art.contains(img)) {
+        // One poster per card: drop any stale one before adding the new.
+        art.querySelectorAll(".recording-poster").forEach((old) => old.remove());
+        art.prepend(img);
+      }
       return hit.el;
     }
     const el = card(r, showBranch);
