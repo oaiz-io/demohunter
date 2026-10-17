@@ -69,6 +69,9 @@ function isDirectory(p) {
  * (known to work with Playwright), else one on the system. */
 function bun() {
   if (process.env.BUN && fs.existsSync(process.env.BUN)) return process.env.BUN;
+  // The downloadable app ships its own Bun next to the Studio sources.
+  const bundled = path.join(root, "bin", "bun");
+  if (fs.existsSync(bundled)) return bundled;
   try {
     const pkg = require.resolve(`@oven/bun-${process.platform}-${process.arch === "arm64" ? "aarch64" : process.arch}/package.json`);
     const pinned = path.join(path.dirname(pkg), "bin/bun");
@@ -96,7 +99,51 @@ function loginEnv() {
       if (i > 0) shellEnv[line.slice(0, i)] = line.slice(i + 1);
     }
   } catch {}
+  // Homebrew's ffmpeg is found even when the login shell doesn't add it.
+  const extra = ["/opt/homebrew/bin", "/usr/local/bin"].filter((d) => !(shellEnv.PATH ?? "").split(":").includes(d));
+  shellEnv.PATH = [shellEnv.PATH, ...extra].filter(Boolean).join(":");
   return shellEnv;
+}
+
+/** Studio renders thumbnails and exports with Playwright's Chromium. A fresh
+ * install (e.g. the downloadable app) fetches it once, with a status page. */
+let browserReady;
+function playwrightCli() {
+  try {
+    return path.join(path.dirname(require.resolve("playwright/package.json", { paths: [path.join(root, "apps/studio")] })), "cli.js");
+  } catch {
+    return undefined;
+  }
+}
+function run(args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(bun(), args, { cwd: path.join(root, "apps/studio"), env: { ...loginEnv(), FORCE_COLOR: "0" }, stdio: ["ignore", "pipe", "pipe"], ...options });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (out = (out + d).slice(-4000)));
+    child.once("error", (e) => resolve({ code: -1, out: String(e.message) }));
+    child.once("close", (code) => resolve({ code, out }));
+  });
+}
+/** true/false, or undefined when the check itself could not run. */
+function hasBrowser() {
+  return run(["-e", "const { chromium } = require('playwright'); process.stdout.write(require('fs').existsSync(chromium.executablePath()) ? 'yes' : 'no')"]).then((r) =>
+    r.code !== 0 ? undefined : r.out.trim().endsWith("yes"),
+  );
+}
+function ensureBrowser(dir) {
+  return (browserReady ??= (async () => {
+    // When even the check fails, Studio's own startup error says more.
+    if ((await hasBrowser()) !== false) return;
+    const cliPath = playwrightCli();
+    if (!cliPath) return;
+    if (dir) await showStatus(dir, undefined, false, "Downloading the browser Studio renders with (first run, about 150 MB)…");
+    const result = await run([cliPath, "install", "chromium"]);
+    if (result.code !== 0) {
+      browserReady = undefined;
+      throw new Error(`Could not download Chromium for rendering.\n${result.out}`);
+    }
+  })());
 }
 
 function stopStudio() {
@@ -138,8 +185,9 @@ function startStudio(dir) {
 
 // ---------------------------------------------------------------- windows
 
-function showStatus(dir, error, stopped = false) {
+function showStatus(dir, error, stopped = false, message) {
   const q = new URLSearchParams({ name: path.basename(dir), path: dir });
+  if (message) q.set("message", message);
   // The startup banner is not part of the problem.
   if (error) q.set("error", error.replace(/^(DemoHunter Studio: .*|Workspace: .*|No account or hosted service required\.)\n?/gm, "").trim().slice(-4000));
   if (stopped) q.set("stopped", "1");
@@ -170,6 +218,7 @@ async function openRepository(dir) {
   buildMenus();
   await showStatus(dir);
   try {
+    await ensureBrowser(dir);
     const url = await startStudio(dir);
     if (workspace === dir) {
       studioOrigin = new URL(url).origin;

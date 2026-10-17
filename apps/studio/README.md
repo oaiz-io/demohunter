@@ -4,7 +4,7 @@ An open-source, local-first application for captured browser demos. Explore reco
 
 ## Start
 
-From this source workspace, with Bun, Playwright Chromium and FFmpeg installed:
+From this source workspace, with Bun 1.3 or newer (Bun 1.2 cannot launch Playwright's browsers), Playwright Chromium and FFmpeg installed:
 
 ```sh
 bun install
@@ -72,9 +72,9 @@ Or choose **Export video** in the editor (24 fps; missing speech is left silent)
 
 ## Contract and boundaries
 
-[Format/protocol v1](FORMAT.md) fixes filenames, identity, time semantics, revision rules and compatibility; [JSON Schemas](schemas/) support tools. [Architecture](ARCHITECTURE.md) describes the browser/service/storage boundaries and future Tauri/hosting path.
+[Format/protocol v1](FORMAT.md) fixes filenames, identity, time semantics, revision rules and compatibility; [JSON Schemas](schemas/) support tools. [Architecture](ARCHITECTURE.md) describes the browser/service/storage boundaries and the desktop/hosting path.
 
-This is now an application workspace under apps/studio, still source-distributed rather than a published desktop package. The local service has no account/auth layer; use localhost or a trusted private network. Hosting with multiple users requires authorization and tenant scoping. Tauri packaging remains future work.
+This is an application workspace under apps/studio. The macOS desktop app (apps/desktop, alpha) wraps the same service in an Electron window; an unsigned build for Apple silicon is published as the rolling `studio-desktop-alpha` GitHub pre-release. The local service has no account/auth layer; use localhost or a trusted private network. Hosting with multiple users requires authorization and tenant scoping.
 
 Replay captures visible DOM rather than the JavaScript heap/backend. Original app scripts do not execute. Text edits do not recompute calculations. Captured HTML does not identify original React/HTML source unless the app supplied provenance. Refs survive edits, not recapture. HTML/SVG work best; canvas/WebGL, cross-origin frames and native media have fidelity limits. Captured assets have a 10 MB resource limit. Keep demo data appropriate for sharing.
 
@@ -85,6 +85,7 @@ Clips use source milliseconds; effects use output milliseconds. Speech follows c
 ```sh
 bun run test:studio
 bun run typecheck:studio
+bun run test:desktop      # macOS (or Linux with a display): Electron end-to-end tests
 bun run build
 ```
 

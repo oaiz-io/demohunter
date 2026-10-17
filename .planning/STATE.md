@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: none — milestone archived
 Plan: none
 Status: v1.0 complete
-Last activity: 2026-10-17 -- Quick tasks 261016-dsk (worktree libraries) and 261016-txt (inline text editing)
+Last activity: 2026-10-17 -- Quick tasks 261017-wtl (worktree libraries), 261016-txt (inline text editing) and 261017-rdy (alpha readiness review)
 Progress: [██████████] 100%
 
 ## Performance Metrics
@@ -43,12 +43,10 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
-| 2026-10-16 | 261016-qus | Controla brand comment | Added Spotify and Klarna; retained existing brands; checked three replay frames and project validation; resolved the comment. |
 | 2026-10-16 | 261016-moj | Restore direct element editing | Research/plan/implement loops: drag, resize, text/colors, hide/remove/reset, scene targets, disk autosave, revision-safe conflicts and undo. Full verify: 369 passed, 1 skipped; final browser regression and typecheck passed. |
-| 2026-10-16 | 261016-mjc | Controla flag comment | Changed the Swedish flag to the EU flag through MCP; checked the rendered replay at 31.049 s; inspect passed with no warnings; replied and resolved the comment. |
 | 2026-10-16 | 261016-exp | Faster Studio export | Parallel chunked rendering in new-headless Chromium, JPEG frames, still-frame reuse, one-pass loudness prepared during render: 67 s 1080p30 export 482 s → ~23 s. 66 Studio tests pass. |
 | 2026-10-16 | 261016-dsk | Desktop app | Electron shell with icon, welcome/loading/error pages, window memory, single instance, Dock drop, `.app` bundle builder; 4 Electron e2e tests pass. |
-| 2026-10-17 | 261016-dsk | Worktree libraries | Repository roots list every git worktree (sidebar with branch/changes); agent session follows the demo's worktree; library no longer rebuilds every poll (no flicker); pinned Bun, export Open/Show in Finder, review fixes. |
+| 2026-10-17 | 261017-wtl | Worktree libraries | Repository roots list every git worktree (sidebar with branch/changes); agent session follows the demo's worktree; library no longer rebuilds every poll (no flicker); pinned Bun, export Open/Show in Finder, review fixes. |
 | 2026-10-17 | 261016-txt | Inline text editing | Double-click text on the canvas to rewrite it in place (whole video, formatting kept, form values, overflow warnings, Tab navigation). |
 | 2026-10-16 | 261016-lft | Lift and commercial kit | Lift real UI out of the recording into scenes, overlay backdrop, kit show.js (liftShow, click-safe cursorClick, flip) with browser regression test, demohunter-commercial skill. |
 | 2026-10-15 | 261015-mot | Motion scenes, music and sound | HTML intro/outro scenes and overlays seeked per frame, music/SFX with ducking and −16 LUFS export, procedural score kit, workspace MCP following the open demo; OAIZ docs launch film exported. Studio tests 63 passed. |

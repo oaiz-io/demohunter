@@ -7,12 +7,15 @@ import { createRequire } from "node:module";
 import { _electron, type ElectronApplication } from "playwright";
 
 const require = createRequire(import.meta.url);
-// Needs the Electron binary and a display (macOS, or Linux with X).
+// Needs a display (macOS, or Linux with X) and the Electron binary. The
+// display check comes first: loading "electron" downloads it if missing.
+const display = process.platform === "darwin" || !!process.env.DISPLAY;
 let electron = "";
-try {
-  electron = require("electron") as unknown as string;
-} catch {}
-const runnable = !!electron && (process.platform === "darwin" || !!process.env.DISPLAY);
+if (display)
+  try {
+    electron = require("electron") as unknown as string;
+  } catch {}
+const runnable = display && !!electron;
 const here = import.meta.dir;
 const shots = process.env.DESKTOP_SHOTS;
 let app: ElectronApplication | undefined;

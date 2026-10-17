@@ -1,0 +1,114 @@
+name: Studio desktop (alpha)
+
+# Builds the downloadable DemoHunter Studio app for macOS (Apple silicon),
+# runs the Electron end-to-end tests, and publishes the .dmg/.zip as the
+# rolling "studio-desktop-alpha" pre-release. Pull requests get the files as
+# workflow artifacts only.
+
+on:
+  pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "bun.lock"
+      - "package.json"
+      - ".github/workflows/desktop-alpha.yml"
+  push:
+    branches:
+      - main
+      - t3code/research-editable-demo-capture
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "bun.lock"
+      - "package.json"
+      - ".github/workflows/desktop-alpha.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-alpha-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: bun x playwright install chromium
+
+      - name: Run desktop end-to-end tests
+        run: bun test apps/desktop
+
+      - name: Package the app
+        run: node apps/desktop/scripts/package.mjs
+
+      - name: Smoke-test the packaged app away from the checkout
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pkg"
+          ditto "apps/desktop/out/DemoHunter Studio.app" "$RUNNER_TEMP/pkg/DemoHunter Studio.app"
+          bun apps/desktop/scripts/smoke.ts "$RUNNER_TEMP/pkg/DemoHunter Studio.app"
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: demohunter-studio-mac-arm64
+          path: |
+            apps/desktop/out/*.dmg
+            apps/desktop/out/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: demohunter-studio-mac-arm64
+          path: dist
+
+      - name: Publish rolling alpha pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG=studio-desktop-alpha
+          cat > notes.md <<EOF
+          **DemoHunter Studio desktop — alpha.** Unsigned test build from \`${GITHUB_REF_NAME}\` @ \`${GITHUB_SHA::7}\` ($(date -u +%Y-%m-%d)). Expect rough edges; projects you open are only read and edited locally.
+
+          **Install (macOS, Apple silicon)**
+          1. Download the \`.dmg\` below and drag **DemoHunter Studio** to Applications.
+          2. The app is not notarized: the first time, right-click it → **Open** → **Open** (or System Settings → Privacy & Security → **Open Anyway**).
+          3. Open a repository or folder with DemoHunter tours or captured demos (⌘O).
+
+          **Needs**
+          - First launch downloads Chromium for rendering (about 150 MB, once).
+          - Export needs ffmpeg: \`brew install ffmpeg\`.
+          - Narration uses \`OPENAI_API_KEY\` or \`ELEVENLABS_API_KEY\` from your shell environment; nothing is stored by the app.
+
+          Intel Macs, Windows and Linux are not built yet; run \`bun run desktop\` from a checkout instead.
+          EOF
+          gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "$TAG" dist/* \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "DemoHunter Studio desktop (alpha)" \
+            --notes-file notes.md

@@ -4,7 +4,7 @@ The application is an independent, private Bun workspace. The published DemoHunt
 
 ```mermaid
 flowchart LR
-  UI[Browser UI / future Tauri webview] -->|Project-scoped HTTP| HTTP[Local service adapter]
+  UI[Browser UI / desktop window] -->|Project-scoped HTTP| HTTP[Local service adapter]
   MCP[External agent / MCP stdio] --> WS[ReplayWorkspace]
   CLI[Capture / inspect / export CLI] --> WS
   HTTP --> WS
@@ -16,7 +16,7 @@ flowchart LR
 
 ## Boundaries implemented now
 
-- **Browser-safe contracts:** contract.ts and model.ts own versions, validation and timeline math. web/ uses HTTP and project-relative URLs; it has no Bun, Node, Tauri or filesystem imports at runtime. Vendor-specific agent configuration is outside the product.
+- **Browser-safe contracts:** contract.ts and model.ts own versions, validation and timeline math. web/ uses HTTP and project-relative URLs; it has no Bun, Node, Electron or filesystem imports at runtime; the optional `window.demohunterDesktop` bridge is feature-detected. Vendor-specific agent configuration is outside the product.
 - **Local application service:** ReplayWorkspace handles inspection/mutations; storage.ts handles revision checks, atomic file replacement, locking/history. Format compatibility is checked before reads/edits. Agents can bypass adapters and edit canonical files deliberately.
 - **Transport adapters:** server.ts creates a project handler; library-server.ts composes handlers in one HTTP process. Project-scoped resource/API routes keep multiple tabs isolated. Static UI assets are compiled once per service process. MCP binds to one explicit project so opening another tab cannot redirect an in-flight agent write. `studio list` provides JSON discovery across the workspace.
 - **Library:** LocalLibrary scans an explicit workspace, skips dependency/cache directories and symlinks, bounds depth/entry count, tolerates damaged captures, and returns relative paths. Routes resolve real paths within that workspace. Posters and scene thumbnails (`/api/frame`) are derived, cached per revision under `.studio/` and rendered through one globally bounded queue. The library links recordings to tours, and reads git status (branch, changed files) without writing. It never runs captures; recording stays in the CLI.
@@ -29,6 +29,6 @@ flowchart LR
 
 The browser speaks a project-scoped service API; storage credentials and provider keys stay in the service process. A later hosted deployment can mount tenant-scoped storage and add authorization at the library/project routing boundary, plus background workers for capture/export. The current server has no user authentication: deploy it locally or on a trusted private development network. It is not a multi-tenant hosted product yet. Library scanning and poster generation are deliberately bounded but are not a large-scale search/indexing service.
 
-For Tauri, reuse this frontend and package a local service sidecar; do not move Node filesystem calls into view code. The shell will need per-target service binaries/assets, Playwright/FFmpeg packaging or detection, scoped IPC/shell permissions, launch readiness, shutdown handling, filesystem selection and update/signing work. No Tauri placeholder is presented as a working desktop release. The shared renderer retains Chromium for consistent output even if the desktop webview uses another engine.
+The desktop app (apps/desktop, alpha) reuses this frontend unchanged: an Electron shell starts the local service as a child process (its own pinned Bun), waits for its URL, and shows it in a window. The shell owns only folder selection, recent projects, window state and a narrow IPC bridge (choose/open a folder, open or reveal export files inside the opened project); navigation is limited to the shell's app:// pages and the exact Studio origin. The downloadable build bundles the service sources, production modules and Bun; Chromium is fetched once on first launch and FFmpeg is detected on the system. It is signed ad hoc, not notarized, and has no auto-update yet. The shared renderer keeps Chromium for consistent output whatever the window engine.
 
 Primary research: [Paper MCP](https://paper.design/docs/mcp), [Tauri architecture](https://v2.tauri.app/concept/architecture/), [Tauri sidecars](https://v2.tauri.app/develop/sidecar/), [MCP request progress](https://modelcontextprotocol.io/specification/latest/basic/utilities/progress). Paper documents visible feedback during agent inspection. Studio reports actual tool operations; it cannot observe an agent's private thinking. MCP request progress and the editor's persistent activity feed have different purposes.

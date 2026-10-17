@@ -106,7 +106,7 @@
         ? q.get("stopped")
           ? `Studio stopped working in ${q.get("name") ?? "the repository"}`
           : `Could not open ${q.get("name") ?? "the repository"}`
-        : `Opening ${q.get("name") ?? "repository"}…`;
+        : q.get("message") ?? `Opening ${q.get("name") ?? "repository"}…`;
       document.getElementById("detail").textContent = q.get("path") ?? "";
       if (error) {
         document.getElementById("bar").hidden = true;

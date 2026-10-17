@@ -7,15 +7,9 @@ import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
 
 import { parsePortableOutputManifest } from "../../packages/manifest/src/index.js";
-import {
-  createNarrationRequest,
-  resolveNarrationFromCache,
-} from "../../packages/tts-core/src/index.js";
+import { createNarrationRequest, resolveNarrationFromCache } from "../../packages/tts-core/src/index.js";
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../..",
-);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const tempRoots: string[] = [];
 const serverProcesses: ManagedServer[] = [];
 let repoBuildPromise: Promise<void> | undefined;
@@ -43,85 +37,69 @@ const EXAMPLES = [
 ] as const;
 
 afterEach(async () => {
+  await Promise.all(serverProcesses.splice(0).map((server) => stopServer(server)));
+  await Promise.all(tempRoots.splice(0).map((tempRoot) => rm(tempRoot, { force: true, recursive: true })));
   await Promise.all(
-    serverProcesses.splice(0).map((server) => stopServer(server)),
-  );
-  await Promise.all(
-    tempRoots
-      .splice(0)
-      .map((tempRoot) => rm(tempRoot, { force: true, recursive: true })),
-  );
-  await Promise.all(
-    EXAMPLES.map((example) =>
-      rm(path.join(example.projectRoot, ".demohunter"), {
-        force: true,
-        recursive: true,
-      }),
-    ),
+    EXAMPLES.map((example) => rm(path.join(example.projectRoot, ".demohunter"), { force: true, recursive: true })),
   );
 });
 
 describe("example app contract", () => {
   for (const example of EXAMPLES) {
-    test(`generates portable output for the ${example.name} example from its own project root`, async () => {
-      await ensureRepoBuilt();
+    test(
+      `generates portable output for the ${example.name} example from its own project root`,
+      async () => {
+        await ensureRepoBuilt();
 
-      const outputRoot = await makeTempRoot(`${example.tourId}-output-`);
-      const cacheRoot = path.join(outputRoot, "cache");
+        const outputRoot = await makeTempRoot(`${example.tourId}-output-`);
+        const cacheRoot = path.join(outputRoot, "cache");
 
-      await primeNarrationCache(cacheRoot, example.narrationTexts);
+        await primeNarrationCache(cacheRoot, example.narrationTexts);
 
-      // Any free port works; the example dev script and config both read PORT.
-      const port = String(await freePort());
-      const stopServer = startServer(example.projectRoot, port);
-      serverProcesses.push(stopServer);
+        // Any free port works; the example dev script and config both read PORT.
+        const port = String(await freePort());
+        const stopServer = startServer(example.projectRoot, port);
+        serverProcesses.push(stopServer);
 
-      await waitForReady(
-        `http://127.0.0.1:${port}`,
-        "readyText" in example ? example.readyText : undefined,
-      );
+        await waitForReady(`http://127.0.0.1:${port}`, "readyText" in example ? example.readyText : undefined);
 
-      const generateResult = await spawnCommand(
-        [process.execPath, "run", "generate"],
-        example.projectRoot,
-        withoutNarrationEnv({
-          DEMOHUNTER_EXAMPLE_CACHE_DIR: cacheRoot,
-          DEMOHUNTER_EXAMPLE_OUTPUT_DIR: outputRoot,
+        const generateResult = await spawnCommand(
+          [process.execPath, "run", "generate"],
+          example.projectRoot,
+          withoutNarrationEnv({
+            DEMOHUNTER_EXAMPLE_CACHE_DIR: cacheRoot,
+            DEMOHUNTER_EXAMPLE_OUTPUT_DIR: outputRoot,
           PORT: port,
-        }),
-      );
-
-      if (generateResult.exitCode !== 0) {
-        throw new Error(
-          `Example generation failed for ${example.name}.\nSTDOUT:\n${generateResult.stdout}\nSTDERR:\n${generateResult.stderr}`,
+          }),
         );
-      }
 
-      expect(generateResult.exitCode).toBe(0);
+        if (generateResult.exitCode !== 0) {
+          throw new Error(
+            `Example generation failed for ${example.name}.\nSTDOUT:\n${generateResult.stdout}\nSTDERR:\n${generateResult.stderr}`,
+          );
+        }
 
-      const demoDir = path.join(outputRoot, example.tourId);
-      const manifestPath = path.join(demoDir, "manifest.json");
-      const chaptersPath = path.join(demoDir, "chapters.json");
-      const videoPath = path.join(demoDir, "video.mp4");
+        expect(generateResult.exitCode).toBe(0);
 
-      await access(manifestPath);
-      await access(chaptersPath);
-      await access(videoPath);
+        const demoDir = path.join(outputRoot, example.tourId);
+        const manifestPath = path.join(demoDir, "manifest.json");
+        const chaptersPath = path.join(demoDir, "chapters.json");
+        const videoPath = path.join(demoDir, "video.mp4");
 
-      const manifest = parsePortableOutputManifest(
-        JSON.parse(await readFile(manifestPath, "utf8")),
-      );
-      const chapters = JSON.parse(
-        await readFile(chaptersPath, "utf8"),
-      ) as Array<{ startMs: number; title: string }>;
+        await access(manifestPath);
+        await access(chaptersPath);
+        await access(videoPath);
 
-      expect(manifest.artifacts.videos.mp4.path).toBe("video.mp4");
-      expect(manifest.artifacts.audio).toHaveLength(
-        example.narrationTexts.length,
-      );
-      expect(chapters).toHaveLength(2);
-      await expectVideoToContainAudio(videoPath);
-    }, 60_000);
+        const manifest = parsePortableOutputManifest(JSON.parse(await readFile(manifestPath, "utf8")));
+        const chapters = JSON.parse(await readFile(chaptersPath, "utf8")) as Array<{ startMs: number; title: string }>;
+
+        expect(manifest.artifacts.videos.mp4.path).toBe("video.mp4");
+        expect(manifest.artifacts.audio).toHaveLength(example.narrationTexts.length);
+        expect(chapters).toHaveLength(2);
+        await expectVideoToContainAudio(videoPath);
+      },
+      60_000,
+    );
   }
 });
 
@@ -131,17 +109,12 @@ async function ensureRepoBuilt(): Promise<void> {
 }
 
 async function makeTempRoot(prefix: string): Promise<string> {
-  const tempRoot = await mkdtemp(
-    path.join(os.tmpdir(), `demohunter-${prefix}`),
-  );
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), `demohunter-${prefix}`));
   tempRoots.push(tempRoot);
   return tempRoot;
 }
 
-async function primeNarrationCache(
-  cacheDir: string,
-  texts: readonly string[],
-): Promise<void> {
+async function primeNarrationCache(cacheDir: string, texts: readonly string[]): Promise<void> {
   for (const [index, text] of texts.entries()) {
     const request = createNarrationRequest({
       provider: "openai",
@@ -212,22 +185,14 @@ async function stopServer(server: ManagedServer): Promise<void> {
   await server.process.exited;
 }
 
-async function waitForReady(
-  url: string,
-  expectedText?: string,
-  timeoutMs = 20_000,
-): Promise<void> {
+async function waitForReady(url: string, expectedText?: string, timeoutMs = 20_000): Promise<void> {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
     try {
       const response = await fetch(url);
 
-      if (
-        response.ok &&
-        (expectedText === undefined ||
-          (await response.text()).includes(expectedText))
-      ) {
+      if (response.ok && (expectedText === undefined || (await response.text()).includes(expectedText))) {
         return;
       }
     } catch {
@@ -241,21 +206,7 @@ async function waitForReady(
 }
 
 async function expectVideoToContainAudio(videoPath: string): Promise<void> {
-  const result = await spawnCommand(
-    [
-      "ffprobe",
-      "-v",
-      "error",
-      "-select_streams",
-      "a",
-      "-show_entries",
-      "stream=codec_type",
-      "-of",
-      "csv=p=0",
-      videoPath,
-    ],
-    repoRoot,
-  );
+  const result = await spawnCommand(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", videoPath], repoRoot);
 
   expect(result.exitCode).toBe(0);
   expect(result.stdout.trim()).toContain("audio");
@@ -299,9 +250,7 @@ async function runRepoCommand(args: string[]): Promise<void> {
   const result = await spawnCommand([process.execPath, ...args], repoRoot);
 
   if (result.exitCode !== 0) {
-    throw new Error(
-      result.stderr || result.stdout || `Command failed: bun ${args.join(" ")}`,
-    );
+    throw new Error(result.stderr || result.stdout || `Command failed: bun ${args.join(" ")}`);
   }
 }
 
@@ -327,9 +276,7 @@ async function spawnCommand(
   return { exitCode, stdout, stderr };
 }
 
-function buildEnv(
-  overrides: Record<string, string | undefined>,
-): Record<string, string> {
+function buildEnv(overrides: Record<string, string | undefined>): Record<string, string> {
   const env: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(process.env)) {
@@ -350,9 +297,7 @@ function buildEnv(
   return env;
 }
 
-function withoutNarrationEnv(
-  overrides: Record<string, string | undefined>,
-): Record<string, string | undefined> {
+function withoutNarrationEnv(overrides: Record<string, string | undefined>): Record<string, string | undefined> {
   return {
     DEMOHUNTER_RUN_LIVE_OPENAI_TESTS: undefined,
     OPENAI_API_KEY: undefined,

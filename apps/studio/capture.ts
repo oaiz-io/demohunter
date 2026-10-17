@@ -94,9 +94,7 @@ export async function captureReplay(
         if (body.length > 10_000_000) return;
         const extension =
           extensions[contentType] ??
-          (/\.(woff2?|ttf|otf)(?:\?|$)/.exec(response.url())?.[1]
-            ? `.${/\.(woff2?|ttf|otf)(?:\?|$)/.exec(response.url())![1]}`
-            : ".bin");
+          `.${/\.(woff2?|ttf|otf)(?:\?|$)/.exec(response.url())?.[1] ?? "bin"}`;
         const file = `assets/${createHash("sha256").update(response.url()).digest("hex").slice(0, 20)}${extension}`;
         assets.set(response.url(), {
           file,
@@ -253,7 +251,7 @@ export async function captureReplay(
       }
       // Bundled after all: drop the warning from the failed first attempt.
       warnings.delete(`Could not bundle asset: ${new URL(url).pathname}`);
-      const extension = /\.(woff2?|ttf|otf)(?:\?|$)/.exec(url)![1];
+      const extension = /\.(woff2?|ttf|otf)(?:\?|$)/.exec(url)?.[1] ?? "bin";
       assets.set(url, {
         file: `assets/${createHash("sha256").update(url).digest("hex").slice(0, 20)}.${extension}`,
         body,

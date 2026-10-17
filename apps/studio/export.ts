@@ -48,6 +48,8 @@ export async function exportReplay(
   const fps = options.fps ?? 24;
   if (!Number.isInteger(fps) || fps < 1 || fps > 60)
     throw new Error("FPS must be an integer from 1 to 60.");
+  // Fail before rendering anything when ffmpeg is missing.
+  await run(["-hide_banner", "-version"]);
   const destination = path.resolve(out);
   await mkdir(path.dirname(destination), { recursive: true });
   // New destination only: failed renders cannot replace a previous good artifact.
@@ -315,7 +317,7 @@ export async function exportReplay(
       file: string,
     ): Promise<string> {
       const encoder = spawn(
-        "ffmpeg",
+        FFMPEG,
         [
           "-hide_banner",
           "-loglevel",
@@ -345,7 +347,7 @@ export async function exportReplay(
       });
       encoder.stdin.on("error", () => {});
       const completed = new Promise<void>((resolve, reject) => {
-        encoder.once("error", reject);
+        encoder.once("error", (e) => reject(ffmpegError(e)));
         encoder.once("close", (code) =>
           code === 0
             ? resolve()
@@ -487,6 +489,16 @@ function stamp(ms: number) {
     .padStart(2, "0")}:${((ms / 1000) % 60).toFixed(3).padStart(6, "0")}`;
 }
 const RATE = 48000;
+/** ffmpeg from PATH, or FFMPEG_PATH. */
+const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
+/** A missing ffmpeg says what to do instead of "spawn ffmpeg ENOENT". */
+function ffmpegError(error: NodeJS.ErrnoException): Error {
+  return error.code === "ENOENT"
+    ? new Error(
+        "Export needs ffmpeg. Install it (macOS: `brew install ffmpeg`) or set FFMPEG_PATH, then export again.",
+      )
+    : error;
+}
 /** About one render browser per four cores, at most four. */
 function defaultWorkers(): number {
   return Math.max(1, Math.min(4, Math.floor(cpus().length / 4)));
@@ -494,7 +506,7 @@ function defaultWorkers(): number {
 /** Runs ffmpeg; resolves with the tail of stderr (loudnorm prints there). */
 async function run(args: string[], keepLog = false): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
-    const child = spawn("ffmpeg", args, {
+    const child = spawn(FFMPEG, args, {
       stdio: ["ignore", "ignore", "pipe"],
     });
     let text = "";
@@ -502,7 +514,7 @@ async function run(args: string[], keepLog = false): Promise<string> {
       "data",
       (d) => (text = (text + d).slice(keepLog ? -20000 : -4000)),
     );
-    child.once("error", reject);
+    child.once("error", (e) => reject(ffmpegError(e)));
     child.once("close", (c) =>
       c === 0 ? resolve(text) : reject(new Error(text)),
     );
@@ -512,7 +524,7 @@ async function run(args: string[], keepLog = false): Promise<string> {
 async function decode(file: string): Promise<Float32Array> {
   return await new Promise<Float32Array>((resolve, reject) => {
     const child = spawn(
-      "ffmpeg",
+      FFMPEG,
       [
         "-hide_banner",
         "-loglevel",
@@ -533,7 +545,7 @@ async function decode(file: string): Promise<Float32Array> {
     let text = "";
     child.stdout.on("data", (d: Buffer) => chunks.push(d));
     child.stderr.on("data", (d) => (text = (text + d).slice(-2000)));
-    child.once("error", reject);
+    child.once("error", (e) => reject(ffmpegError(e)));
     child.once("close", (code) => {
       if (code !== 0)
         return reject(new Error(text || `Could not decode ${file}`));

@@ -57,7 +57,7 @@ export function gitStatus(dir: string, maxAgeMs = 2500): Promise<GitStatus> {
               file,
             ) && !file.endsWith(".lock"),
         );
-      const match = /[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote.trim());
+      const match = remoteName(remote);
       return {
         // Worktrees often live in arbitrary folders; the remote name is truer.
         repository: match?.[1]?.split("/")[1] ?? path.basename(root),
@@ -72,6 +72,11 @@ export function gitStatus(dir: string, maxAgeMs = 2500): Promise<GitStatus> {
   })();
   cache.set(dir, { at: Date.now(), value });
   return value;
+}
+
+/** "owner/name" from a GitHub-style origin URL (https or ssh). */
+function remoteName(remote: string) {
+  return /[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote.trim());
 }
 
 export type Worktree = {
@@ -218,7 +223,7 @@ export function gitSummary(dir: string, maxAgeMs = 10_000): Promise<GitStatus> {
         git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]).then((s) => s.trim()),
         git(dir, ["remote", "get-url", "origin"]).catch(() => ""),
       ]);
-      const match = /[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote.trim());
+      const match = remoteName(remote);
       return {
         repository: match?.[1]?.split("/")[1] ?? path.basename(root),
         remote: match?.[1],
