@@ -4,7 +4,7 @@ A native macOS window around the same local Studio service as `bun run studio`. 
 
 ## Download
 
-Unsigned Apple-silicon builds are published as the rolling [`studio-desktop-alpha`](https://github.com/oaiz-io/demohunter/releases/tag/studio-desktop-alpha) pre-release (built by `.github/workflows/desktop-alpha.yml`).
+`.github/workflows/desktop-alpha.yml` builds unsigned Apple-silicon apps on every push and pull request (the `.dmg`/`.zip` are attached to the workflow run as artifacts). It publishes a GitHub pre-release only when run by hand (Actions → *Studio desktop (alpha)* → Run workflow, with **publish** on and a new tag).
 
 1. Open the `.dmg` and drag **DemoHunter Studio** to Applications.
 2. It is signed ad hoc, not notarized: the first time, right-click the app → **Open** → **Open** (or System Settings → Privacy & Security → **Open Anyway**).

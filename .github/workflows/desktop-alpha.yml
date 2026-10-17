@@ -1,9 +1,9 @@
 name: Studio desktop (alpha)
 
-# Builds the downloadable DemoHunter Studio app for macOS (Apple silicon),
-# runs the Electron end-to-end tests, and publishes the .dmg/.zip as the
-# rolling "studio-desktop-alpha" pre-release. Pull requests get the files as
-# workflow artifacts only.
+# Builds the downloadable DemoHunter Studio app for macOS (Apple silicon) and
+# runs the Electron end-to-end tests. Pushes and pull requests only build (the
+# .dmg/.zip are kept as workflow artifacts). Publishing a GitHub pre-release
+# happens only when someone runs this workflow by hand with "publish" on.
 
 on:
   pull_request:
@@ -24,6 +24,15 @@ on:
       - "package.json"
       - ".github/workflows/desktop-alpha.yml"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the build as a GitHub pre-release"
+        type: boolean
+        default: false
+      tag:
+        description: "Release tag (e.g. studio-desktop-v0.1.0-alpha.1)"
+        type: string
+        default: ""
 
 # Builds run pull request code with a read-only token; only the release job
 # (which never checks out code) can write.
@@ -84,9 +93,8 @@ jobs:
           retention-days: 14
 
   release:
-    # Only the main branch and the alpha branch publish; manual runs from
-    # other refs only build.
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/t3code/research-editable-demo-capture')
+    # Only a manual run with "publish" on (and a tag) creates a release.
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && inputs.tag != ''
     needs: build
     runs-on: ubuntu-latest
     # Never cancelled halfway (between deleting and recreating the release).
@@ -108,7 +116,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG=studio-desktop-alpha
+          TAG="${{ inputs.tag }}"
           cat > notes.md <<EOF
           **DemoHunter Studio desktop — alpha.** Unsigned test build from \`${GITHUB_REF_NAME}\` @ \`${GITHUB_SHA::7}\` ($(date -u +%Y-%m-%d)). Expect rough edges; projects you open are only read and edited locally.
 
@@ -124,7 +132,10 @@ jobs:
 
           Intel Macs, Windows and Linux are not built yet; run \`bun run desktop\` from a checkout instead.
           EOF
-          gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; choose a new tag." >&2
+            exit 1
+          fi
           gh release create "$TAG" dist/* \
             --target "$GITHUB_SHA" \
             --prerelease \

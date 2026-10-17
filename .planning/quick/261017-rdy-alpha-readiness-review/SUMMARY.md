@@ -3,7 +3,7 @@ status: complete
 ---
 # 261017-rdy — Alpha readiness review of PR #28
 
-PR labelled `alpha`, retitled, description rewritten; downloadable macOS app published as the rolling `studio-desktop-alpha` pre-release by `.github/workflows/desktop-alpha.yml` (Electron e2e tests hidden, packaging, smoke test outside the checkout, checksums).
+PR labelled `alpha`, retitled, description rewritten; downloadable macOS app built by `.github/workflows/desktop-alpha.yml` (artifacts on every push; a GitHub pre-release only from a manual run with publish on — an automatic pre-release created during the review was deleted) (Electron e2e tests hidden, packaging, smoke test outside the checkout, checksums).
 
 Review → fix loops:
 1. Round 1 (core, UI, security, hygiene): DNS-rebinding guard, inert assets, vendored rrweb, symlink refusal, lift sanitising, folder trust/restricted mode, IPC sender checks; undo chain, stale locks, partial MCP updates, export/capture fixes; reload coalescing, idle-frame skipping, stable thumbnails/scenes; customer-specific notes and the experiments shim removed; CI pins Bun and skips Electron on Linux.
