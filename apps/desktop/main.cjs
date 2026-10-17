@@ -14,6 +14,10 @@ const NAME = "DemoHunter Studio";
 // Tests check what would be opened without launching Finder or a browser.
 const dryShell = process.env.DEMOHUNTER_DESKTOP_DRY_SHELL === "1";
 const openExternal = (url) => !dryShell && shell.openExternal(url);
+// Automated tests run the app invisibly: no window on screen, no Dock icon,
+// no focus stealing (pages still load and render offscreen).
+const hidden = process.env.DEMOHUNTER_DESKTOP_HIDDEN === "1";
+if (hidden && process.platform === "darwin") app.dock?.hide();
 
 app.setName(NAME);
 // Tests (and side-by-side profiles) use their own settings directory.
@@ -284,10 +288,12 @@ function createWindow() {
     backgroundColor: "#f3f3f1",
     icon: iconPng,
     show: false,
+    // Offscreen test windows still paint, so screenshots work.
+    paintWhenInitiallyHidden: true,
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, sandbox: true },
   });
   if (settings().window?.maximized) window.maximize();
-  window.once("ready-to-show", () => window.show());
+  if (!hidden) window.once("ready-to-show", () => window.show());
   // Match the window background to the page, so resizing never flashes a
   // different colour at the edges.
   window.webContents.on("did-finish-load", () =>

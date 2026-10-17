@@ -35,6 +35,7 @@ const app = await _electron.launch({
     PATH: "/usr/bin:/bin",
     DEMOHUNTER_DESKTOP_USER_DATA: path.join(base, "data"),
     DEMOHUNTER_DESKTOP_DRY_SHELL: "1",
+    DEMOHUNTER_DESKTOP_HIDDEN: "1",
   },
   timeout: 60_000,
 });

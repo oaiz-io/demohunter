@@ -30,7 +30,7 @@ async function launch(userData: string, args: string[] = [], env: Record<string,
   app = await _electron.launch({
     executablePath: electron,
     args: [here, ...args],
-    env: { ...process.env, DEMOHUNTER_DESKTOP_USER_DATA: userData, DEMOHUNTER_DESKTOP_DRY_SHELL: "1", ...env } as Record<string, string>,
+    env: { ...process.env, DEMOHUNTER_DESKTOP_USER_DATA: userData, DEMOHUNTER_DESKTOP_DRY_SHELL: "1", DEMOHUNTER_DESKTOP_HIDDEN: "1", ...env } as Record<string, string>,
     timeout: 30_000,
   });
   const page = await app.firstWindow();
@@ -39,8 +39,11 @@ async function launch(userData: string, args: string[] = [], env: Record<string,
 afterEach(async () => {
   // A test that failed mid-way may leave the app busy: don't let closing it
   // hang the next test.
+  let proc: ReturnType<ElectronApplication["process"]> | undefined;
+  try {
+    proc = app?.process();
+  } catch {}
   const closing = app?.close().catch(() => {});
-  const proc = app?.process();
   await Promise.race([closing, new Promise((r) => setTimeout(r, 10_000))]);
   if (proc && proc.exitCode === null) proc.kill("SIGKILL");
   app = undefined;
