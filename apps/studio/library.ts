@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { assetStamp, loadBundle } from "./storage.js";
+import { assetStamp, loadBundle, readProjectFile } from "./storage.js";
 import { readFormat } from "./format.js";
 import { totalDuration, audioIsCurrent } from "./model.js";
 import { historySummary } from "./storage.js";
@@ -14,6 +14,13 @@ import {
   listDemoSources,
   listWorktrees,
 } from "./git.js";
+/** Same horizon as readActivity: no update for 15 s means interrupted. */
+const ACTIVE_MS = 15_000;
+type Cached = LibraryRecording & {
+  tourSha256?: string;
+  /** Running tool calls at read time, to be judged against the clock later. */
+  running?: { actor: string; at: number }[];
+};
 export type LibraryRecording = {
   id: string;
   path: string;
@@ -30,8 +37,10 @@ export type LibraryRecording = {
   tourPath?: string;
   /** The tour file changed after this recording was captured. */
   tourChanged?: boolean;
-  /** Tracked edits made by agents (MCP), newest first count. */
+  /** Tracked edits made by agents (MCP) among the kept history entries. */
   agentChanges: number;
+  /** When an agent last made a tracked edit (ISO time). */
+  lastAgentChangeAt?: string;
   /** An agent tool call is running in this recording right now. */
   activeAgent?: string;
   /** Worktree folder holding this recording (repository libraries only). */
@@ -63,7 +72,8 @@ export type LibraryWorktree = {
   current: boolean;
   /** The repository's main checkout. */
   main: boolean;
-  changed: number;
+  /** Uncommitted files; absent when git could not tell (timed out). */
+  changed?: number;
   ahead?: number;
   behind?: number;
   recordings: number;
@@ -242,9 +252,7 @@ export class LocalLibrary {
             current: w.path === this.root,
             main: w.main,
             // Refreshed in the background; never holds up the library.
-            ...(w.missing
-              ? { changed: 0 }
-              : (cachedWorktreeState(w.path) ?? { changed: 0 })),
+            ...(w.missing ? { changed: 0 } : cachedWorktreeState(w.path)),
             recordings: recordings.filter((r) => r.worktree === w.path).length,
             tours: tours.filter((t) => t.worktree === w.path).length,
           })),
@@ -272,10 +280,7 @@ export class LocalLibrary {
     string,
     { key: string; info: { sha256: string; title?: string } }
   >();
-  private recordingCache = new Map<
-    string,
-    { key: string; value: LibraryRecording & { tourSha256?: string } }
-  >();
+  private recordingCache = new Map<string, { key: string; value: Cached }>();
   private async tourInfo(file: string) {
     const s = await stat(file).catch(() => undefined);
     if (!s?.isFile()) return undefined;
@@ -324,19 +329,23 @@ export class LocalLibrary {
       )
     ).join("|");
     const hit = this.recordingCache.get(dir);
-    if (hit?.key === key) {
-      this.recordings.set(hit.value.id, dir);
-      return { ...hit.value };
+    let value = hit?.value;
+    if (hit?.key === key) this.recordings.set(hit.value.id, dir);
+    else {
+      value = await this.readRecording(dir, base, worktree);
+      this.recordingCache.set(dir, { key, value });
     }
-    const value = await this.readRecording(dir, base, worktree);
-    this.recordingCache.set(dir, { key, value });
-    return { ...value };
+    // Liveness is time, not file state: a dead agent stops touching its
+    // activity file, so judge the cached timestamps on every scan.
+    const { running, ...rest } = value!;
+    const live = running?.find((a) => Date.now() - a.at <= ACTIVE_MS);
+    return { ...rest, ...(live ? { activeAgent: live.actor } : {}) };
   }
   private async readRecording(
     dir: string,
     base: string,
     worktree: string | undefined,
-  ): Promise<LibraryRecording & { tourSha256?: string }> {
+  ): Promise<Cached> {
     const relative = path.relative(base, dir),
       // IDs stay relative to the opened folder, so existing links still work.
       id = createHash("sha256")
@@ -350,7 +359,7 @@ export class LocalLibrary {
       let captureId = format?.captureId;
       try {
         captureId ??= JSON.parse(
-          await readFile(path.join(dir, "elements.json"), "utf8"),
+          await readProjectFile(dir, "elements.json"),
         ).captureId;
       } catch {}
       const timestamps = await Promise.all(
@@ -370,13 +379,23 @@ export class LocalLibrary {
         historySummary(dir).catch(() => []),
         readActivity(dir).catch(() => []),
       ]);
-      const running = activity.find((a) => a.status === "running");
+      const authored = history.filter((h) => h.author);
       return {
         id,
         path: relative,
         title: bundle.project.title,
-        agentChanges: history.filter((h) => h.author).length,
-        activeAgent: running?.actor,
+        agentChanges: authored.length,
+        lastAgentChangeAt: authored
+          .map((h) => h.createdAt)
+          .filter((t) => typeof t === "string" && !Number.isNaN(Date.parse(t)))
+          .sort()
+          .at(-1),
+        running: activity
+          .filter((a) => a.status === "running")
+          .map((a) => ({
+            actor: a.actor,
+            at: Date.parse(a.updatedAt ?? a.startedAt),
+          })),
         tourSha256: format?.source?.tourSha256,
         modifiedAt: new Date(Math.max(...timestamps)).toISOString(),
         revision: bundle.revision,

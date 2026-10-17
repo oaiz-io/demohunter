@@ -63,6 +63,9 @@ const defaults = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
 export class ElementEditor {
   selected?: Editable;
   private drafts = new Map<string, Draft>();
+  /** The newest save: until the reload after it lands, `bundle()` still
+   * reports the revision it started from. */
+  private lastSave?: { from: string; to: string };
   private queue = Promise.resolve();
   private rendered = "";
   private renderedNode?: Element;
@@ -119,6 +122,8 @@ export class ElementEditor {
       handle.className = `direct-handle ${corner}`;
       handle.dataset.corner = corner;
       handle.setAttribute("aria-label", `Resize ${corner}`);
+      // Pointer-only: resizing has no keyboard behaviour, so no tab stop.
+      handle.tabIndex = -1;
       this.outline.append(handle);
     }
     this.outline.setAttribute("aria-label", "Drag selected element");
@@ -241,6 +246,8 @@ export class ElementEditor {
           event.stopImmediatePropagation();
           this.cancelGesture();
         }
+        // A dialog owns the keyboard while it is open.
+        if (document.querySelector("dialog[open]")) return;
         // Keys typed into the inline editor stay in its frame; never let
         // Delete or arrows act on the element while its text is open.
         if (this.inline) {
@@ -256,7 +263,7 @@ export class ElementEditor {
           !this.selected ||
           this.root.hidden ||
           (event.target as HTMLElement).closest(
-            "input,textarea,select,button,[contenteditable]",
+            "input,textarea,select,button,summary,a,[role=slider],[contenteditable]",
           )
         )
           return;
@@ -339,6 +346,12 @@ export class ElementEditor {
       );
     return result;
   }
+  /** The revision a new edit builds on, counting a save whose reload has not
+   * arrived yet (an edit made right after "Saved" would otherwise conflict). */
+  private baseRevision(): string {
+    const current = this.hooks.bundle().revision;
+    return this.lastSave?.from === current ? this.lastSave.to : current;
+  }
   private currentEdit() {
     return (
       this.selected && effectiveElementEdit(this.edits(), this.selected.target)
@@ -360,7 +373,7 @@ export class ElementEditor {
       d = {
         target,
         patch: {},
-        revision: base?.revision ?? this.hooks.bundle().revision,
+        revision: base?.revision ?? this.baseRevision(),
         version: 0,
         label: base?.label,
       };
@@ -393,47 +406,59 @@ export class ElementEditor {
       throw new Error("Resolve element edit changes before continuing.");
   }
   private flush(key: string): Promise<void> {
-    this.queue = this.queue.then(async () => {
-      const draft = this.drafts.get(key);
-      if (!draft || draft.error) return;
-      if (draft.timer) clearTimeout(draft.timer);
-      const version = draft.version,
-        revision = draft.revision,
-        patch = structuredClone(draft.patch);
-      draft.busy = true;
-      this.refresh();
-      try {
-        const result = await this.hooks.api<{ revision: string }>(
-          "/api/element-edit",
-          { revision, target: draft.target, patch },
-        );
-        for (const pending of this.drafts.values())
-          if (pending.revision === revision) pending.revision = result.revision;
-        if (draft.version === version) this.drafts.delete(key);
-        await this.hooks.reload();
-      } catch (error) {
-        draft.error = `${error instanceof Error ? error.message : String(error)} Your changes are kept. Apply them to the latest version or use the saved version.`;
-        await this.hooks.reload().catch(() => {});
-        // An inline edit saved after Tab moved on: show its conflict choice.
-        if (
-          !this.inline &&
-          draft.label &&
-          this.selected &&
-          elementKey(this.selected.target) !== key
-        )
-          this.hooks.select({ target: draft.target, label: draft.label });
-      } finally {
-        draft.busy = false;
-        this.rendered = "";
+    this.queue = this.queue
+      .then(async () => {
+        const draft = this.drafts.get(key);
+        if (!draft || draft.error) return;
+        if (draft.timer) clearTimeout(draft.timer);
+        const version = draft.version,
+          revision = draft.revision,
+          patch = structuredClone(draft.patch);
+        draft.busy = true;
         this.refresh();
-        if (
-          this.drafts.get(key) === draft &&
-          !draft.error &&
-          draft.version !== version
-        )
-          draft.timer = setTimeout(() => void this.flush(key), 0);
-      }
-    });
+        try {
+          const result = await this.hooks.api<{ revision: string }>(
+            "/api/element-edit",
+            { revision, target: draft.target, patch },
+          );
+          for (const pending of this.drafts.values())
+            if (pending.revision === revision)
+              pending.revision = result.revision;
+          this.lastSave = { from: revision, to: result.revision };
+          // A Tab-chained editor opened before this save landed has the old
+          // base revision; without this its own save would report a conflict.
+          if (this.inline?.revision === revision)
+            this.inline.revision = result.revision;
+          if (draft.version === version) this.drafts.delete(key);
+          await this.hooks.reload();
+          // The bundle is current again and is the source of truth.
+          this.lastSave = undefined;
+        } catch (error) {
+          draft.error = `${error instanceof Error ? error.message : String(error)} Your changes are kept. Apply them to the latest version or use the saved version.`;
+          await this.hooks.reload().catch(() => {});
+          // An inline edit saved after Tab moved on: show its conflict choice.
+          if (
+            !this.inline &&
+            draft.label &&
+            this.selected &&
+            elementKey(this.selected.target) !== key
+          )
+            this.hooks.select({ target: draft.target, label: draft.label });
+        } finally {
+          this.lastSave = undefined;
+          draft.busy = false;
+          this.rendered = "";
+          this.refresh();
+          if (
+            this.drafts.get(key) === draft &&
+            !draft.error &&
+            draft.version !== version
+          )
+            draft.timer = setTimeout(() => void this.flush(key), 0);
+        }
+      })
+      // One unexpected exception must not poison every later flush.
+      .catch((error) => console.error("Element edit flush failed", error));
     return this.queue;
   }
   refresh(): void {
@@ -746,7 +771,7 @@ export class ElementEditor {
       key,
       original,
       text: original,
-      revision: this.hooks.bundle().revision,
+      revision: this.baseRevision(),
       newline: isTextField(live)
         ? undefined
         : ["normal", "nowrap"].includes(style.whiteSpace)

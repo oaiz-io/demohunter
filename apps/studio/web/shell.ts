@@ -12,9 +12,15 @@ export function initializeShell() {
   };
   $("#help-open").onclick = () => help.showModal();
   $("#help-close").onclick = () => help.close();
-  for (const dialog of document.querySelectorAll<HTMLDialogElement>("dialog"))
+  for (const dialog of document.querySelectorAll<HTMLDialogElement>("dialog")) {
+    // A drag that starts inside (selecting text) and ends on the backdrop
+    // must not dismiss the dialog.
+    let downOnBackdrop = false;
+    dialog.addEventListener("pointerdown", (e) => {
+      downOnBackdrop = e.target === dialog;
+    });
     dialog.addEventListener("click", (e) => {
-      if (e.target === dialog) {
+      if (e.target === dialog && downOnBackdrop) {
         const r = dialog.getBoundingClientRect();
         if (
           e.clientX < r.left ||
@@ -24,7 +30,9 @@ export function initializeShell() {
         )
           dialog.close();
       }
+      downOnBackdrop = false;
     });
+  }
   menu.addEventListener("click", (e) => {
     if ((e.target as HTMLElement).closest(".menu-content>button"))
       menu.open = false;

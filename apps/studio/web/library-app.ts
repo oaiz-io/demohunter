@@ -64,9 +64,13 @@ let showEmptyTrees = false;
  * project so returning from a demo keeps the view. */
 const scopeKey = () => `demohunter.worktree:${data.workspace}`;
 let scope: string | undefined;
+/** The sidebar (where a scope is chosen) is hidden at this width. */
+const narrow = window.matchMedia("(max-width: 860px)");
 const currentScope = () => {
   const trees = data.worktrees ?? [];
-  if (trees.length < 2) return "";
+  // Without the sidebar there is no way to see or change a remembered scope,
+  // so the whole project shows instead of an unexplained subset.
+  if (trees.length < 2 || narrow.matches) return "";
   scope ??= localStorage.getItem(scopeKey()) ?? "";
   return trees.some((w) => w.path === scope) ? scope! : "";
 };
@@ -101,6 +105,10 @@ function renderProjects() {
   const nav = $("#projects");
   nav.hidden = !show;
   if (!show) return nav.replaceChildren();
+  // Rebuilding the list would drop keyboard focus; remember which control had it.
+  const focused = nav.contains(document.activeElement)
+    ? (document.activeElement as HTMLElement).dataset.key
+    : undefined;
   const active = currentScope();
   const all = visibleRecordings();
 
@@ -109,6 +117,7 @@ function renderProjects() {
   if (desktop) {
     const open = node("button", "Open…", "open-project") as HTMLButtonElement;
     open.type = "button";
+    open.dataset.key = "open";
     open.title = "Open a repository or folder (⌘O)";
     open.onclick = () => void desktop.choose();
     head.append(open);
@@ -118,6 +127,7 @@ function renderProjects() {
   const current = node("div", undefined, "project current");
   const row = node("button", undefined, "project-row") as HTMLButtonElement;
   row.type = "button";
+  row.dataset.key = "project";
   row.setAttribute("aria-pressed", String(!active));
   row.title = data.workspace;
   row.onclick = () => setScope("");
@@ -132,7 +142,8 @@ function renderProjects() {
 
   if (trees.length > 1) {
     const list = node("div", undefined, "worktree-list");
-    const demosIn = (w: LibraryWorktree) => all.filter((r) => r.worktree === w.path);
+    const demosIn = (w: LibraryWorktree) =>
+      all.filter((r) => r.worktree === w.path);
     const latest = (w: LibraryWorktree) =>
       demosIn(w).reduce((m, r) => (r.modifiedAt > m ? r.modifiedAt : m), "");
     // Worktrees with demos: new/updated first, then most recently edited.
@@ -149,6 +160,7 @@ function renderProjects() {
       const demos = demosIn(w);
       const row = node("button", undefined, "worktree") as HTMLButtonElement;
       row.type = "button";
+      row.dataset.key = `wt:${w.path}`;
       row.disabled = !!w.missing;
       row.classList.toggle("no-demos", !demos.length);
       row.setAttribute("aria-pressed", String(active === w.path));
@@ -172,7 +184,8 @@ function renderProjects() {
       row.append(node("span", branchLabel(w), "wt-branch mono"));
       if (w.changed) row.append(node("span", "", "wt-dirty"));
       row.append(...freshBadges(demos));
-      if (demos.length) row.append(node("span", String(demos.length), "row-count"));
+      if (demos.length)
+        row.append(node("span", String(demos.length), "row-count"));
       return row;
     };
     list.append(...withDemos.map(item));
@@ -187,6 +200,7 @@ function renderProjects() {
         "more-trees",
       ) as HTMLButtonElement;
       more.type = "button";
+      more.dataset.key = "more";
       more.onclick = () => {
         showEmptyTrees = !showEmptyTrees;
         render();
@@ -200,15 +214,22 @@ function renderProjects() {
   // Recent projects from the desktop app; opening one switches to it.
   const others = recentProjects.filter((p) => p.path !== data.workspace);
   const rest = others.map((p) => {
-    const item = node("button", undefined, "project-row other") as HTMLButtonElement;
+    const item = node(
+      "button",
+      undefined,
+      "project-row other",
+    ) as HTMLButtonElement;
     item.type = "button";
+    item.dataset.key = `recent:${p.path}`;
     item.title = p.path;
     item.onclick = () => void desktop?.open(p.path);
     item.append(node("span", p.name, "row-name"));
     item.append(
       node(
         "span",
-        home && p.path.startsWith(home) ? `~${p.path.slice(home.length)}` : p.path,
+        home && p.path.startsWith(home)
+          ? `~${p.path.slice(home.length)}`
+          : p.path,
         "row-sub mono row-path",
       ),
     );
@@ -220,6 +241,10 @@ function renderProjects() {
     ...(rest.length ? [node("h3", "Recent", "projects-recent")] : []),
     ...rest,
   );
+  if (focused)
+    [...nav.querySelectorAll<HTMLElement>("[data-key]")]
+      .find((el) => el.dataset.key === focused)
+      ?.focus({ preventScroll: true });
 }
 if (desktop)
   void desktop
@@ -244,8 +269,7 @@ const latest = new Map<string, string>();
 function poster(r: LibraryRecording): HTMLImageElement {
   const src = `/projects/${r.id}/poster.png?revision=${r.revision ?? "legacy"}`;
   const current = posters.get(r.id);
-  if (current?.dataset.src === src || latest.get(r.id) === src)
-    return current!;
+  if (current?.dataset.src === src || latest.get(r.id) === src) return current!;
   const img = node("img", undefined, "recording-poster") as HTMLImageElement;
   img.dataset.src = src;
   img.alt = `First frame of ${r.title}`;
@@ -263,13 +287,23 @@ function poster(r: LibraryRecording): HTMLImageElement {
       posters.get(r.id)?.replaceWith(img);
       posters.set(r.id, img);
     };
+    // The shown poster stays; forget this attempt so a later render retries.
+    next.onerror = () => {
+      if (latest.get(r.id) === src) latest.delete(r.id);
+    };
     next.src = src;
     return current;
   }
   latest.set(r.id, src);
   img.loading = "lazy";
   img.onload = () => img.classList.add("loaded");
-  img.onerror = () => img.remove();
+  img.onerror = () => {
+    // A transient failure must not stick: drop the entries so the next
+    // render builds a fresh poster.
+    img.remove();
+    if (posters.get(r.id) === img) posters.delete(r.id);
+    if (latest.get(r.id) === src) latest.delete(r.id);
+  };
   img.src = src;
   posters.set(r.id, img);
   return img;
@@ -327,7 +361,9 @@ function card(r: LibraryRecording, showBranch: boolean) {
   );
   path.title = r.worktree ? `${r.worktree}/${r.path}` : r.path;
   where.append(path);
-  meta.append(where, node("span", ago(r.modifiedAt), "card-when"));
+  const when = node("span", ago(r.modifiedAt), "card-when");
+  when.dataset.at = r.modifiedAt;
+  meta.append(where, when);
   body.append(top, meta);
   if (r.error) body.append(node("p", r.error, "recording-error"));
   el.append(link, body);
@@ -377,6 +413,10 @@ function render() {
       const when = hit.el.querySelector(".card-when");
       const text = ago(r.modifiedAt);
       if (when && when.textContent !== text) when.textContent = text;
+      // A poster that failed to load is retried on the next render.
+      const art = hit.el.querySelector(".recording-art");
+      const img = poster(r);
+      if (art && !art.contains(img)) art.prepend(img);
       return hit.el;
     }
     const el = card(r, showBranch);
@@ -414,7 +454,8 @@ function render() {
     : "";
   $("#empty-command").hidden = recordings.length > 0;
   $("#empty-open").hidden = !desktop || recordings.length > 0;
-  const quote = (p: string) => (/^[\w./-]+$/.test(p) ? p : `'${p.replaceAll("'", "'\\''")}'`);
+  const quote = (p: string) =>
+    /^[\w./-]+$/.test(p) ? p : `'${p.replaceAll("'", "'\\''")}'`;
   // Prefer a tour in the folder Studio was opened on; another worktree's
   // tour needs a cd first.
   const suggested =
@@ -473,6 +514,18 @@ if (desktop) {
   name.onkeydown = (e) => void (e.key === "Enter" && desktop.choose());
 }
 $("#search").oninput = render;
+narrow.addEventListener("change", render);
+// "Edited 5 min ago" keeps moving even when the demos themselves do not.
+const refreshAgo = () => {
+  for (const when of document.querySelectorAll<HTMLElement>(".card-when")) {
+    const text = ago(when.dataset.at ?? "");
+    if (when.dataset.at && when.textContent !== text) when.textContent = text;
+  }
+};
+setInterval(refreshAgo, 60_000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshAgo();
+});
 document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();

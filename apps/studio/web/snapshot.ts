@@ -129,15 +129,52 @@ function styleText(style: CSSStyleDeclaration): string {
   return text;
 }
 
+const unsafeTags = new Set([
+  "script",
+  "noscript",
+  "template",
+  "style",
+  "link",
+  "iframe",
+  "frame",
+  "frameset",
+  "object",
+  "embed",
+  "applet",
+  "base",
+  "meta",
+  "portal",
+]);
+const droppedAttributes = new Set([
+  "id",
+  "class",
+  "href",
+  "xlink:href",
+  "srcset",
+  "srcdoc",
+  "action",
+  "formaction",
+  "ping",
+  "nonce",
+]);
+
 function copy(source: Element, view: Window): Element | undefined {
   const tag = source.tagName.toLowerCase();
-  if (["script", "noscript", "template", "style", "link"].includes(tag))
-    return undefined;
+  // Recorded pages are third-party content and lifted copies run inside
+  // scene pages: keep markup and computed style, never anything executable.
+  if (unsafeTags.has(tag)) return undefined;
   const style = view.getComputedStyle(source);
   if (style.display === "none") return undefined;
   const clone = source.cloneNode(false) as Element;
-  for (const name of ["id", "class", "onclick", "href", "srcset"])
-    clone.removeAttribute(name);
+  for (const attribute of [...clone.attributes]) {
+    const name = attribute.name.toLowerCase();
+    if (
+      name.startsWith("on") ||
+      droppedAttributes.has(name) ||
+      /^\s*(javascript|vbscript|data:text\/html)/i.test(attribute.value)
+    )
+      clone.removeAttribute(attribute.name);
+  }
   clone.setAttribute("style", styleText(style));
   const pseudo = (which: "::before" | "::after") => {
     const p = view.getComputedStyle(source, which);

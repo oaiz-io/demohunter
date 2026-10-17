@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
@@ -197,13 +198,16 @@ test("concurrent writes conflict, comment threads round-trip, undo protects exte
     );
     const before = await loadBundle(dir);
     await writeJson(path.join(dir, ".history/edits.json"), { bad: true });
-    // Malformed history must not cause a partial content write.
-    await expect(
-      mutateProject(dir, before.revision, "Bad history", (d) => {
-        d.project.title = "Lost";
-      }),
-    ).rejects.toThrow();
-    expect((await loadBundle(dir)).project.title).toBe("External");
+    // Damaged undo history is set aside; it must not block every edit.
+    await mutateProject(dir, before.revision, "Bad history", (d) => {
+      d.project.title = "Kept";
+    });
+    expect((await loadBundle(dir)).project.title).toBe("Kept");
+    expect(
+      (await readdir(path.join(dir, ".history"))).some((name) =>
+        name.startsWith("edits.json.corrupt-"),
+      ),
+    ).toBe(true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

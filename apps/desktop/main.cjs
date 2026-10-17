@@ -1,7 +1,7 @@
 // DemoHunter Studio desktop shell (experimental).
 // Starts the local Studio service for a repository and shows it in a native
 // window. The service, MCP and exports are the same as `bun run studio`.
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, net, protocol, screen, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, net, protocol, screen, session, shell } = require("electron");
 const { spawn, execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -54,6 +54,26 @@ const recent = () => settings().recent.filter((r) => isDirectory(r.path));
 function remember(dir) {
   save({ recent: [{ path: dir, openedAt: Date.now() }, ...settings().recent.filter((r) => r.path !== dir)].slice(0, 10) });
   app.addRecentDocument(dir);
+}
+/** Folders the person chose to trust: their scene pages run scripts and Studio
+ * starts inside them (so their Bun config and .env apply). Everything else
+ * opens restricted. */
+const isTrusted = (dir) => (settings().trusted ?? []).includes(dir);
+async function trustFolder() {
+  if (!workspace || isTrusted(workspace)) return false;
+  const { response } = await dialog.showMessageBox(window, {
+    type: "question",
+    buttons: ["Trust Folder", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: `Trust “${path.basename(workspace)}”?`,
+    detail:
+      "Scene pages in this folder's demos are code: trusting it lets their scripts run, and Studio starts inside the folder with its Bun settings and .env file. Only trust folders whose authors you trust.",
+  });
+  if (response !== 0) return false;
+  save({ trusted: [...new Set([...(settings().trusted ?? []), workspace])] });
+  await openRepository(workspace);
+  return true;
 }
 function isDirectory(p) {
   try {
@@ -156,8 +176,11 @@ function stopStudio() {
 function startStudio(dir) {
   stopStudio();
   return new Promise((resolve, reject) => {
-    const child = spawn(bun(), [cli, dir, "--port", "0"], {
-      cwd: dir,
+    const trusted = isTrusted(dir);
+    const child = spawn(bun(), [cli, dir, "--port", "0", ...(trusted ? [] : ["--restricted"])], {
+      // Untrusted folders never become Bun's working directory, so a
+      // repository's bunfig.toml preload or .env can't run or load.
+      cwd: trusted ? dir : app.getPath("userData"),
       env: { ...loginEnv(), FORCE_COLOR: "0", DEMOHUNTER_EXIT_WITH_STDIN: "1" },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -295,13 +318,16 @@ function createWindow() {
   });
   // Links that leave Studio open in the default browser.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url) && !isOwnPage(url)) openExternal(url);
+    if (/^https:/.test(url) && !isOwnPage(url)) openExternal(url);
     return { action: "deny" };
   });
-  window.webContents.on("will-navigate", (event, url) => {
-    if (isOwnPage(url)) return;
+  // Top-level navigation stays on the shell and Studio; links the person
+  // followed in Studio's own page open in the browser. Navigations started by
+  // embedded frames (scene pages) are blocked.
+  window.webContents.on("will-frame-navigate", (event) => {
+    if (!event.isMainFrame || isOwnPage(event.url)) return;
     event.preventDefault();
-    if (/^https?:/.test(url)) openExternal(url);
+    if (event.initiator === window.webContents.mainFrame && /^https?:/.test(event.url)) openExternal(event.url);
   });
 }
 
@@ -327,6 +353,7 @@ function buildMenus() {
           { label: "Open Recent", submenu: recentItems },
           { type: "separator" },
           { label: "Show in Finder", enabled: !!workspace, click: () => workspace && shell.openPath(workspace) },
+          { label: "Trust This Folder…", enabled: !!workspace && !isTrusted(workspace), click: trustFolder },
           { label: "Close Repository", enabled: !!workspace, accelerator: "CmdOrCtrl+Shift+W", click: showWelcome },
           { type: "separator" },
           { role: "close" },
@@ -390,7 +417,7 @@ app.on("open-file", (event, file) => {
 app.whenReady().then(async () => {
   // Bundled shell pages, the icon and the Studio interface fonts only.
   const fonts = { "geist.woff2": "geist", "geist-mono.woff2": "geist-mono" };
-  protocol.handle("app", (request) => {
+  protocol.handle("app", async (request) => {
     const url = new URL(request.url);
     const rel = path.posix.normalize(decodeURIComponent(`${url.host}${url.pathname}`)).replace(/\/+$/, "");
     let file;
@@ -402,7 +429,10 @@ app.whenReady().then(async () => {
       file = path.join(dir, "files", `${pkg}-latin-wght-normal.woff2`);
     }
     if (!file || !fs.existsSync(file)) return new Response("Not found", { status: 404 });
-    return net.fetch(pathToFileURL(file).toString());
+    const response = await net.fetch(pathToFileURL(file).toString());
+    const headers = new Headers(response.headers);
+    headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+    return new Response(response.body, { status: response.status, headers });
   });
   if (process.platform === "darwin" && !app.isPackaged) app.dock?.setIcon(nativeImage.createFromPath(iconPng));
   app.setAboutPanelOptions({
@@ -414,7 +444,15 @@ app.whenReady().then(async () => {
     iconPath: iconPng,
   });
 
-  ipcMain.handle("info", () => {
+  // The bridge answers only the shell's pages and Studio's top frame — never
+  // scene pages or other frames inside them.
+  const own = (event) => !!event.senderFrame && event.senderFrame === window?.webContents.mainFrame && isOwnPage(event.senderFrame.url);
+  const handle = (channel, fn) =>
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!own(event)) throw new Error("Not allowed.");
+      return fn(...args);
+    });
+  handle("info", () => {
     const seen = new Set();
     const list = [];
     for (const r of recent()) {
@@ -428,8 +466,9 @@ app.whenReady().then(async () => {
     }
     return { version: app.getVersion(), home: app.getPath("home"), recent: list };
   });
-  ipcMain.handle("open", (_e, dir) => typeof dir === "string" && openRepository(dir));
-  ipcMain.handle("choose", chooseRepository);
+  handle("open", (dir) => typeof dir === "string" && openRepository(dir));
+  handle("choose", chooseRepository);
+  handle("trust", trustFolder);
   // Only export results (video, captions, manifest) inside the open folder
   // or one of its worktrees — never arbitrary files that could be launched.
   const exportFile = /\/exports\/[^/]+\/(video\.mp4|captions\.vtt|captions\.json|manifest\.json)$/;
@@ -457,17 +496,23 @@ app.whenReady().then(async () => {
     });
     return inside ? real : undefined;
   };
-  ipcMain.handle("open-file", async (_e, file) => {
+  handle("open-file", async (file) => {
     const f = inWorkspace(file);
     if (f && !dryShell) await shell.openPath(f);
     return !!f;
   });
-  ipcMain.handle("show-file", (_e, file) => {
+  handle("show-file", (file) => {
     const f = inWorkspace(file);
     if (f && !dryShell) shell.showItemInFolder(f);
     return !!f;
   });
-  ipcMain.handle("open-repository", chooseRepository);
+  handle("open-repository", chooseRepository);
+  // No camera, microphone, notifications, etc.; clipboard writes (copy
+  // buttons) and fullscreen only for Studio's own top frame.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) =>
+    callback(["clipboard-sanitized-write", "fullscreen"].includes(permission) && details.isMainFrame !== false && isOwnPage(details.requestingUrl)),
+  );
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => ["clipboard-sanitized-write", "fullscreen"].includes(permission) && isOwnPage(origin));
 
   createWindow();
   buildMenus();

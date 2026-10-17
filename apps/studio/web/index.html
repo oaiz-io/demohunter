@@ -8,9 +8,9 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 20'%3E%3Cpath d='M6 1h19l-5 18H1z' fill='white' stroke='%23111' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M8.5 7h11l-1.6 6h-11z' fill='%23ffe53d'/%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="/files/assets/rrweb.css" />
+    <link rel="stylesheet" href="/vendor/rrweb.css" />
     <link rel="stylesheet" href="/style.css" />
-    <script defer src="/files/assets/rrweb.js"></script>
+    <script defer src="/vendor/rrweb.js"></script>
     <script defer src="/app.js"></script>
   </head>
   <body>
@@ -112,7 +112,16 @@
         </details>
       </div>
     </header>
-    <div id="error" class="error" role="alert" hidden></div>
+    <div id="error" class="error" role="alert" hidden>
+      <span id="error-text"></span
+      ><button
+        id="error-dismiss"
+        class="error-dismiss"
+        aria-label="Dismiss message"
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+      </button>
+    </div>
     <div id="toast" class="toast" role="status" hidden></div>
     <main class="workspace">
       <aside class="outline" id="scene-drawer" popover>
@@ -157,6 +166,12 @@
               <use href="#i-chevron" />
             </svg>
           </button>
+          <span id="scene-trust" class="scene-trust" role="status" hidden
+            ><span>Scene scripts are off for this folder.</span
+            ><button id="trust-folder" class="quiet" hidden>
+              Trust folder…
+            </button></span
+          >
           <button id="focus-preview" class="quiet" title="Expand preview">
             <svg class="icon" aria-hidden="true"><use href="#i-focus" /></svg
             ><span>Focus</span>

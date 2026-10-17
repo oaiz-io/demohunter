@@ -31,7 +31,7 @@ test("the library marks new and agent-updated demos until they are opened", asyn
     await writeFile(
       path.join(root, "second/.history/edits.json"),
       JSON.stringify([
-        { id: "h1", at: new Date().toISOString(), label: "Agent edit", author: { kind: "agent", name: "test" }, before: {} },
+        { id: "h1", createdAt: new Date().toISOString(), description: "Agent edit", author: { actor: "test", sessionId: "s", tool: "t" }, before: {} },
       ]),
     );
     expect(await fresh()).toEqual({ project: null, second: "updated" });

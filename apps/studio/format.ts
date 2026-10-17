@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile, link, unlink } from "node:fs/promises";
+import { writeFile, link, unlink } from "node:fs/promises";
 import path from "node:path";
 import { formatSchema, type StudioFormat } from "./contract.js";
 import type { ElementIndex } from "./elements.js";
+import { readProjectFile } from "./storage.js";
 export async function readFormat(dir: string): Promise<StudioFormat | null> {
   try {
     return formatSchema.parse(
-      JSON.parse(await readFile(path.join(dir, "studio.json"), "utf8")),
+      JSON.parse(await readProjectFile(dir, "studio.json")),
     );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;

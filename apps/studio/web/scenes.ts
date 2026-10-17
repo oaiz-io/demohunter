@@ -10,15 +10,26 @@ export type SceneCue = {
 };
 
 type Layer = {
-  key: string;
+  /** Scene file and asset stamp the visible iframe was loaded for. */
+  version: string;
+  trusted: boolean;
   kind: "scene" | "overlay";
   iframe: HTMLIFrameElement;
+  /** Resolves when the newest iframe for this layer is ready (and shown). */
   loaded: Promise<void>;
   ready: boolean;
   startMs: number;
   endMs: number;
   zIndex: number;
   src: string;
+  /** A replacement loading out of sight; swapped in once ready. */
+  pending?: LoadingFrame;
+};
+type LoadingFrame = {
+  iframe: HTMLIFrameElement;
+  loaded: Promise<void>;
+  /** Stop waiting (the frame was discarded before it finished loading). */
+  release: () => void;
 };
 
 /**
@@ -31,8 +42,16 @@ type Layer = {
 export class SceneLayer {
   private layers = new Map<string, Layer>();
   private active = false;
+  private lastPosition = 0;
+  private changes = 0;
 
   constructor(private root: HTMLElement) {}
+
+  /** Bumps whenever pages load, swap or change visibility, so callers can
+   * skip redrawing a paused frame that nothing touched. */
+  get generation(): number {
+    return this.changes;
+  }
 
   /** True while an opaque scene covers the recording. */
   get covering(): boolean {
@@ -62,17 +81,28 @@ export class SceneLayer {
       }));
   }
 
-  load(bundle: ReplayBundle): void {
+  /**
+   * Bring the layers in line with the bundle. `trusted` false loads pages in a
+   * sandbox without scripts: Studio can still seek CSS and Web Animations
+   * through the document, but the page's own code never runs.
+   */
+  load(bundle: ReplayBundle, trusted = true): void {
+    this.changes++;
     const wanted = new Map<
       string,
-      Omit<Layer, "iframe" | "loaded" | "ready">
+      Pick<
+        Layer,
+        "src" | "kind" | "startMs" | "endMs" | "zIndex" | "version" | "trusted"
+      >
     >();
     const { width, height } = bundle.project.viewport;
+    const version = bundle.assetsRevision ?? "";
     for (const clip of bundle.edits.clips) {
       if (!isScene(clip)) continue;
       const startMs = clipStart(bundle.edits, clip.id) ?? 0;
       wanted.set(`scene:${clip.id}`, {
-        key: `${clip.src}#${bundle.assetsRevision}`,
+        version,
+        trusted,
         src: clip.src,
         kind: "scene",
         startMs,
@@ -82,7 +112,8 @@ export class SceneLayer {
     }
     (bundle.edits.overlays ?? []).forEach((overlay, i) =>
       wanted.set(`overlay:${overlay.id}`, {
-        key: `${overlay.src}#${bundle.assetsRevision}`,
+        version,
+        trusted,
         src: overlay.src,
         kind: "overlay",
         startMs: overlay.startMs,
@@ -91,69 +122,147 @@ export class SceneLayer {
       }),
     );
     for (const [id, layer] of this.layers)
-      if (wanted.get(id)?.key !== layer.key) {
+      if (!wanted.has(id)) {
+        this.discard(layer.pending);
         layer.iframe.remove();
         this.layers.delete(id);
       }
     for (const [id, spec] of wanted) {
       const existing = this.layers.get(id);
       if (existing) {
-        Object.assign(existing, spec);
+        const {
+          version: nextVersion,
+          src,
+          trusted: nextTrusted,
+          ...rest
+        } = spec;
+        Object.assign(existing, rest);
         existing.iframe.style.zIndex = String(spec.zIndex);
+        // The viewport can change while pages are open.
+        for (const frame of [existing.iframe, existing.pending?.iframe])
+          if (frame)
+            Object.assign(frame.style, {
+              width: `${width}px`,
+              height: `${height}px`,
+            });
+        const current = existing.pending
+          ? existing.pending.iframe.dataset.version
+          : existing.version;
+        const sandboxed = (
+          existing.pending?.iframe ?? existing.iframe
+        ).hasAttribute("sandbox");
+        if (
+          current === nextVersion &&
+          sandboxed === !spec.trusted &&
+          (existing.pending?.iframe ?? existing.iframe).dataset.src === spec.src
+        )
+          continue;
+        // Keep showing the old page until the replacement is ready, so a
+        // change anywhere in the assets never blanks every scene.
+        this.discard(existing.pending);
+        const next = this.frame(spec, nextVersion, width, height);
+        existing.pending = next;
+        existing.loaded = next.loaded.then(() => {
+          if (existing.pending !== next || this.layers.get(id) !== existing)
+            return;
+          const old = existing.iframe;
+          next.iframe.classList.toggle(
+            "visible",
+            old.classList.contains("visible"),
+          );
+          existing.iframe = next.iframe;
+          existing.version = nextVersion;
+          existing.src = src;
+          existing.trusted = nextTrusted;
+          existing.pending = undefined;
+          this.changes++;
+          old.remove();
+          if (next.iframe.classList.contains("visible"))
+            seekDocument(
+              next.iframe,
+              Math.max(0, this.lastPosition - existing.startMs),
+            );
+        });
         continue;
       }
-      const src = id.startsWith("scene:")
-        ? bundle.edits.clips.find((c) => isScene(c) && `scene:${c.id}` === id)!
-        : bundle.edits.overlays!.find((o) => `overlay:${o.id}` === id)!;
-      const iframe = document.createElement("iframe");
-      iframe.className = `scene-frame ${spec.kind}`;
-      iframe.setAttribute("aria-hidden", "true");
-      iframe.tabIndex = -1;
-      Object.assign(iframe.style, {
-        width: `${width}px`,
-        height: `${height}px`,
-        zIndex: String(spec.zIndex),
-      });
+      const first = this.frame(spec, spec.version, width, height);
       const layer: Layer = {
         ...spec,
-        iframe,
+        iframe: first.iframe,
         ready: false,
-        loaded: new Promise<void>((resolve) => {
-          iframe.addEventListener(
-            "load",
-            async () => {
-              const doc = iframe.contentDocument;
-              // Scenes that fetch lifted elements register a ready promise.
-              await (
-                iframe.contentWindow as
-                  | (Window & {
-                      demohunterScene?: { ready?: Promise<unknown> };
-                    })
-                  | null
-              )?.demohunterScene?.ready?.catch?.(() => {});
-              await doc?.fonts?.ready;
-              await Promise.all(
-                [...(doc?.images ?? [])].map((img) =>
-                  img.decode().catch(() => {}),
-                ),
-              );
-              // Freeze the page on its first frame right away: animations that
-              // ran (and finished) in real time while the page waited could
-              // otherwise be auto-removed by the browser as "replaced".
-              seekDocument(iframe, 0);
-              layer.ready = true;
-              resolve();
-            },
-            { once: true },
-          );
+        loaded: first.loaded.then(() => {
+          layer.ready = true;
+          this.changes++;
         }),
       };
-      iframe.src = projectUrl(
-        `/files/${(src as { src: string }).src}?v=${bundle.assetsRevision ?? ""}`,
-      );
-      this.root.append(iframe);
       this.layers.set(id, layer);
     }
+  }
+
+  /** A hidden iframe for a scene page; `loaded` resolves once it is frozen on
+   * its first frame (fonts, images and the page's ready promise included). */
+  private frame(
+    spec: {
+      src: string;
+      kind: Layer["kind"];
+      zIndex: number;
+      trusted: boolean;
+    },
+    version: string,
+    width: number,
+    height: number,
+  ): LoadingFrame {
+    const iframe = document.createElement("iframe");
+    iframe.className = `scene-frame ${spec.kind}`;
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.tabIndex = -1;
+    iframe.dataset.version = version;
+    iframe.dataset.src = spec.src;
+    // Untrusted folders: no scripts, but same-origin so Studio can seek the
+    // page. Must be set before src or the first load would run scripts.
+    if (!spec.trusted) iframe.setAttribute("sandbox", "allow-same-origin");
+    Object.assign(iframe.style, {
+      width: `${width}px`,
+      height: `${height}px`,
+      zIndex: String(spec.zIndex),
+    });
+    let release = () => {};
+    const loaded = new Promise<void>((resolve) => {
+      release = resolve;
+      iframe.addEventListener(
+        "load",
+        async () => {
+          const doc = iframe.contentDocument;
+          // Scenes that fetch lifted elements register a ready promise.
+          await (
+            iframe.contentWindow as
+              | (Window & {
+                  demohunterScene?: { ready?: Promise<unknown> };
+                })
+              | null
+          )?.demohunterScene?.ready?.catch?.(() => {});
+          await doc?.fonts?.ready;
+          await Promise.all(
+            [...(doc?.images ?? [])].map((img) => img.decode().catch(() => {})),
+          );
+          // Freeze the page on its first frame right away: animations that
+          // ran (and finished) in real time while the page waited could
+          // otherwise be auto-removed by the browser as "replaced".
+          seekDocument(iframe, 0);
+          resolve();
+        },
+        { once: true },
+      );
+    });
+    iframe.src = projectUrl(`/files/${spec.src}?v=${version}`);
+    this.root.append(iframe);
+    return { iframe, loaded, release };
+  }
+
+  private discard(frame: LoadingFrame | undefined): void {
+    if (!frame) return;
+    frame.iframe.remove();
+    frame.release();
   }
 
   /** Recording blur/dim requested by the overlays at an output time. */
@@ -182,13 +291,19 @@ export class SceneLayer {
   /** Show and seek the layers at an output time. */
   update(positionMs: number, totalMs: number): void {
     let covering = false;
+    this.lastPosition = positionMs;
     for (const layer of this.layers.values()) {
       const visible =
         positionMs >= layer.startMs &&
         (positionMs < layer.endMs ||
           (positionMs >= totalMs - 0.5 && layer.endMs >= totalMs - 0.5));
-      layer.iframe.classList.toggle("visible", visible);
-      if (!visible || !layer.ready) continue;
+      // A page that is still loading would show as a blank card.
+      const shown = visible && layer.ready;
+      if (layer.iframe.classList.contains("visible") !== shown) {
+        layer.iframe.classList.toggle("visible", shown);
+        this.changes++;
+      }
+      if (!shown) continue;
       if (layer.kind === "scene") covering = true;
       seekDocument(layer.iframe, Math.max(0, positionMs - layer.startMs));
     }
@@ -196,9 +311,17 @@ export class SceneLayer {
     this.root.classList.toggle("covering", covering);
   }
 
-  /** Resolves when every scene page, font and image has loaded. */
+  /** Resolves when every scene page, font and image has loaded, including
+   * replacements started while waiting. */
   async ready(): Promise<void> {
-    await Promise.all([...this.layers.values()].map((layer) => layer.loaded));
+    for (let round = 0; round < 5; round++) {
+      const loading = [...this.layers.values()].map((layer) => layer.loaded);
+      await Promise.all(loading);
+      const settled = [...this.layers.values()].every(
+        (layer, i) => layer.loaded === loading[i],
+      );
+      if (settled) return;
+    }
   }
 
   /** Sounds declared inside scene pages, in output time. */
@@ -228,8 +351,7 @@ export class SceneLayer {
 function seekDocument(iframe: HTMLIFrameElement, localMs: number): void {
   const doc = iframe.contentDocument,
     win = iframe.contentWindow as
-      | (Window & { demohunterScene?: { seek?: (ms: number) => void } })
-      | null;
+      (Window & { demohunterScene?: { seek?: (ms: number) => void } }) | null;
   if (!doc || !win) return;
   for (const animation of doc.getAnimations()) {
     if (animation.playState !== "paused") {

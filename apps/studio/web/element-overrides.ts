@@ -114,6 +114,22 @@ export function distributeText(
   text: string,
   fixed: boolean[] = [],
 ): string[] {
+  // Overrides are re-applied on every frame with the same inputs; the diff
+  // is quadratic, so remember recent results.
+  const key = JSON.stringify([values, text, fixed]);
+  const known = distributed.get(key);
+  if (known) return [...known];
+  const result = distribute(values, text, fixed);
+  if (distributed.size >= 200) distributed.clear();
+  distributed.set(key, result);
+  return [...result];
+}
+const distributed = new Map<string, string[]>();
+function distribute(
+  values: string[],
+  text: string,
+  fixed: boolean[],
+): string[] {
   const source = values.join(""),
     { keep, inserts } = diff(source, text),
     owners: number[] = [];

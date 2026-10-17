@@ -12,15 +12,30 @@ export type GitStatus = {
   changed: string[];
   /** True when the folder is inside the repo but ignored (e.g. local captures). */
   ignored?: boolean;
+  /** `git status` timed out or was too large: `changed` is not known. */
+  changedUnknown?: boolean;
 };
+
+/** git killed by our timeout or output limit (as opposed to "not a repo"). */
+const gaveUp = (error: unknown) =>
+  !!(error as { killed?: boolean })?.killed ||
+  (error as { code?: unknown })?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
 
 function git(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) =>
     execFile(
       "git",
       // Read-only polling must never take index.lock from people (or agents)
-      // committing in the same worktree.
-      ["--no-optional-locks", ...args],
+      // committing in the same worktree. Repositories are untrusted input:
+      // no fsmonitor command and no hooks may run from their config.
+      [
+        "--no-optional-locks",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        ...args,
+      ],
       { cwd, timeout: 3000, maxBuffer: 1024 * 1024 },
       (error, stdout) => (error ? reject(error) : resolve(stdout)),
     ),
@@ -66,11 +81,18 @@ export function gitStatus(dir: string, maxAgeMs = 2500): Promise<GitStatus> {
         changed,
         ignored,
       };
-    } catch {
-      return { changed: [] };
+    } catch (error) {
+      return gaveUp(error)
+        ? { changed: [], changedUnknown: true }
+        : { changed: [] };
     }
   })();
-  cache.set(dir, { at: Date.now(), value });
+  const entry = { at: Date.now(), value };
+  cache.set(dir, entry);
+  // Don't keep a timed-out read around: try again on the next poll.
+  void value.then((status) => {
+    if (status.changedUnknown && cache.get(dir) === entry) cache.delete(dir);
+  });
   return value;
 }
 
@@ -137,10 +159,11 @@ export async function listWorktrees(
   }
 }
 
-/** Uncommitted file count and distance from upstream for a worktree. */
+/** Uncommitted file count and distance from upstream for a worktree;
+ * undefined when git failed or timed out (unknown, not "0 changes"). */
 export async function worktreeState(
   dir: string,
-): Promise<{ changed: number; ahead?: number; behind?: number }> {
+): Promise<{ changed: number; ahead?: number; behind?: number } | undefined> {
   try {
     const out = await git(dir, [
       "status",
@@ -160,7 +183,7 @@ export async function worktreeState(
     }
     return { changed, ahead, behind };
   } catch {
-    return { changed: 0 };
+    return undefined;
   }
 }
 
@@ -183,7 +206,7 @@ function limiter(max: number) {
 /** `git status` is slow in large repositories; listings are cheap. */
 const statusLimit = limiter(2),
   listLimit = limiter(8);
-type State = Awaited<ReturnType<typeof worktreeState>>;
+type State = NonNullable<Awaited<ReturnType<typeof worktreeState>>>;
 const states = new Map<
   string,
   { at: number; value?: State; refreshing?: Promise<void> }
@@ -201,7 +224,8 @@ export function cachedWorktreeState(
     e.refreshing = statusLimit(() => worktreeState(dir))
       .then((value) => {
         e.value = value;
-        e.at = Date.now();
+        // A failure is retried soon instead of being trusted for a full period.
+        e.at = value ? Date.now() : Date.now() - maxAgeMs + 5000;
       })
       .finally(() => (e.refreshing = undefined));
   return e.value;
@@ -239,13 +263,17 @@ export function gitSummary(dir: string, maxAgeMs = 10_000): Promise<GitStatus> {
 }
 
 /** Where demos can be in a worktree, from git instead of walking the tree:
- * tour files (tracked or new) and every `.demohunter` folder (captures live
- * there and are usually git-ignored). Paths are relative to `dir`. */
+ * tour files (tracked or new), every `.demohunter` folder (captures live
+ * there and are usually git-ignored), and folders saved elsewhere (a
+ * `project.json` next to an `events.json`, tracked or not ignored). Paths are
+ * relative to `dir`. */
 export async function listDemoSources(
   dir: string,
 ): Promise<{ tours: string[]; folders: string[] } | undefined> {
   const folders = new Set([".demohunter"]),
-    tours = new Set<string>();
+    tours = new Set<string>(),
+    projects = new Set<string>(),
+    events = new Set<string>();
   const folder = (entry: string) => {
     const i = entry.lastIndexOf(".demohunter/");
     if (i >= 0 && (i === 0 || entry[i - 1] === "/"))
@@ -255,13 +283,44 @@ export async function listDemoSources(
   };
   try {
     const [listed, ignored] = await Promise.all([
-      git(dir, ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.tour.ts", "*/.demohunter/*", ".demohunter/*"]),
+      git(dir, [
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        "*.tour.ts",
+        "*/.demohunter/*",
+        ".demohunter/*",
+        "*/project.json",
+        "project.json",
+        "*/events.json",
+        "events.json",
+      ]),
       git(dir, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"]).catch(() => ""),
     ]);
     for (const entry of listed.split("\0").filter(Boolean))
       if (entry.endsWith(".tour.ts")) tours.add(entry);
+      else if (
+        /(^|\/)(project|events)\.json$/.test(entry) &&
+        !/(^|\/)\.demohunter\//.test(entry)
+      )
+        (entry.endsWith("project.json") ? projects : events).add(
+          path.posix.dirname(entry),
+        );
       else folder(entry);
     for (const entry of ignored.split("\0").filter(Boolean)) folder(entry);
+    // Recordings saved outside .demohunter: both files must be there (Nx and
+    // others also use project.json). Nested ones are found from their parent.
+    const saved = [...projects]
+      .filter((p) => events.has(p))
+      .sort()
+      .filter(
+        (p, i, all) =>
+          !all.slice(0, i).some((q) => q === "." || p.startsWith(`${q}/`)),
+      );
+    for (const p of saved) folders.add(p);
     return { tours: [...tours].sort(), folders: [...folders].sort() };
   } catch {
     return undefined;

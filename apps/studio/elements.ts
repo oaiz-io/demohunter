@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { atomicWrite, writeJson, safeFile } from "./storage.js";
+import { atomicWrite, writeJson, safeFile, readProjectFile } from "./storage.js";
 
 export type CapturedNode = {
   id: number;
@@ -64,11 +64,11 @@ const slug = (value: string) =>
     .slice(0, 48);
 
 export async function ensureElementIndex(dir: string): Promise<ElementIndex> {
-  const bytes = await readFile(path.join(dir, "events.json"));
+  const bytes = await readProjectFile(dir, "events.json", null);
   const hash = createHash("sha256").update(bytes).digest("hex");
   try {
     const existing = JSON.parse(
-      await readFile(path.join(dir, "elements.json"), "utf8"),
+      await readProjectFile(dir, "elements.json"),
     ) as ElementIndex;
     if (existing.schemaVersion !== 1 || existing.captureHash !== hash)
       throw new Error(

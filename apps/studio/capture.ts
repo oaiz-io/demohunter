@@ -43,6 +43,8 @@ export async function captureReplay(
   input: SmokeGenerateInput & {
     projectDir: string;
     configureContext?: (context: BrowserContext) => Promise<void>;
+    /** Stop recording after this many events (default 100,000). */
+    maxEvents?: number;
   },
 ): Promise<string> {
   const dir = path.resolve(input.projectDir);
@@ -67,7 +69,9 @@ export async function captureReplay(
   }
   let startedAt: number | undefined;
   let recording = false;
-  let eventCount = 0;
+  const maxEvents = input.maxEvents ?? 100_000;
+  /** Source ms at which the event limit stopped the recording, if it did. */
+  let cutoffMs: number | undefined;
 
   const collectAsset = (response: Response): void => {
     const task = (async () => {
@@ -145,8 +149,24 @@ export async function captureReplay(
       "__dhEmit",
       async ({ frame }, event: eventWithTime) => {
         if (!recording || frame !== frame.page().mainFrame()) return;
-        if (++eventCount > 100_000)
-          throw new Error("Replay prototype limit: 100,000 events.");
+        if (cutoffMs !== undefined) return;
+        if (events.length >= maxEvents) {
+          // Keep what was recorded, say so, and stop the recorder; the demo
+          // simply ends here instead of silently losing its tail.
+          cutoffMs = Math.max(1, (events.at(-1)?.timestamp ?? event.timestamp) - (startedAt ?? event.timestamp));
+          warnings.add(
+            `Recording stopped after ${maxEvents.toLocaleString("en-US")} events; the rest of the tour was not captured. Shorten the tour or split it.`,
+          );
+          void frame
+            .page()
+            .evaluate(() => {
+              const w = window as any;
+              w.__dhStop?.();
+              sessionStorage.removeItem("__dhReplayRecording");
+            })
+            .catch(() => {});
+          return;
+        }
         startedAt ??= event.timestamp;
         events.push(event);
       },
@@ -218,7 +238,8 @@ export async function captureReplay(
       await document.fonts.ready;
       await new Promise((r) => setTimeout(r, 150));
     });
-    const durationMs = Math.max(1, Date.now() - (startedAt ?? Date.now()));
+    const durationMs =
+      cutoffMs ?? Math.max(1, Date.now() - (startedAt ?? Date.now()));
     await page.evaluate(() => {
       (window as any).__dhStop?.();
       sessionStorage.removeItem("__dhReplayRecording");

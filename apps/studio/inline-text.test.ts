@@ -401,18 +401,31 @@ test("inline canvas text editing: commit, cancel, targeting, fields, Tab, overfl
       "Tab save",
     );
     await page.locator("#save-indicator").waitFor({ state: "hidden" });
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#replay iframe") !== (window as any).oldFrame,
-    );
+    // Saving an edit applies it to the live replay; it is not rebuilt.
     await editor.waitFor();
+    expect(
+      await page.evaluate(
+        () =>
+          document.querySelector("#replay iframe") === (window as any).oldFrame,
+      ),
+    ).toBe(true);
     expect(await editor.inputValue()).toBe("Short");
     expect(
       await editor.evaluate(
         (n) => (n.getRootNode() as ShadowRoot).activeElement === n,
       ),
     ).toBe(true);
-    await page.keyboard.press("Escape");
+    // The second editor of a Tab chain opened before the first save landed;
+    // its own save must not report a conflict.
+    await page.keyboard.type("Tiny");
+    await page.keyboard.press("Enter");
+    await waitUntil(
+      async () => (await saved()).some((e) => e.text === "Tiny"),
+      "chained Tab save",
+    );
+    await settled();
+    expect(await page.locator("#element-conflict").isVisible()).toBe(false);
+    expect((await saved()).filter((e) => e.text === "globe").length).toBe(1);
     await editor.waitFor({ state: "detached" });
     expect(await replay.locator("#intro").innerHTML()).toBe(
       "Hi <b>globe</b> today",

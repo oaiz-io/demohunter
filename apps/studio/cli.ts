@@ -29,7 +29,7 @@ import { createInvoiceDemo } from "./invoice-demo.js";
 
 const help = `DemoHunter Studio — local-first demo workspace
 
-bun run studio [workspace-directory] [--port 4310] [--host 127.0.0.1]
+bun run studio [workspace-directory] [--port 4310] [--host 127.0.0.1] [--restricted]
     Open Studio with every demo in the workspace (default: current directory).
 
 bun run studio capture <tour.ts> [--project <new-dir>]
@@ -94,7 +94,7 @@ export async function main(args: string[]): Promise<void> {
   const flags = new Map<string, string>();
   for (let i = 0; i < rest.length; i++) {
     const value = rest[i]!;
-    if (["--fit", "--strict-audio"].includes(value)) {
+    if (["--fit", "--strict-audio", "--restricted"].includes(value)) {
       flags.set(value.slice(2), "true");
       continue;
     }
@@ -147,6 +147,9 @@ export async function main(args: string[]): Promise<void> {
     const app = await serveLibrary(positions[0] ?? process.cwd(), {
       port,
       host: flags.get("host"),
+      // The desktop app opens folders it hasn't been told to trust this way:
+      // scene pages render without running their scripts.
+      restricted: flags.has("restricted"),
     });
     // The desktop app keeps stdin open; if it dies (even force-killed), the
     // pipe closes and the service follows instead of lingering.

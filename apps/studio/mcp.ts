@@ -50,6 +50,8 @@ const guidePath = path.resolve(
 );
 type ToolOptions = {
   write?: boolean;
+  /** Removes or overwrites existing content (MCP destructiveHint). */
+  destructive?: boolean;
   /** Capture ID named by the call (e.g. a copied link) to pick its demo. */
   capture?: (args: Record<string, unknown>) => string | undefined;
   /** Handler returns MCP content blocks instead of JSON. */
@@ -106,6 +108,7 @@ export function createReplayMcp(
   ) {
     const {
       write = false,
+      destructive = false,
       capture,
       content,
     } = typeof options === "boolean" ? { write: options } : options;
@@ -182,7 +185,7 @@ export function createReplayMcp(
         inputSchema: input,
         annotations: {
           readOnlyHint: !write,
-          destructiveHint: false,
+          destructiveHint: destructive,
           openWorldHint: false,
         },
       },
@@ -338,8 +341,9 @@ export function createReplayMcp(
   );
   tool(
     "lift_element",
-    "Copy a recorded element, exactly as it looks at an output time, into scenes/lifts/<name>.html (inline computed styles) with its on-screen rect, for a scene or overlay to pick it up from the page and animate it (scenes/kit/motion.js lift(name)). Pick a time when the element is fully visible and settled. Writes scene files (changes the revision; not undoable).",
+    "Copy a recorded element, exactly as it looks at an output time, into scenes/lifts/<name>.html (inline computed styles) with its on-screen rect, for a scene or overlay to pick it up from the page and animate it (scenes/kit/motion.js lift(name)). Pick a time when the element is fully visible and settled. Revision-checked write of scene files (returns the new revision; not undoable).",
     z.object({
+      expectedRevision: revision,
       elementRef: ref,
       outputMs: time,
       name: z
@@ -347,15 +351,16 @@ export function createReplayMcp(
         .regex(/^[a-z0-9][a-z0-9-]{0,60}$/)
         .describe("File name, e.g. connected-card"),
     }),
-    async ({ elementRef, outputMs, name }, t) => {
+    async ({ expectedRevision, elementRef, outputMs, name }, t) => {
       t.workspace.element(elementRef);
-      const result = await liftElement(t.dir, {
+      return liftElement(t.dir, {
         ref: elementRef,
         atMs: outputMs,
         name,
+        expectedRevision,
       });
-      return { project: t.title, ...result };
     },
+    true,
   );
   tool(
     "find_elements",
@@ -607,7 +612,7 @@ export function createReplayMcp(
       );
       return { revision: result.revision, removed: { collection, id } };
     },
-    true,
+    { write: true, destructive: true },
   );
   tool(
     "write_project_file",
@@ -619,7 +624,7 @@ export function createReplayMcp(
     }),
     ({ expectedRevision, path: file, content }, t) =>
       writeSceneFile(t.dir, expectedRevision, file, content),
-    true,
+    { write: true, destructive: true },
   );
   const animation = editsSchema.shape.animations.unwrap().element;
   tool(
@@ -645,25 +650,49 @@ export function createReplayMcp(
     },
     true,
   );
+  // A patch: only the keys given change. Optional text fields take null to
+  // clear them (so no key can be reset by omission or by a schema default).
+  const segmentShape = narrationSchema.shape.segments.element.omit({
+    audio: true,
+  }).shape;
+  const segmentPatch = z.object({
+    id: segmentShape.id,
+    clipId: segmentShape.clipId.optional(),
+    offsetMs: segmentShape.offsetMs.unwrap().optional(),
+    text: segmentShape.text.optional(),
+    title: segmentShape.title.nullable(),
+    voice: segmentShape.voice.nullable(),
+    model: segmentShape.model.nullable(),
+    instructions: segmentShape.instructions.nullable(),
+    language: segmentShape.language.nullable(),
+  });
   tool(
     "update_narration",
-    "Update an existing segment or add one with a unique ID. Preserve audio metadata so old speech is marked stale. New segments need a valid clipId. Does not generate speech.",
-    z.object({
-      expectedRevision: revision,
-      segment: narrationSchema.shape.segments.element.omit({ audio: true }),
-    }),
+    "Update an existing segment or add one with a unique ID. Only the fields you pass change (pass null for title, voice, model, instructions or language to clear it). Preserve audio metadata so old speech is marked stale. New segments need clipId and text. Does not generate speech.",
+    z.object({ expectedRevision: revision, segment: segmentPatch }),
     async ({ expectedRevision, segment }, t) => {
       const b = await t.workspace.change(
         expectedRevision,
         "Edit narration",
         (draft) => {
-          if (!draft.edits.clips.some((c) => c.id === segment.clipId))
+          const { id, ...patch } = segment;
+          const existing = draft.narration.segments.find((s) => s.id === id);
+          const target = existing ?? { id, offsetMs: 0 };
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === undefined) continue;
+            if (value === null) delete (target as Record<string, unknown>)[key];
+            else (target as Record<string, unknown>)[key] = value;
+          }
+          const clipId = (target as { clipId?: string }).clipId;
+          if (!clipId || !draft.edits.clips.some((c) => c.id === clipId))
             throw new Error("Narration needs an existing clipId.");
-          const existing = draft.narration.segments.find(
-            (s) => s.id === segment.id,
-          );
-          if (existing) Object.assign(existing, segment);
-          else draft.narration.segments.push(segment);
+          if (!existing) {
+            if (typeof (target as { text?: unknown }).text !== "string")
+              throw new Error("A new narration segment needs text.");
+            draft.narration.segments.push(
+              target as (typeof draft.narration.segments)[number],
+            );
+          }
         },
       );
       return {
@@ -728,12 +757,15 @@ export function createReplayMcp(
   );
   tool(
     "undo_last_edit",
-    "Undo the most recent tracked UI/MCP change. Refuses to overwrite subsequent direct-file edits.",
-    z.object({ expectedRevision: revision }),
-    async ({ expectedRevision }, t) => ({
-      revision: (await t.workspace.undo(expectedRevision)).revision,
+    "Undo the most recent tracked UI/MCP change, or the newest `steps` of them in one operation (e.g. a whole agent turn). Refuses to overwrite subsequent direct-file edits.",
+    z.object({
+      expectedRevision: revision,
+      steps: z.number().int().min(1).max(20).default(1),
     }),
-    true,
+    async ({ expectedRevision, steps }, t) => ({
+      revision: (await t.workspace.undo(expectedRevision, steps)).revision,
+    }),
+    { write: true, destructive: true },
   );
   server.registerResource(
     "replay-guide",

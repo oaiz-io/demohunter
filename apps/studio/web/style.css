@@ -585,6 +585,25 @@ body.desktop .app-header summary {
   box-shadow: var(--shadow-pop);
   white-space: pre-line;
 }
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.error-dismiss {
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: -1px -4px 0 0;
+  border-radius: var(--radius-xs);
+  color: var(--color-graphite);
+}
+.error-dismiss:hover {
+  background: rgba(17, 17, 17, 0.08);
+  color: var(--color-ink);
+}
 .toast {
   position: fixed;
   bottom: 24px;
@@ -637,6 +656,30 @@ body.desktop .app-header summary {
 .scene-switch .mono {
   color: var(--color-graphite);
   font-weight: 400;
+}
+/* Shown when the folder is not trusted: scene scripts never run. */
+.scene-trust {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--color-graphite);
+  font-size: var(--text-micro);
+  white-space: nowrap;
+}
+.scene-trust[hidden] {
+  display: none;
+}
+.scene-trust .quiet {
+  font-size: var(--text-micro);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.scene-trust:not([hidden]) {
+  margin-left: auto;
+}
+.scene-trust:not([hidden]) + #focus-preview {
+  margin-left: 0;
 }
 #focus-preview {
   margin-left: auto;
@@ -1060,6 +1103,8 @@ body[data-tool="comment"] #select-layer {
   gap: 6px;
   cursor: pointer;
   user-select: none;
+  /* Scrubbing with a finger must not scroll the page. */
+  touch-action: none;
 }
 .ruler {
   position: relative;

@@ -367,6 +367,9 @@ export type ReplayBundle = {
   css: string;
   comments: ReplayComments;
   revision: string;
+  /** Like `revision`, without scene pages and audio: exactly what history
+   * snapshots, so undo can tell tracked from outside changes. */
+  contentRevision?: string;
   /** Changes only when scene pages or audio files change. */
   assetsRevision?: string;
 };
@@ -480,6 +483,7 @@ export function validateBundle(value: {
   css: string;
   comments?: unknown;
   revision?: string;
+  contentRevision?: string;
   assetsRevision?: string;
 }): ReplayBundle {
   const project = projectSchema.parse(value.project);
@@ -515,6 +519,7 @@ export function validateBundle(value: {
     css: value.css,
     comments,
     revision: value.revision ?? "",
+    contentRevision: value.contentRevision,
     assetsRevision: value.assetsRevision,
   };
 }

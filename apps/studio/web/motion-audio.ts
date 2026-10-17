@@ -29,14 +29,16 @@ export class MotionAudio {
     const total = totalDuration(bundle.edits),
       voice = voiceSpans(bundle),
       music = bundle.edits.audio?.music ?? [];
-    const wanted = new Set(music.map((m) => `${m.id}:${m.src}`));
+    // A rewritten file keeps its path, so the asset stamp is part of the key.
+    const stamp = bundle.assetsRevision ?? "";
+    const wanted = new Set(music.map((m) => `${m.id}:${m.src}#${stamp}`));
     for (const [key, player] of this.beds)
       if (!wanted.has(key)) {
         player.pause();
         this.beds.delete(key);
       }
     for (const bed of music) {
-      const key = `${bed.id}:${bed.src}`;
+      const key = `${bed.id}:${bed.src}#${stamp}`;
       let player = this.beds.get(key);
       if (!player) {
         player = new Audio(this.url(bundle, bed.src));
@@ -56,7 +58,10 @@ export class MotionAudio {
         player.currentTime = Math.max(0, at);
       if (player.paused) void player.play().catch(() => {});
     }
-    if (playing && !seek && this.lastMs >= 0 && positionMs > this.lastMs) {
+    // A fresh play or seek starts at the position itself, so a cue at 0 ms
+    // sounds when playing from the start; afterwards cues fire as time passes.
+    const restart = seek || this.lastMs < 0;
+    if (playing && (restart || positionMs > this.lastMs)) {
       const cues = [
         ...(bundle.edits.audio?.sfx ?? []).map((s) => ({
           src: s.src,
@@ -67,9 +72,11 @@ export class MotionAudio {
       ];
       for (const cue of cues)
         if (
-          cue.atMs > this.lastMs &&
-          cue.atMs <= positionMs &&
-          positionMs - cue.atMs < 250
+          restart
+            ? Math.abs(cue.atMs - positionMs) <= 0.5
+            : cue.atMs > this.lastMs &&
+              cue.atMs <= positionMs &&
+              positionMs - cue.atMs < 250
         )
           this.fire(bundle, cue.src, cue.volume);
     }

@@ -6,6 +6,7 @@ import path from "node:path";
 import { build } from "esbuild";
 import { LocalLibrary } from "./library.js";
 import { SeenDemos } from "./seen.js";
+import { hostAllowed, restrictFolder } from "./trust.js";
 import { createReplayHandler } from "./server.js";
 import { contract } from "./contract.js";
 import { fontFile } from "./fonts.js";
@@ -22,9 +23,15 @@ const VIEWER_TIMEOUT_MS = 90_000,
   SESSION_HEARTBEAT_MS = 15_000;
 export async function serveLibrary(
   root: string,
-  options: { port?: number; host?: string } = {},
+  options: {
+    port?: number;
+    host?: string;
+    /** Opened without being trusted (desktop app): scene scripts stay off. */
+    restricted?: boolean;
+  } = {},
 ) {
   const library = await LocalLibrary.open(root);
+  if (options.restricted) restrictFolder(library.root);
   // Start scanning, but serve right away: the page shows and fills in.
   void library.scan().catch(() => {});
   const seen = new SeenDemos(library.root);
@@ -118,7 +125,7 @@ export async function serveLibrary(
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'self'; base-uri 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'",
     );
     const url = new URL(req.url ?? "/", "http://localhost");
     const send = (data: string | Uint8Array, type: string, status = 200) => {
@@ -126,6 +133,11 @@ export async function serveLibrary(
       res.end(data);
     };
     try {
+      if (!hostAllowed(req, options.host))
+        return send(JSON.stringify({ error: "Unknown host." }), "application/json", 421);
+      // Every worktree of a restricted project is restricted, including ones
+      // found after start (posters render before a demo is opened).
+      if (options.restricted) for (const r of library.roots) restrictFolder(r);
       if (req.method === "POST" && !url.pathname.startsWith("/projects/")) {
         // Library write endpoints may only be called from this app.
         const origin = req.headers.origin;
@@ -168,7 +180,10 @@ export async function serveLibrary(
       if (req.method === "POST" && url.pathname === "/api/seen") {
         // The library and the editor mark a demo as looked at.
         let body = "";
-        for await (const chunk of req) body += chunk;
+        for await (const chunk of req) {
+          body += chunk;
+          if (body.length > 4096) throw new Error("Request is too large.");
+        }
         const id = (JSON.parse(body || "{}") as { id?: unknown }).id;
         const recording =
           typeof id === "string"
@@ -209,6 +224,7 @@ export async function serveLibrary(
         let handler = handlers.get(id);
         if (!handler) {
           handler = createReplayHandler(dir, {
+            host: options.host,
             basePath: `/projects/${id}`,
             library: true,
             // Agents connect in the worktree that holds the demo.

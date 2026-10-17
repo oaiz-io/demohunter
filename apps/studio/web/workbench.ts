@@ -30,6 +30,8 @@ export type WorkspaceData = {
     name?: string;
   };
   sourceBoundary: string;
+  /** False when scene scripts must not run (absent means trusted). */
+  trusted?: boolean;
 };
 type Hooks = {
   data: () => WorkspaceData;
@@ -65,6 +67,40 @@ const icon = (name: string) => {
   svg.append(use);
   return svg;
 };
+/** Text is written only when it differs, so live polls never reset a text
+ * selection the user is making (for example in the copyable command). */
+function setText(node: HTMLElement, text: string): void {
+  if (node.textContent !== text) node.textContent = text;
+}
+/** Swap a container's children without losing keyboard focus: the focused
+ * control is re-focused by position in the new content. */
+function replaceKeepingFocus(container: HTMLElement, nodes: Node[]): void {
+  const focusable = "button,a,input,textarea,select,[tabindex]";
+  const active = document.activeElement;
+  const index =
+    active && container.contains(active)
+      ? [...container.querySelectorAll(focusable)].indexOf(active)
+      : -1;
+  container.replaceChildren(...nodes);
+  if (index >= 0)
+    container
+      .querySelectorAll<HTMLElement>(focusable)
+      [index]?.focus({ preventScroll: true });
+}
+/** Put `wanted` in order inside `list` without moving anything that holds
+ * focus: re-appending a node blurs a textarea being typed in. */
+function keepOrder(list: HTMLElement, wanted: HTMLElement[]): void {
+  const current = [...list.children].filter((c) =>
+    wanted.includes(c as HTMLElement),
+  );
+  if (
+    current.length === wanted.length &&
+    current.every((c, i) => c === wanted[i])
+  )
+    return;
+  for (const card of wanted)
+    if (!card.contains(document.activeElement)) list.append(card);
+}
 export async function copyText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     try {
@@ -104,6 +140,7 @@ export class AgentWorkbench {
   private history: HistoryItem[] = [];
   private client: "claude" | "codex" | "other" = "claude";
   private activeThread?: string;
+  private addingComment = false;
   constructor(private hooks: Hooks) {
     $("#element-search").oninput = () => this.renderTree();
     const dialog = $<HTMLDialogElement>("#agent-dialog");
@@ -197,7 +234,7 @@ export class AgentWorkbench {
     $("#scene-count").textContent = String(bundle.edits.clips.length);
     $("#element-count").textContent = String(data.index.elements.length);
     $("#agent-project-path").textContent = data.projectDir;
-    $("#scene-list").replaceChildren();
+    const scenes: Node[] = [];
     let offset = 0;
     for (const [i, clip] of bundle.edits.clips.entries()) {
       const start = offset;
@@ -211,10 +248,10 @@ export class AgentWorkbench {
         make("span", "scene-time", clockMs(start)),
       );
       button.onclick = () => this.hooks.seek(start);
-      $("#scene-list").append(button);
+      scenes.push(button);
     }
+    replaceKeepingFocus($("#scene-list"), scenes);
     this.renderTree();
-    this.selectionChanged();
     this.renderComments();
     this.renderAgent();
     this.updateTime();
@@ -287,8 +324,10 @@ export class AgentWorkbench {
           this.hooks.time() < Number(button.dataset.end),
       );
     const selected = this.selected();
-    $("#comment-anchor").textContent =
-      `${selected?.ref ?? "Recording"} · ${clockMs(this.hooks.time())}`;
+    setText(
+      $("#comment-anchor"),
+      `${selected?.ref ?? "Recording"} · ${clockMs(this.hooks.time())}`,
+    );
   }
   selectionChanged(): void {
     const element = this.selected();
@@ -336,7 +375,7 @@ export class AgentWorkbench {
               ].includes(e.tag)),
       )
       .slice(0, 200);
-    $("#element-tree").replaceChildren();
+    const tree: Node[] = [];
     for (const element of useful) {
       const button = make("button", "layer-button");
       button.dataset.ref = element.ref;
@@ -358,12 +397,12 @@ export class AgentWorkbench {
       button.onclick = () => this.hooks.select(element.ref);
       button.onmouseenter = () => this.hooks.hover(element.ref);
       button.onmouseleave = () => this.hooks.hover();
-      $("#element-tree").append(button);
+      tree.push(button);
     }
     if (!useful.length)
-      $("#element-tree").append(
-        make("p", "hint", "No matching captured elements."),
-      );
+      tree.push(make("p", "hint", "No matching captured elements."));
+    replaceKeepingFocus($("#element-tree"), tree);
+    this.selectionChanged();
   }
   /** The selected element's reference, files and moment for an agent. */
   async copyReference(): Promise<void> {
@@ -493,22 +532,32 @@ export class AgentWorkbench {
   }
   private async addComment(): Promise<void> {
     const textarea = $<HTMLTextAreaElement>("#new-comment");
-    if (!textarea.value.trim()) return;
-    const selected = this.selected();
-    const result = await this.hooks.api<{ id: string }>("/api/comments", {
-      action: "add",
-      expectedRevision: this.hooks.bundle().revision,
-      elementRef: $<HTMLInputElement>("#attach-comment").checked
-        ? selected?.ref
-        : undefined,
-      timeMs: this.hooks.time(),
-      body: textarea.value,
-      author: "You",
-    });
-    textarea.value = "";
-    this.activeThread = result.id;
-    await this.hooks.reload();
-    toast("Note saved — your agent can read it through MCP");
+    // A double click or repeated shortcut must not post the note twice.
+    if (!textarea.value.trim() || this.addingComment) return;
+    this.addingComment = true;
+    $<HTMLButtonElement>("#add-comment").disabled = true;
+    try {
+      const selected = this.selected();
+      const body = textarea.value;
+      const result = await this.hooks.api<{ id: string }>("/api/comments", {
+        action: "add",
+        expectedRevision: this.hooks.bundle().revision,
+        elementRef: $<HTMLInputElement>("#attach-comment").checked
+          ? selected?.ref
+          : undefined,
+        timeMs: this.hooks.time(),
+        body,
+        author: "You",
+      });
+      // Keep anything typed while the request was in flight.
+      if (textarea.value === body) textarea.value = "";
+      this.activeThread = result.id;
+      await this.hooks.reload();
+      toast("Note saved — your agent can read it through MCP");
+    } finally {
+      this.addingComment = false;
+      $<HTMLButtonElement>("#add-comment").disabled = false;
+    }
   }
   private activeId(): string | undefined {
     const bundle = this.hooks.bundle();
@@ -553,13 +602,14 @@ export class AgentWorkbench {
     $(".filter-row").hidden = threads.length === 0;
     const turns = this.turns();
     const active = this.activeId();
+    const ordered: HTMLElement[] = [];
     for (const thread of visible) {
       let card = this.commentCards.get(thread.id);
       if (!card) {
         card = this.createCommentCard(thread.id);
         this.commentCards.set(thread.id, card);
       }
-      $("#comments-list").append(card);
+      ordered.push(card);
       card.hidden = false;
       const number = threads.indexOf(thread) + 1;
       card.classList.toggle("resolved", thread.status === "resolved");
@@ -674,6 +724,7 @@ export class AgentWorkbench {
       card.querySelector<HTMLButtonElement>(".comment-resolve")!.className =
         `comment-resolve button small ${thread.status === "resolved" || state.kind === "open" ? "secondary" : "primary"}`;
     }
+    keepOrder($("#comments-list"), ordered);
     for (const [id, card] of this.commentCards)
       if (!visible.some((t) => t.id === id)) card.hidden = true;
     if (!visible.length && threads.length) {
@@ -851,8 +902,6 @@ export class AgentWorkbench {
     const bundle = this.hooks.bundle();
     if (!bundle) return;
     const last = this.lastAgent();
-    const connection = $("#agent-connection");
-    connection.replaceChildren();
     const who = make("div", "who");
     const avatar = make(
       "span",
@@ -881,10 +930,9 @@ export class AgentWorkbench {
       last ? "+ Connect" : "Connect agent",
     );
     connect.onclick = () => $("#connect-agent").click();
-    connection.append(who, connect);
+    replaceKeepingFocus($("#agent-connection"), [who, connect]);
     // Now
-    const now = $("#agent-now");
-    now.replaceChildren();
+    const nowNodes: Node[] = [];
     const running = this.activity.find((a) => a.status === "running");
     if (running) {
       const card = make("button", "now-card");
@@ -902,9 +950,9 @@ export class AgentWorkbench {
       card.append(make("i"), info, since);
       card.onclick = () =>
         running.elementRef && this.hooks.showElement(running.elementRef);
-      now.append(card);
+      nowNodes.push(card);
     } else
-      now.append(
+      nowNodes.push(
         make(
           "p",
           "now-idle",
@@ -914,15 +962,16 @@ export class AgentWorkbench {
         ),
       );
     // Changes, newest turn first
+    replaceKeepingFocus($("#agent-now"), nowNodes);
     const turns = this.turns();
-    const list = $("#review-list");
-    list.replaceChildren(
-      ...turns.slice(0, 20).map((turn) => this.turnCard(turn, running)),
-    );
+    const cards: Node[] = turns
+      .slice(0, 20)
+      .map((turn) => this.turnCard(turn, running));
     if (!turns.length)
-      list.append(
+      cards.push(
         make("p", "review-empty", "Agent changes appear here, by turn."),
       );
+    replaceKeepingFocus($("#review-list"), cards);
   }
   private turnCard(
     turn: Turn,
@@ -1048,24 +1097,31 @@ export class AgentWorkbench {
     ))
       button.classList.toggle("active", button.dataset.client === this.client);
     const client = this.client;
-    $("#agent-command").textContent =
+    setText(
+      $("#agent-command"),
       client === "other"
         ? JSON.stringify(this.mcpConfig(), null, 2)
-        : this.command(client);
-    $("#agent-config").textContent = JSON.stringify(this.mcpConfig(), null, 2);
-    $("#agent-dialog .dialog-lead").textContent =
+        : this.command(client),
+    );
+    setText($("#agent-config"), JSON.stringify(this.mcpConfig(), null, 2));
+    setText(
+      $("#agent-dialog .dialog-lead"),
       this.hooks.data().connection.scope === "workspace"
         ? "Run once in the repo. It edits whichever demo is open in Studio; your agent settings are not changed."
-        : "Run once in the repo. Studio does not change your agent settings.";
+        : "Run once in the repo. Studio does not change your agent settings.",
+    );
     const status = $("#agent-dialog-status");
     const last = this.lastAgent();
     const running = this.activity.find((a) => a.status === "running");
     status.classList.toggle("connected", !!running);
-    status.textContent = running
-      ? `${running.actor} is working now`
-      : last
-        ? `${last.actor} · last activity ${ago(last.finishedAt ?? last.startedAt)}`
-        : "Waiting for the first tool call…";
+    setText(
+      status,
+      running
+        ? `${running.actor} is working now`
+        : last
+          ? `${last.actor} · last activity ${ago(last.finishedAt ?? last.startedAt)}`
+          : "Waiting for the first tool call…",
+    );
   }
 }
 function shellQuote(value: string): string {

@@ -55,7 +55,15 @@ const WRITE_TOOLS = new Set([
 export class Timeline {
   private lanes = $("#lanes");
   private dragging = false;
-  private thumbs = new Map<string, string>();
+  /** One thumbnail element per scene, reused across renders so the image
+   * stays on screen while a fresher one loads. */
+  private thumbs = new Map<
+    string,
+    { el: HTMLElement; at: number; visual: string; token: number }
+  >();
+  /** Frames already fetched, by clip, time and visual state. */
+  private thumbUrls = new Map<string, string>();
+  private thumbToken = 0;
   private signature = "";
   constructor(private hooks: Hooks) {
     this.lanes.addEventListener("pointerdown", (event) => {
@@ -92,6 +100,7 @@ export class Timeline {
     const scenes = $("#clip-track");
     scenes.replaceChildren();
     let offset = 0;
+    const visual = visualKey(bundle);
     for (const [i, clip] of bundle.edits.clips.entries()) {
       const start = offset,
         length = clipDuration(clip);
@@ -110,12 +119,8 @@ export class Timeline {
       block.style.width = `calc(${this.pct(length)} - 2px)`;
       const title = this.hooks.sceneTitle(i);
       block.title = `${title} · ${clockMs(start)}`;
-      const thumb = el("span", "clip-thumb");
       const at = Math.round(start + Math.min(1500, length / 2));
-      const key = `${bundle.revision}:${at}`;
-      if (this.thumbs.get(clip.id) !== key) this.thumbs.set(clip.id, key);
-      const url = this.hooks.frameUrl(at);
-      if (url) this.loadThumb(thumb, url);
+      const thumb = this.thumbFor(clip.id, at, visual);
       const text = el("span", "clip-text");
       text.append(
         el("strong", undefined, title),
@@ -128,6 +133,8 @@ export class Timeline {
       block.append(thumb, text);
       scenes.append(block);
     }
+    for (const id of [...this.thumbs.keys()])
+      if (!bundle.edits.clips.some((c) => c.id === id)) this.thumbs.delete(id);
     // Camera and effects
     const effects = $("#effect-track");
     effects.replaceChildren();
@@ -327,13 +334,44 @@ export class Timeline {
   // browser's connections from scene pages, audio or status polls.
   private thumbQueue: (() => Promise<void>)[] = [];
   private thumbsLoading = 0;
-  private loadThumb(thumb: HTMLElement, url: string) {
+  /** The scene's thumbnail element; only fetches when what it shows changed. */
+  private thumbFor(clipId: string, at: number, visual: string): HTMLElement {
+    let state = this.thumbs.get(clipId);
+    if (!state) {
+      state = { el: el("span", "clip-thumb"), at, visual: "", token: 0 };
+      this.thumbs.set(clipId, state);
+    }
+    if (state.at === at && state.visual === visual) return state.el;
+    state.at = at;
+    state.visual = visual;
+    const cacheKey = `${clipId}:${at}:${visual}`;
+    const cached = this.thumbUrls.get(cacheKey);
+    const token = (state.token = ++this.thumbToken);
+    if (cached) {
+      state.el.style.backgroundImage = `url("${cached}")`;
+      return state.el;
+    }
+    const url = this.hooks.frameUrl(at);
+    if (url) this.loadThumb(state, token, cacheKey, url);
+    return state.el;
+  }
+  private loadThumb(
+    state: { el: HTMLElement; token: number },
+    token: number,
+    cacheKey: string,
+    url: string,
+  ) {
     const load = async () => {
+      // Superseded by a newer frame for this scene, or the scene is gone.
+      if (state.token !== token) return;
       const image = new Image();
       image.src = url;
       try {
         await image.decode();
-        if (thumb.isConnected) thumb.style.backgroundImage = `url("${url}")`;
+        if (this.thumbUrls.size > 200) this.thumbUrls.clear();
+        this.thumbUrls.set(cacheKey, url);
+        if (state.token === token)
+          state.el.style.backgroundImage = `url("${url}")`;
       } catch {
         /* No thumbnail; the block still shows its title. */
       }
@@ -385,6 +423,25 @@ export class Timeline {
       canvas.remove();
     }
   }
+}
+/** What a rendered frame depends on; comments, narration text and audio do not.
+ * Scene pages count only when the project has scenes or overlays. */
+function visualKey(bundle: ReplayBundle): string {
+  const { audio: _audio, ...edits } = bundle.edits;
+  const pages =
+    bundle.edits.clips.some((c) => c.kind === "scene") ||
+    !!bundle.edits.overlays?.length;
+  const text = JSON.stringify([
+    bundle.project.viewport,
+    bundle.css,
+    edits,
+    pages ? bundle.assetsRevision : undefined,
+  ]);
+  // A short stable hash keeps the per-frame cache keys small.
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++)
+    hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+  return (hash >>> 0).toString(36);
 }
 export function estimateSpeechMs(text: string) {
   // Same estimate the capture uses for draft timing.

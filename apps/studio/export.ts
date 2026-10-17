@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+  access,
   mkdir,
   mkdtemp,
   readFile,
@@ -54,7 +55,7 @@ export async function exportReplay(
   await mkdir(path.dirname(destination), { recursive: true });
   // New destination only: failed renders cannot replace a previous good artifact.
   try {
-    await import("node:fs/promises").then((fs) => fs.access(destination));
+    await access(destination);
     throw new Error(
       "Export destination already exists. Choose a new directory.",
     );
@@ -87,6 +88,21 @@ export async function exportReplay(
       throw new Error(
         `Audio is draft or stale: ${missing.map((s) => s.id).join(", ")}. Regenerate narration or omit --strict-audio.`,
       );
+    // A missing music or sound file would only surface after the whole render.
+    for (const src of new Set(
+      [
+        ...(bundle.edits.audio?.music ?? []),
+        ...(bundle.edits.audio?.sfx ?? []),
+      ].map((a) => a.src),
+    ))
+      await safeFile(dir, src)
+        .then((file) => access(file))
+        .catch((error) => {
+          if (String(error?.message).includes("outside")) throw error;
+          throw new Error(
+            `Audio file ${src} is missing from the demo. Add it to the audio/ folder or remove it from the timeline, then export again.`,
+          );
+        });
     // Prepare the audio mix while the frames render; only the mux waits.
     const audioReady = (async () => {
       const segments = bundle.narration.segments.filter(
@@ -220,7 +236,9 @@ export async function exportReplay(
       "-crf",
       String(crf),
     ];
-    const extra: Awaited<ReturnType<typeof openReplayRenderer>>[] = [];
+    // Every extra browser is tracked from the moment it starts opening, so
+    // one that is still starting when another worker fails is closed too.
+    const extra: Promise<Awaited<ReturnType<typeof openReplayRenderer>>>[] = [];
     let done = 0,
       failed: unknown;
     const progress = setInterval(
@@ -262,19 +280,25 @@ export async function exportReplay(
         work(renderer),
         ...Array.from({ length: workers - 1 }, async () => {
           if (next >= chunks.length) return;
-          const r = await openReplayRenderer(dir, bundle.revision);
-          extra.push(r);
-          await work(r);
+          const opening = openReplayRenderer(dir, bundle.revision);
+          extra.push(opening);
+          await work(await opening);
         }),
       ]);
       if (parts.length === 1) await rename(parts[0]!, video);
       else {
         const list = path.join(stage, "parts.txt");
-        await writeFile(list, parts.map((p) => `file '${p}'`).join("\n"));
+        // concat-list syntax: a quote inside a name is written '\''.
+        await writeFile(
+          list,
+          parts.map((p) => `file '${p.replaceAll("'", "'\\''")}'`).join("\n"),
+        );
         await run([
           "-hide_banner",
           "-loglevel",
           "error",
+          "-protocol_whitelist",
+          "file,pipe",
           "-f",
           "concat",
           "-safe",
@@ -291,7 +315,7 @@ export async function exportReplay(
       }
     } finally {
       clearInterval(progress);
-      await Promise.all(extra.map((r) => r.close()));
+      await Promise.all(extra.map((r) => r.then((x) => x.close(), () => {})));
     }
     /** Whether nothing on screen can change between two output times. */
     function still(a: number, b: number): boolean {
@@ -437,7 +461,7 @@ export async function exportReplay(
         cues
           .map(
             (c, i) =>
-              `${i + 1}\n${stamp(c.startMs)} --> ${stamp(c.endMs)}\n${c.text.replaceAll("-->", "→").replaceAll("<", "&lt;")}\n`,
+              `${i + 1}\n${stamp(c.startMs)} --> ${stamp(c.endMs)}\n${cueText(c.text)}\n`,
           )
           .join("\n"),
     );
@@ -481,12 +505,20 @@ export async function exportReplay(
     if (!published) await rm(stage, { recursive: true, force: true });
   }
 }
-function stamp(ms: number) {
-  return `${Math.floor(ms / 3600000)
-    .toString()
-    .padStart(2, "0")}:${Math.floor((ms / 60000) % 60)
-    .toString()
-    .padStart(2, "0")}:${((ms / 1000) % 60).toFixed(3).padStart(6, "0")}`;
+/** WebVTT cue text: a blank line would end the cue, `&` and `<` are markup. */
+export function cueText(text: string) {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll("-->", "→")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n(?:[ \t]*\n)+/g, "\n");
+}
+/** HH:MM:SS.mmm from whole milliseconds, so 59.9996 s never prints 60.000. */
+export function stamp(ms: number) {
+  const total = Math.round(ms);
+  const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+  return `${pad(Math.floor(total / 3600000))}:${pad(Math.floor(total / 60000) % 60)}:${pad(Math.floor(total / 1000) % 60)}.${pad(total % 1000, 3)}`;
 }
 const RATE = 48000;
 /** ffmpeg from PATH, or FFMPEG_PATH. */
@@ -529,6 +561,9 @@ async function decode(file: string): Promise<Float32Array> {
         "-hide_banner",
         "-loglevel",
         "error",
+        // User audio can be a playlist naming URLs: read local files only.
+        "-protocol_whitelist",
+        "file,pipe",
         "-i",
         file,
         "-f",

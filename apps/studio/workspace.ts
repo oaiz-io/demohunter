@@ -29,6 +29,7 @@ import { elementUri, parseReference, previewLink } from "./links.js";
 import {
   atomicWrite,
   loadBundle,
+  readProjectFile,
   mutateProject,
   mutationAuthor,
   RevisionConflict,
@@ -255,17 +256,31 @@ export class ReplayWorkspace {
       expectedRevision,
       description,
       async (draft) => {
+        // Only what this change adds or alters is checked: one stale ref
+        // (the capture changed) must not block every unrelated write.
+        const collections = (d: ReplayBundle) => [
+          d.edits.elements,
+          d.edits.camera,
+          d.edits.highlights,
+          d.edits.animations ?? [],
+        ];
+        const known = new Set(
+          collections(draft).flatMap((c) => c.map((i) => JSON.stringify(i))),
+        );
+        const threads = new Set(
+          draft.comments.threads.map((t) => `${t.id}\0${t.elementRef}`),
+        );
         await mutate(draft);
-        for (const collection of [
-          draft.edits.elements,
-          draft.edits.camera,
-          draft.edits.highlights,
-          draft.edits.animations ?? [],
-        ])
+        for (const collection of collections(draft))
           for (const item of collection)
-            if (item.target?.ref) this.element(item.target.ref);
+            if (item.target?.ref && !known.has(JSON.stringify(item)))
+              this.element(item.target.ref);
         for (const thread of draft.comments.threads)
-          if (thread.elementRef) this.element(thread.elementRef);
+          if (
+            thread.elementRef &&
+            !threads.has(`${thread.id}\0${thread.elementRef}`)
+          )
+            this.element(thread.elementRef);
       },
     );
   }
@@ -373,7 +388,7 @@ export async function readOptional<T>(
   file: string,
 ): Promise<T | null> {
   try {
-    return JSON.parse(await readFile(path.join(dir, file), "utf8"));
+    return JSON.parse(await readProjectFile(dir, file));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
@@ -508,7 +523,10 @@ export class ProjectTargets {
     if (cached?.key === key) return cached.workspace;
     const workspace = ReplayWorkspace.open(dir);
     this.cache.set(dir, { key, workspace });
-    workspace.catch(() => this.cache.delete(dir));
+    // A newer entry (the capture changed meanwhile) must survive this failure.
+    workspace.catch(() => {
+      if (this.cache.get(dir)?.workspace === workspace) this.cache.delete(dir);
+    });
     return workspace;
   }
   private async target(
@@ -701,34 +719,64 @@ export async function writeSceneFile(
     throw new Error(
       `Scene file is ${bytes} bytes; the limit is ${SCENE_FILE_LIMIT} (512 KB).`,
     );
+  return writeUnderScenes(dir, expectedRevision, [{ relative, content }]).then(
+    (result) => ({
+      path: relative,
+      bytes,
+      revision: result.revision,
+      created: result.created[0]!,
+    }),
+  );
+}
+/**
+ * Atomically (per file) write files under `scenes/` while holding the project
+ * lock, after checking the revision. Folders and targets that are symlinks are
+ * refused so a write cannot leave the project. Callers validate names/sizes.
+ */
+export async function writeUnderScenes(
+  dir: string,
+  expectedRevision: string | undefined,
+  files: { relative: string; content: string }[],
+): Promise<{ revision: string; created: boolean[] }> {
   return withProjectLock(dir, async () => {
     const before = await loadBundle(dir);
-    if (before.revision !== expectedRevision)
+    if (
+      expectedRevision !== undefined &&
+      before.revision !== expectedRevision
+    )
       throw new RevisionConflict(
         "The project changed. Read the latest revision before retrying; the file was not written.",
       );
     const root = await realpath(dir);
-    // Refuse symlinked folders so writes cannot leave the project.
-    let current = root;
-    for (const part of parts.slice(0, -1)) {
-      current = path.join(current, part);
-      const info = await lstat(current).catch(() => undefined);
-      if (!info) await mkdir(current);
-      else if (!info.isDirectory() || info.isSymbolicLink())
-        throw new Error(`${path.relative(root, current)} is not a folder.`);
+    // Check everything first so a refusal leaves no partial write.
+    const plan: { file: string; content: string; existed: boolean }[] = [];
+    for (const { relative, content } of files) {
+      const parts = relative.split("/");
+      let current = root;
+      for (const part of parts.slice(0, -1)) {
+        current = path.join(current, part);
+        const info = await lstat(current).catch(() => undefined);
+        if (info && (!info.isDirectory() || info.isSymbolicLink()))
+          throw new Error(`${path.relative(root, current)} is not a folder.`);
+        if (!info) break;
+      }
+      const file = path.join(root, ...parts);
+      const existing = await lstat(file).catch(() => undefined);
+      if (existing && !existing.isFile())
+        throw new Error(`${relative} exists and is not a regular file.`);
+      plan.push({ file, content, existed: !!existing });
     }
-    const file = path.join(root, ...parts);
-    const existing = await lstat(file).catch(() => undefined);
-    if (existing && !existing.isFile())
-      throw new Error(`${relative} exists and is not a regular file.`);
-    await atomicWrite(file, content);
+    for (const { relative } of files) {
+      let current = root;
+      for (const part of relative.split("/").slice(0, -1)) {
+        current = path.join(current, part);
+        if (!(await lstat(current).catch(() => undefined)))
+          await mkdir(current);
+      }
+    }
+    for (const { file, content } of plan) await atomicWrite(file, content);
     const after = await loadBundle(dir);
-    return {
-      path: relative,
-      bytes,
-      revision: after.revision,
-      created: !existing,
-    };
+    return { revision: after.revision, created: plan.map((p) => !p.existed) };
   });
 }
 /** Project-relative files usable as scene/overlay pages and audio sources.

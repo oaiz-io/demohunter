@@ -99,6 +99,18 @@ export class TranscriptEditor {
       }
       const ready = audioIsCurrent(bundle.project, values);
       const index = bundle.narration.segments.indexOf(segment);
+      // Screen readers get the segment's name, not its internal id.
+      const name =
+        values.title?.trim() ||
+        values.text.trim().split(/\s+/).slice(0, 6).join(" ") ||
+        `segment ${index + 1}`;
+      card
+        .querySelector(".narration-title")!
+        .setAttribute("aria-label", `Title for ${name}`);
+      textarea.setAttribute("aria-label", `Script for ${name}`);
+      card
+        .querySelector(".segment-remove")!
+        .setAttribute("aria-label", `Remove ${name}`);
       card.querySelector<HTMLElement>(".segment-number")!.textContent = String(
         index + 1,
       ).padStart(2, "0");
@@ -239,12 +251,12 @@ export class TranscriptEditor {
       number = el("span", "segment-number"),
       title = el("input", "narration-title"),
       badge = el("span", "status-tag tag");
-    title.setAttribute("aria-label", `Title for ${id}`);
+    title.setAttribute("aria-label", "Title");
     title.oninput = () => this.patch(id, { title: title.value });
     top.append(number, title, badge);
     const textarea = el("textarea", "script-text");
     textarea.rows = 3;
-    textarea.setAttribute("aria-label", `Script for ${id}`);
+    textarea.setAttribute("aria-label", "Script");
     textarea.oninput = () => this.patch(id, { text: textarea.value });
     const canvas = el("canvas", "waveform");
     canvas.width = 640;
@@ -266,15 +278,23 @@ export class TranscriptEditor {
       spacer = el("span", "spacer"),
       status = el("span", "segment-status"),
       save = el("button", "segment-save quiet small-text", "Save"),
-      remove = el("button", "quiet", "×");
-    remove.setAttribute("aria-label", `Remove ${id}`);
+      remove = el("button", "quiet segment-remove", "×");
+    remove.setAttribute("aria-label", "Remove segment");
     remove.title = "Remove segment";
     generate.onclick = () =>
       void this.save(id)
         .then(() => this.hooks.regenerate([id]))
         .catch(this.hooks.error);
     save.onclick = () => void this.save(id).catch(this.hooks.error);
-    remove.onclick = () =>
+    remove.onclick = () => {
+      // Unsaved words are lost with the segment; make that a conscious choice.
+      const draft = this.drafts.get(id);
+      if (
+        draft?.patch.text !== undefined &&
+        draft.patch.text !== draft.base.text &&
+        !confirm("This segment has unsaved text. Remove it anyway?")
+      )
+        return;
       void this.hooks
         .remove(id)
         .then(() => {
@@ -282,6 +302,7 @@ export class TranscriptEditor {
           this.render(this.bundle!);
         })
         .catch(this.hooks.error);
+    };
     tools.append(generate, spacer, status, save, remove);
     const conflict = el("div", "segment-conflict");
     conflict.hidden = true;

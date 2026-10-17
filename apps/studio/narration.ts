@@ -1,8 +1,8 @@
-import { copyFile, mkdir, open, unlink } from "node:fs/promises";
+import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_DEMOHUNTER_CONFIG } from "@demohunter/sdk";
 import { resolveNarrationSegment } from "../../packages/generator-playwright/src/narration/resolve-narration.js";
-import { loadBundle, mutateProject } from "./storage.js";
+import { acquireLock, loadBundle, mutateProject } from "./storage.js";
 import { clipDuration, narrationRequestKey } from "./model.js";
 
 export async function regenerateNarration(
@@ -15,14 +15,10 @@ export async function regenerateNarration(
     onProgress?: (message: string) => void;
   } = {},
 ): Promise<{ generated: number; skipped: number }> {
-  const lockPath = path.join(dir, ".narration.lock");
-  const lock = await open(lockPath, "wx").catch(() => {
-    throw new Error(
-      "Narration is already regenerating. If a previous process crashed, remove .narration.lock and retry.",
-    );
-  });
+  // A crashed run's lock (dead pid, or silent for 30 s) is taken over.
+  const lock = await acquireLock(path.join(dir, ".narration.lock"));
+  if (!lock) throw new Error("Narration is already regenerating.");
   try {
-    await lock.writeFile(String(process.pid));
     const initial = await loadBundle(dir);
     for (const id of options.segmentIds ?? [])
       if (!initial.narration.segments.some((s) => s.id === id))
@@ -54,7 +50,7 @@ export async function regenerateNarration(
             ...DEFAULT_DEMOHUNTER_CONFIG,
             baseURL: "http://replay.invalid",
             outputDir: dir,
-            cacheDir: options.cacheDir ?? path.resolve(".demohunter/cache"),
+            cacheDir: options.cacheDir ?? defaultCacheDir(dir),
             tts: initial.project.tts,
           },
         },
@@ -118,7 +114,20 @@ export async function regenerateNarration(
     }
     return { generated, skipped };
   } finally {
-    await lock.close();
-    await unlink(lockPath);
+    await lock.release();
   }
+}
+/** The workspace's shared speech cache: `<root>/.demohunter/cache` for a
+ * project at `<root>/.demohunter/replays/x`, not wherever the process runs. */
+export function defaultCacheDir(projectDir: string): string {
+  const resolved = path.resolve(projectDir);
+  let current = resolved;
+  for (;;) {
+    if (path.basename(current) === ".demohunter")
+      return path.join(current, "cache");
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return path.resolve(resolved, "../..", ".demohunter/cache");
 }

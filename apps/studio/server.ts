@@ -18,6 +18,18 @@ import { contract } from "./contract.js";
 import { historySummary } from "./storage.js";
 import { fontFile } from "./fonts.js";
 import { projectFrame } from "./poster.js";
+import { createRequire } from "node:module";
+import { hostAllowed, scenesTrusted } from "./trust.js";
+
+const require = createRequire(import.meta.url);
+/** The replay player ships with Studio; project folders never supply code. */
+const rrwebDir = path.dirname(require.resolve("rrweb"));
+const vendor: Record<string, [file: string, type: string]> = {
+  "/vendor/rrweb.js": [path.join(rrwebDir, "rrweb.umd.cjs"), "text/javascript"],
+  "/vendor/rrweb.css": [path.join(rrwebDir, "style.css"), "text/css"],
+};
+/** Captured asset URLs inside recordings and stylesheets (sha-named files). */
+const assetUrl = /(?<![\w/])\/files\/assets\/(?=[0-9a-f]{20}\.)/g;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const mime: Record<string, string> = {
@@ -41,6 +53,7 @@ const mime: Record<string, string> = {
   ".avif": "image/avif",
   ".otf": "font/otf",
   ".json": "application/json",
+  ".vtt": "text/vtt",
   ".html": "text/html; charset=utf-8",
 };
 const selectionSchema = z
@@ -61,7 +74,8 @@ let assetsPromise:
   | Promise<{ js: Uint8Array; html: string; css: Buffer }>
   | undefined;
 function browserAssets() {
-  return (assetsPromise ??= (async () => {
+  if (assetsPromise) return assetsPromise;
+  assetsPromise = (async () => {
     const compiled = await build({
       entryPoints: [path.join(here, "web/app.ts")],
       bundle: true,
@@ -76,7 +90,10 @@ function browserAssets() {
       html: await readFile(path.join(here, "web/index.html"), "utf8"),
       css: await readFile(path.join(here, "web/style.css")),
     };
-  })());
+  })();
+  // A failed build (e.g. a syntax error while developing) is retried.
+  assetsPromise.catch(() => (assetsPromise = undefined));
+  return assetsPromise;
 }
 
 export async function createReplayHandler(
@@ -86,6 +103,8 @@ export async function createReplayHandler(
     library?: boolean;
     /** Studio library root: agents connect to the workspace, not one demo. */
     workspaceRoot?: string;
+    /** The --host the service listens on (loopback names are always allowed). */
+    host?: string;
   } = {},
 ) {
   const basePath = options.basePath ?? "";
@@ -115,10 +134,17 @@ export async function createReplayHandler(
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; frame-src 'self' about: blob:; object-src 'none'; base-uri 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; frame-src 'self' about: blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
     );
     try {
+      if (!hostAllowed(req, options.host))
+        return json(res, { error: "Unknown host." }, 421);
       const url = new URL(req.url ?? "/", "http://localhost");
+      if (req.method === "GET" && vendor[url.pathname]) {
+        const [file, type] = vendor[url.pathname]!;
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return send(res, await readFile(file), type);
+      }
       if (req.method === "POST") {
         // Local write endpoints may only be called from this editor or a local CLI.
         const origin = req.headers.origin;
@@ -184,6 +210,8 @@ export async function createReplayHandler(
                 args: [path.join(here, "cli.ts"), "mcp", dir],
                 scope: "project",
               },
+          // Scene pages run scripts only in trusted folders.
+          trusted: scenesTrusted(dir),
           sourceBoundary:
             "Captured HTML is a recording artifact. Original source locations are available only when explicitly annotated by the app.",
         });
@@ -192,9 +220,9 @@ export async function createReplayHandler(
       if (req.method === "GET" && url.pathname === "/api/events")
         return send(
           res,
-          (await readFile(path.join(dir, "events.json"), "utf8")).replaceAll(
-            "/files/",
-            `${basePath}/files/`,
+          (await readFile(await safeFile(dir, "events.json"), "utf8")).replace(
+            assetUrl,
+            `${basePath}/files/assets/`,
           ),
           "application/json",
         );
@@ -224,6 +252,10 @@ export async function createReplayHandler(
       if (req.method === "POST" && url.pathname === "/api/export") {
         if (exportState.running)
           return json(res, { error: "An export is already running." }, 409);
+        // Claim the slot before any await, so a double click can't start two.
+        const previous = exportState;
+        exportState = { running: true, message: "Preparing saved replay…" };
+        try {
         const input = z
           .object({
             revision: z.string(),
@@ -233,7 +265,8 @@ export async function createReplayHandler(
           .strict()
           .parse(await body(req));
         const current = await loadBundle(dir);
-        if (current.revision !== input.revision)
+        if (current.revision !== input.revision) {
+          exportState = previous;
           return json(
             res,
             {
@@ -242,7 +275,7 @@ export async function createReplayHandler(
             },
             409,
           );
-        exportState = { running: true, message: "Preparing saved replay…" };
+        }
         const destination = path.join(dir, "exports", `export-${Date.now()}`);
         const job = import("./export.js")
           .then(({ exportReplay }) =>
@@ -272,6 +305,10 @@ export async function createReplayHandler(
           .finally(() => jobs.delete(job));
         jobs.add(job);
         return json(res, { ok: true }, 202);
+        } catch (error) {
+          exportState = previous;
+          throw error;
+        }
       }
       if (
         req.method === "GET" &&
@@ -465,23 +502,43 @@ export async function createReplayHandler(
         return json(res, { ok: true }, 202);
       }
       if (req.method === "GET" && url.pathname.startsWith("/files/")) {
-        const relative = decodeURIComponent(
-          url.pathname.slice("/files/".length),
+        // Normalise before the allow-list, so "scenes/..%2fproject.json"
+        // can't reach other project files.
+        const relative = path.posix.normalize(
+          decodeURIComponent(url.pathname.slice("/files/".length)),
         );
-        if (!/^(assets|audio|scenes)\//.test(relative))
+        if (
+          !/^(assets|audio|scenes)\//.test(relative) ||
+          relative.split("/").includes("..") ||
+          relative.includes("\0")
+        )
           return json(res, { error: "Unknown file." }, 404);
-        // Scene pages are project code (like tour files): inline scripts and
-        // styles run, but only local files load, so renders stay offline.
-        if (relative.startsWith("scenes/"))
+        const extension = path.extname(relative).toLowerCase();
+        if (relative.startsWith("scenes/")) {
+          // Scene pages are project code (like tour files): inline scripts and
+          // styles run, but only local files load, so renders stay offline. In
+          // folders that aren't trusted the editor sandboxes them (no scripts).
           res.setHeader(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'",
+            `default-src 'self'; script-src 'self'${scenesTrusted(dir) ? " 'unsafe-inline'" : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'self'`,
           );
+          if (!scenesTrusted(dir) && [".js", ".mjs"].includes(extension))
+            return json(res, { error: "Scene scripts are off for this folder." }, 403);
+        } else {
+          // Captured assets and audio are passive data: never scripts or
+          // pages, and inert even when opened directly.
+          if ([".js", ".mjs", ".html", ".htm", ".xhtml"].includes(extension))
+            return json(res, { error: "Unknown file." }, 404);
+          res.setHeader(
+            "Content-Security-Policy",
+            "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; font-src 'self' data:",
+          );
+        }
         const file = await safeFile(dir, relative);
         let data = await readFile(file);
         if (path.extname(file) === ".css" && basePath)
           data = Buffer.from(
-            data.toString().replaceAll("/files/", `${basePath}/files/`),
+            data.toString().replace(assetUrl, `${basePath}/files/assets/`),
           );
         const type = mime[path.extname(file)] ?? "application/octet-stream";
         res.setHeader("Accept-Ranges", "bytes");
@@ -524,7 +581,7 @@ export async function serveReplay(
   projectDir: string,
   options: { port?: number; host?: string } = {},
 ) {
-  const replay = await createReplayHandler(projectDir);
+  const replay = await createReplayHandler(projectDir, { host: options.host });
   const dir = replay.projectDir;
   const server = createServer(replay.handler);
   await new Promise<void>((resolve, reject) => {

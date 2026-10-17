@@ -173,6 +173,34 @@ describe.skipIf(!runnable)("desktop app", () => {
     if (shots) await page.screenshot({ path: path.join(shots, "worktrees.png") });
   }, 120_000);
 
+  test("folders open restricted until trusted", async () => {
+    const repo = await realpath(await tmp("dh-desktop-repo-"));
+    const { projectFixture } = await import("../studio/test-support.js");
+    const fixture = await projectFixture();
+    temp.push(fixture.root);
+    await cp(fixture.dir, path.join(repo, ".demohunter/replays/demo"), { recursive: true });
+    const sceneTrust = (page: import("playwright").Page) =>
+      page.evaluate(async () => {
+        const lib = await fetch("/api/library").then((r) => r.json());
+        const id = lib.recordings[0].id;
+        return (await fetch(`/projects/${id}/api/workspace`).then((r) => r.json())).trusted as boolean;
+      });
+    // Untrusted: scene scripts are off.
+    const first = await launch(await tmp("dh-desktop-data-"), [repo]);
+    await first.page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45_000 });
+    await first.page.locator(".recording-card").first().waitFor();
+    expect(await sceneTrust(first.page)).toBe(false);
+    await first.app.close();
+    app = undefined;
+    // Trusted (as after "Trust Folder…"): scene scripts run.
+    const trustedData = await tmp("dh-desktop-data-");
+    await writeFile(path.join(trustedData, "settings.json"), JSON.stringify({ recent: [], trusted: [repo] }));
+    const second = await launch(trustedData, [repo]);
+    await second.page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45_000 });
+    await second.page.locator(".recording-card").first().waitFor();
+    expect(await sceneTrust(second.page)).toBe(true);
+  }, 120_000);
+
   test("Studio stops when the app is force-killed", async () => {
     const userData = await tmp("dh-desktop-data-");
     const repo = await tmp("dh-desktop-repo-");
