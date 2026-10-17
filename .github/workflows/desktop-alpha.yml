@@ -118,7 +118,7 @@ jobs:
           3. Open a repository or folder with DemoHunter tours or captured demos (⌘O).
 
           **Needs**
-          - First launch downloads Chromium for rendering (about 150 MB, once).
+          - First launch downloads Chromium for rendering (about 270 MB, once).
           - Export needs ffmpeg: \`brew install ffmpeg\`.
           - Narration uses \`OPENAI_API_KEY\` or \`ELEVENLABS_API_KEY\` from your shell environment; nothing is stored by the app.
 

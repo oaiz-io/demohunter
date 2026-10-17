@@ -61,10 +61,17 @@ export function gitStatus(dir: string, maxAgeMs = 2500): Promise<GitStatus> {
           () => false,
         ),
       ]);
-      const changed = status
-        .split("\0")
-        .filter((entry) => entry.length > 3)
-        .map((entry) => entry.slice(3))
+      // -z entries are "XY path"; a rename/copy is followed by a bare
+      // original-path entry, which is skipped rather than clipped.
+      const entries = status.split("\0");
+      const paths: string[] = [];
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i]!;
+        if (entry.length < 4) continue;
+        paths.push(entry.slice(3));
+        if (entry[0] === "R" || entry[0] === "C") i++;
+      }
+      const changed = paths
         .filter((file) => !/(^|\/)\.(studio|history)\//.test(file))
         .filter(
           (file) =>

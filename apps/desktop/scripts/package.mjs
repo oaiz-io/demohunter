@@ -49,7 +49,8 @@ function copyTree(from, to, base = from) {
 // Studio runs TypeScript from source and imports packages/*/src directly.
 // Only files git tracks are bundled, so local .env files, logs or captures
 // in the checkout never end up in a download.
-const tracked = execFileSync("git", ["ls-files", "-z", "--", "apps/studio", "packages"], { cwd: repo })
+// The agent guide (MCP get_guide) ships with Studio.
+const tracked = execFileSync("git", ["ls-files", "-z", "--", "apps/studio", "packages", ".agents/skills/demohunter-replay"], { cwd: repo })
   .toString()
   .split("\0")
   .filter((rel) => rel && !skip(rel) && fs.existsSync(path.join(repo, rel)));

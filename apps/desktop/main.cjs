@@ -77,7 +77,13 @@ async function trustFolder() {
   });
   if (response !== 0) return false;
   save({ trusted: [...new Set([...(settings().trusted ?? []), target])] });
-  if (workspace === target) await openRepository(target);
+  if (workspace !== target) return true;
+  let returnTo;
+  try {
+    const current = new URL(window.webContents.getURL());
+    if (current.origin === studioOrigin) returnTo = current.pathname + current.search;
+  } catch {}
+  await openRepository(target, returnTo);
   return true;
 }
 function isDirectory(p) {
@@ -162,7 +168,7 @@ function ensureBrowser(dir) {
     if ((await hasBrowser()) !== false) return;
     const cliPath = playwrightCli();
     if (!cliPath) return;
-    if (dir) await showStatus(dir, undefined, false, "Downloading the browser Studio renders with (first run, about 150 MB)…");
+    if (dir) await showStatus(dir, undefined, false, "Downloading the browser Studio renders with (first run, about 270 MB)…");
     const result = await run([cliPath, "install", "chromium"]);
     if (result.code !== 0) {
       browserReady = undefined;
@@ -231,7 +237,7 @@ function showWelcome() {
   return window.loadURL("app://ui/welcome.html");
 }
 
-async function openRepository(dir) {
+async function openRepository(dir, returnTo) {
   dir = path.resolve(dir);
   // One entry per folder, however it was reached (symlinks, /tmp → /private/tmp).
   try {
@@ -244,13 +250,14 @@ async function openRepository(dir) {
   window.setTitle(`${path.basename(dir)} — ${NAME}`);
   window.setRepresentedFilename(dir);
   buildMenus();
-  await showStatus(dir);
   try {
+    await showStatus(dir);
     await ensureBrowser(dir);
     const url = await startStudio(dir);
     if (workspace === dir) {
       studioOrigin = new URL(url).origin;
-      await window.loadURL(url);
+      // After a restart (e.g. Trust Folder), come back to the same page.
+      await window.loadURL(returnTo ? new URL(returnTo, url).toString() : url);
     }
   } catch (error) {
     if (workspace === dir) await showStatus(dir, String(error.message ?? error));
@@ -294,6 +301,9 @@ function createWindow() {
   });
   if (settings().window?.maximized) window.maximize();
   if (!hidden) window.once("ready-to-show", () => window.show());
+  // Closing, quitting or switching projects must never be vetoed by the
+  // page: drafts are already flushed on pagehide.
+  window.webContents.on("will-prevent-unload", (event) => event.preventDefault());
   // Match the window background to the page, so resizing never flashes a
   // different colour at the edges.
   window.webContents.on("did-finish-load", () =>

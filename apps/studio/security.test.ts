@@ -110,6 +110,17 @@ describe("local service hardening", () => {
         expect(scriptSrc).not.toContain("'unsafe-inline'");
         expect((await fetch(app.url + "/files/scenes/kit.js")).status).toBe(403);
         expect((await fetch(app.url + "/api/workspace").then((r) => r.json())).trusted).toBe(false);
+        // Behaviour, not just headers: even opened directly, the script
+        // doesn't run (the response itself is sandboxed).
+        const { chromium } = await import("playwright");
+        const browser = await chromium.launch();
+        try {
+          const page = await browser.newPage();
+          await page.goto(app.url + "/files/scenes/intro.html");
+          expect(await page.evaluate(() => (window as any).ran ?? null).catch(() => null)).toBeNull();
+        } finally {
+          await browser.close();
+        }
       } finally {
         await app.close();
       }

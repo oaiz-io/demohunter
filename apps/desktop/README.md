@@ -8,7 +8,7 @@ Unsigned Apple-silicon builds are published as the rolling [`studio-desktop-alph
 
 1. Open the `.dmg` and drag **DemoHunter Studio** to Applications.
 2. It is signed ad hoc, not notarized: the first time, right-click the app → **Open** → **Open** (or System Settings → Privacy & Security → **Open Anyway**).
-3. First launch downloads Chromium for rendering (about 150 MB, once). Export needs ffmpeg (`brew install ffmpeg`). Narration reads `OPENAI_API_KEY` / `ELEVENLABS_API_KEY` from your login shell.
+3. First launch downloads Chromium for rendering (about 270 MB, once). Export needs ffmpeg (`brew install ffmpeg`). Narration reads `OPENAI_API_KEY` / `ELEVENLABS_API_KEY` from your login shell.
 
 ## From source
 

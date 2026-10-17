@@ -1367,6 +1367,30 @@ function renderExportReadiness(force = false): void {
         }
       : { mark: "ok", title: "All narration audio is current" },
   );
+  // Restricted folders export what the editor shows: scenes without scripts.
+  const scripted =
+    bundle.edits.clips.some((c) => c.kind === "scene") ||
+    !!bundle.edits.overlays?.length;
+  if (workspaceData.trusted === false && scripted) {
+    const trust = (window as { demohunterDesktop?: { trust?: () => unknown } })
+      .demohunterDesktop?.trust;
+    rows.push({
+      mark: "bad",
+      title: "Scene scripts are off for this folder",
+      detail: "Animated scenes and overlays export as static pages.",
+      ...(typeof trust === "function"
+        ? {
+            action: [
+              "Trust folder…",
+              () => {
+                $<HTMLDialogElement>("#export-dialog").close();
+                void trust();
+              },
+            ] as [string, () => void],
+          }
+        : {}),
+    });
+  }
   const open = bundle.comments.threads.filter(
     (t) => t.status === "open",
   ).length;

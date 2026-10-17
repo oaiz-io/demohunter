@@ -772,7 +772,8 @@ export async function mutateProject(
         ...(author ? { author: { ...author } } : {}),
         changes: describeChanges(before, after),
       });
-      await mkdir(path.join(dir, ".history"), { recursive: true });
+      // Runtime state: never a link, and kept out of git wherever the demo is.
+      await ensureIgnoredFolder(dir, ".history");
       await writeJson(
         path.join(dir, ".history/edits.json"),
         history.slice(-50),

@@ -2,7 +2,12 @@ import { readdir, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { activitySchema, type AgentActivity } from "./contract.js";
-import { ensureRealFolders, readProjectFile, writeJson } from "./storage.js";
+import {
+  ensureIgnoredFolder,
+  ensureRealFolders,
+  readProjectFile,
+  writeJson,
+} from "./storage.js";
 const labels: Record<string, string> = {
   get_selection: "Inspecting selection",
   get_html: "Reading captured HTML",
@@ -48,6 +53,7 @@ export async function beginActivity(
     updatedAt: new Date().toISOString(),
   };
   // `.studio` comes from the repository: never write through a link.
+  await ensureIgnoredFolder(dir, ".studio");
   const folder = await ensureRealFolders(dir, ".studio/activity");
   const file = path.join(folder, `${event.id}.json`);
   const save = async () => {

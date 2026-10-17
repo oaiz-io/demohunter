@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, realpath, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { scenesTrusted } from "./trust.js";
 import { loadBundle, atomicWrite, writeJson } from "./storage.js";
 import { openReplayRenderer, renderReplayFrame } from "./render.js";
 import { clipStart, isScene, totalDuration } from "./model.js";
@@ -21,7 +22,12 @@ export function studioCacheRoot(): string {
 }
 /** The folder for one project's derived images (not created). */
 export async function projectCacheFolder(dir: string): Promise<string> {
-  const id = createHash("sha256").update(await realpath(dir)).digest("hex");
+  // Restricted renders (scene scripts off) are cached apart, so trusting a
+  // folder re-renders its posters and thumbnails with scripts.
+  const real = await realpath(dir);
+  const id = createHash("sha256")
+    .update(scenesTrusted(real) ? real : `${real}\0restricted`)
+    .digest("hex");
   return path.join(studioCacheRoot(), "frames", id.slice(0, 24));
 }
 async function ensureCacheFolder(dir: string): Promise<string> {
