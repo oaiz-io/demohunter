@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DemoHunter Studio</title>
+    <link rel="stylesheet" href="app://ui/shell.css" />
+    <style>
+      main {
+        height: calc(100% - 52px);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 6vh 24px 40px;
+        overflow: auto;
+      }
+      .intro {
+        display: grid;
+        justify-items: center;
+        gap: 6px;
+        text-align: center;
+      }
+      .intro img {
+        width: 112px;
+        height: 112px;
+        margin-bottom: 10px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .tagline {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .version {
+        color: var(--muted);
+        font-size: 11px;
+        opacity: 0.8;
+      }
+      .actions {
+        margin: 28px 0 36px;
+      }
+      .recents {
+        width: min(560px, 100%);
+      }
+      .recents h2 {
+        margin: 0 0 8px 12px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .recent {
+        list-style: none;
+        margin: 0;
+        padding: 6px;
+        border-radius: 12px;
+        background: var(--paper);
+        border: 1px solid var(--line);
+      }
+      .recent li {
+        display: grid;
+        grid-template-columns: 28px 1fr auto;
+        align-items: center;
+        gap: 0 12px;
+        padding: 9px 10px;
+        border-radius: 8px;
+        cursor: default;
+      }
+      .recent li + li {
+        margin-top: 2px;
+      }
+      .recent li:hover,
+      .recent li:focus-visible {
+        background: var(--desk);
+        outline: none;
+      }
+      .recent .glyph {
+        grid-row: span 2;
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        display: grid;
+        place-items: center;
+        background: var(--desk);
+        border: 1px solid var(--line);
+        font: 600 12px "Geist", system-ui, sans-serif;
+        text-transform: uppercase;
+      }
+      .recent li:hover .glyph {
+        background: var(--highlight);
+        border-color: transparent;
+      }
+      .recent .name {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .recent .when {
+        grid-row: span 2;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .recent .path {
+        color: var(--muted);
+        font-size: 11px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .empty {
+        margin: 0;
+        padding: 28px 24px;
+        text-align: center;
+        color: var(--muted);
+        border: 1px dashed var(--line);
+        border-radius: 12px;
+      }
+      .drop {
+        position: fixed;
+        inset: 12px;
+        display: none;
+        place-items: center;
+        border: 2px dashed var(--agent);
+        border-radius: 14px;
+        background: rgb(47 91 234 / 0.06);
+        color: var(--agent);
+        font-weight: 600;
+        pointer-events: none;
+      }
+      body.dragging .drop {
+        display: grid;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="titlebar"></div>
+    <main>
+      <section class="intro">
+        <img src="app://ui/icon.png" alt="" />
+        <h1>DemoHunter Studio</h1>
+        <div class="tagline">Review and edit the demos your code records — across every worktree.</div>
+        <div class="version mono" id="version"></div>
+      </section>
+      <div class="actions">
+        <button class="button" id="open">Open repository or folder… <kbd>⌘O</kbd></button>
+      </div>
+      <section class="recents" aria-label="Recent repositories" id="recents">
+        <h2>Recent</h2>
+        <ul class="recent" id="recent"></ul>
+      </section>
+    </main>
+    <div class="drop">Drop a folder to open it</div>
+    <script src="app://ui/welcome.js"></script>
+  </body>
+</html>

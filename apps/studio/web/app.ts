@@ -58,7 +58,11 @@ const motionAudio = new MotionAudio();
 const elementOverrides = new ElementOverrides();
 let elementEditor: ElementEditor | undefined;
 initializeShell();
-if ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+if (
+  "demohunterDesktop" in window ||
+  "__TAURI__" in window ||
+  "__TAURI_INTERNALS__" in window
+)
   document.body.classList.add("desktop");
 // In the library the logo and "Demos" go back to the repo's demo list.
 {
@@ -134,7 +138,47 @@ for (const [id, file] of [
   $<HTMLAnchorElement>(`#${id}`).href = projectUrl(
     `/api/export/download/${file}`,
   );
+/** In the desktop app exports open in place instead of downloading. */
+const desktopFiles = (
+  window as {
+    demohunterDesktop?: {
+      openFile(file: string): Promise<unknown>;
+      showFile(file: string): Promise<unknown>;
+    };
+  }
+).demohunterDesktop;
+let exportDirectory: string | undefined;
+if (desktopFiles?.openFile) {
+  $("#export-video").textContent = "Open video";
+  for (const [id, file] of [
+    ["export-video", "video.mp4"],
+    ["export-captions", "captions.vtt"],
+    ["export-manifest", "manifest.json"],
+  ] as const)
+    $(`#${id}`).onclick = (event) => {
+      if (!exportDirectory) return;
+      event.preventDefault();
+      void desktopFiles.openFile(`${exportDirectory}/${file}`);
+    };
+  const reveal = document.createElement("a");
+  reveal.className = "quiet small-text";
+  reveal.href = "#";
+  reveal.textContent = "Show in Finder";
+  reveal.onclick = (event) => {
+    event.preventDefault();
+    if (exportDirectory)
+      void desktopFiles.showFile(`${exportDirectory}/video.mp4`);
+  };
+  $("#export-downloads").append(reveal);
+}
 const renderMode = new URLSearchParams(location.search).get("render") === "1";
+// Leaving a demo marks it as looked at, so agent changes made while it was
+// open don't show up as "Updated" in the library.
+const libraryDemo = /^\/projects\/([a-f0-9]{16})\//.exec(location.pathname)?.[1];
+if (libraryDemo && !renderMode)
+  addEventListener("pagehide", () =>
+    navigator.sendBeacon("/api/seen", JSON.stringify({ id: libraryDemo })),
+  );
 let saveQueue = Promise.resolve();
 function queued<T>(work: () => Promise<T>): Promise<T> {
   const result = saveQueue.catch(() => {}).then(work);
@@ -405,7 +449,12 @@ function drawEffects(): void {
       `${selection!.tag} · ${selection!.elementRef ?? `node ${selection!.nodeId}`}`;
   }
   elementEditor?.draw(!$("#panel-edit").hidden && !playing && !renderMode);
-  placeToolbar((!!box || !!elementEditor?.rect()) && !playing && !renderMode);
+  placeToolbar(
+    (!!box || !!elementEditor?.rect()) &&
+      !playing &&
+      !renderMode &&
+      !elementEditor?.editingText,
+  );
   const hoverBox = hoverRef ? boxOf({ ref: hoverRef }) : undefined;
   $("#hover-box").hidden = !hoverBox;
   if (hoverBox)
@@ -761,6 +810,9 @@ async function reload(): Promise<void> {
       api,
       reload,
       update,
+      pause: () => setPlaying(false),
+      editableOf,
+      textLayers,
     });
     renderPanels();
     resize();
@@ -894,6 +946,65 @@ function selectEditable(entry: Editable): void {
   tab("edit");
   drawEffects();
 }
+/** The editable target for a node in the recording or a scene page. */
+function editableOf(node: Element): Editable | undefined {
+  if (["HTML", "BODY"].includes(node.tagName)) return undefined;
+  const layer = sceneLayer
+    .documents(false)
+    .find((l) => l.document === node.ownerDocument);
+  if (layer)
+    return {
+      target: { scene: layer.src, selector: sceneSelector(node) },
+      label: `${node.localName} · ${(node.textContent?.trim() || node.id || layer.src).slice(0, 70)}`,
+    };
+  if (!replayer || node.ownerDocument !== replayer.iframe.contentDocument)
+    return undefined;
+  const nodeId = replayer.getMirror().getId(node),
+    documentId = currentDocumentId();
+  const record = workspaceData?.index.elements.find(
+    (e) => e.nodeId === nodeId && e.documentId === documentId,
+  );
+  return record
+    ? {
+        target: { ref: record.ref },
+        label: `${record.tag} · ${record.text.slice(0, 70) || record.selector}`,
+      }
+    : undefined;
+}
+/** Documents visible on the current frame, top-most first. */
+function textLayers(): Document[] {
+  const docs: Document[] = [];
+  for (const layer of sceneLayer.documents()) {
+    docs.push(layer.document);
+    if (layer.iframe.classList.contains("scene")) return docs;
+  }
+  const doc = replayer?.iframe.contentDocument;
+  return doc ? [...docs, doc] : docs;
+}
+/** The deepest element under the pointer, in its own document's pixels. */
+function pickText(
+  event: MouseEvent,
+): { node: Element; x: number; y: number } | undefined {
+  for (const layer of sceneLayer.documents()) {
+    const rect = layer.iframe.getBoundingClientRect();
+    const x =
+        ((event.clientX - rect.left) * layer.iframe.clientWidth) / rect.width,
+      y =
+        ((event.clientY - rect.top) * layer.iframe.clientHeight) / rect.height;
+    const node = layer.document.elementFromPoint(x, y);
+    if (node && !["HTML", "BODY"].includes(node.tagName)) return { node, x, y };
+    if (layer.iframe.classList.contains("scene")) return undefined;
+  }
+  const doc = replayer?.iframe.contentDocument;
+  if (!doc) return undefined;
+  const rect = replayer!.iframe.getBoundingClientRect(),
+    x = (event.clientX - rect.left) / (baseScale * cameraScale),
+    y = (event.clientY - rect.top) / (baseScale * cameraScale);
+  const node = doc.elementFromPoint(x, y);
+  return node && !["HTML", "BODY"].includes(node.tagName)
+    ? { node, x, y }
+    : undefined;
+}
 function pickEditable(event: MouseEvent): Editable | undefined {
   for (const layer of sceneLayer.documents()) {
     const rect = layer.iframe.getBoundingClientRect();
@@ -949,6 +1060,10 @@ $("#select-layer").onclick = (event: MouseEvent) => {
   }
 };
 $("#select-layer").ondblclick = (event: MouseEvent) => {
+  if (interactionMode !== "select" || renderMode) return;
+  // Rewrite the double-clicked text in place; otherwise focus the panel.
+  const hit = pickText(event);
+  if (hit && elementEditor?.editText(hit.node, hit)) return;
   const entry = pickEditable(event);
   if (entry) {
     selectEditable(entry);
@@ -956,6 +1071,8 @@ $("#select-layer").ondblclick = (event: MouseEvent) => {
   }
 };
 $("#select-layer").onmousemove = (event: MouseEvent) => {
+  if (elementEditor)
+    elementEditor.pointer = { x: event.clientX, y: event.clientY };
   const node = pickNode(event);
   const nodeId = node && replayer?.getMirror().getId(node);
   hoverRef = workspaceData?.index.elements.find(
@@ -964,6 +1081,7 @@ $("#select-layer").onmousemove = (event: MouseEvent) => {
 };
 $("#select-layer").onmouseleave = () => {
   hoverRef = undefined;
+  if (elementEditor) elementEditor.pointer = undefined;
 };
 /** Bring an element into view without selecting it (Show on canvas). */
 function showElement(ref: string): void {
@@ -1275,6 +1393,7 @@ async function poll(): Promise<void> {
       $("#export-status").textContent =
         status.export.error ?? status.export.message;
       $("#export-downloads").hidden = !status.export.directory;
+      exportDirectory = status.export.directory;
       const progress = /Rendering (\d+)s \/ (\d+)s/.exec(status.export.message);
       $("#export-progress").hidden = !status.export.running;
       $("#export-progress").style.setProperty(

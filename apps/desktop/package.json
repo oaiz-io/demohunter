@@ -1,0 +1,20 @@
+{
+  "name": "@demohunter/desktop",
+  "productName": "DemoHunter Studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DemoHunter Studio as a desktop app (experimental Electron shell).",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "bun test desktop.test.ts",
+    "build": "node scripts/build-app.mjs"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0"
+  },
+  "optionalDependencies": {
+    "@oven/bun-darwin-aarch64": "1.4.3",
+    "@oven/bun-darwin-x64": "1.4.3"
+  }
+}
