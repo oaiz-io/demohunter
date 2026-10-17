@@ -152,6 +152,9 @@ describe.skipIf(!runnable)("desktop app", () => {
     const previous = process.env.XDG_CACHE_HOME;
     process.env.XDG_CACHE_HOME = cacheHome;
     const { projectCacheFolder } = await import("../studio/poster.js");
+    // The app opens this untrusted folder restricted, which caches apart.
+    const { restrictFolder } = await import("../studio/trust.js");
+    restrictFolder(feature);
     const folder = await projectCacheFolder(demo);
     await mkdir(folder, { recursive: true, mode: 0o700 });
     if (previous === undefined) delete process.env.XDG_CACHE_HOME;
