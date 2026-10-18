@@ -50,7 +50,7 @@ test("captures editable DOM replay and exports saved narration and video without
     }
     res.setHeader("Content-Type", "text/html");
     res.end(
-      `<html><head><link rel="stylesheet" href="/theme.css"><link rel="icon" href="/favicon.png"></head><body><h1>${req.url === "/second" ? "Second document" : "Original heading"}</h1><button onclick="document.querySelector('h1').textContent='Changed heading'">Change</button></body></html>`,
+      `<html><head><link rel="stylesheet" href="/theme.css"><link rel="icon" href="/favicon.png"></head><body><h1>${req.url === "/second" ? "Second document" : "Original heading"}</h1><button onclick="document.querySelector('h1').textContent='Changed heading'">Change</button><textarea aria-label="Message"></textarea><input type="password" aria-label="Password"></body></html>`,
     );
   });
   await new Promise<void>((resolve) => app.listen(0, "127.0.0.1", resolve));
@@ -78,6 +78,8 @@ test("captures editable DOM replay and exports saved narration and video without
           title: "Capture test",
           async run({ page, goto }) {
             await page.getByRole("button", { name: "Change" }).click();
+            await page.getByLabel("Message").fill("Typed in the demo");
+            await page.getByLabel("Password").fill("hunter2-secret");
             await page.waitForTimeout(80);
             await goto("/second");
             await page.waitForTimeout(80);
@@ -92,6 +94,9 @@ test("captures editable DOM replay and exports saved narration and video without
     expect(eventText).toContain("Original heading");
     expect(eventText).toContain("Changed heading");
     expect(eventText).toContain("Second document");
+    // What a tour types is demo content; passwords stay masked.
+    expect(eventText).toContain("Typed in the demo");
+    expect(eventText).not.toContain("hunter2-secret");
     expect(eventText).toContain("/files/assets/");
     // Declared but unused fonts are bundled; unfetched icons are dropped.
     expect(eventText).not.toContain(`127.0.0.1:${port}/unused.woff2`);

@@ -184,7 +184,8 @@ export async function captureReplay(
           inlineStylesheet: true,
           inlineImages: true,
           collectFonts: true,
-          maskAllInputs: true,
+          // Typed text is part of the demo; only passwords are masked.
+          maskInputOptions: { password: true },
           recordCanvas: false,
           // Smooth scrolls replay smoothly (rrweb's default is 100 ms).
           sampling: { scroll: 16 },
@@ -213,7 +214,7 @@ export async function captureReplay(
             inlineStylesheet: true,
             inlineImages: true,
             collectFonts: true,
-            maskAllInputs: true,
+            maskInputOptions: { password: true },
             recordCanvas: false,
             sampling: { scroll: 16 },
           });
