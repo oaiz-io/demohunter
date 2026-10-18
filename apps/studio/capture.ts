@@ -106,9 +106,11 @@ export async function captureReplay(
           css: contentType === "text/css",
         });
       } catch {
-        warnings.add(
-          `Could not bundle asset: ${new URL(response.url()).pathname}`,
-        );
+        // A repeat request after navigation has no body; the first copy counts.
+        if (!assets.has(response.url()))
+          warnings.add(
+            `Could not bundle asset: ${new URL(response.url()).pathname}`,
+          );
       }
     })();
     pending.add(task);
@@ -284,6 +286,9 @@ export async function captureReplay(
     if (!events.some((event) => event.type === 2))
       throw new Error("No DOM snapshot was captured.");
 
+    // A failed repeat may finish before the copy that succeeded.
+    for (const url of assets.keys())
+      warnings.delete(`Could not bundle asset: ${new URL(url).pathname}`);
     const replacements = [...assets].sort(([a], [b]) => b.length - a.length);
     const rewrite = (text: string): string =>
       replacements.reduce(
