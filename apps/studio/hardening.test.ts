@@ -1025,17 +1025,17 @@ test("narration audio is copied beside the target and renamed, never through a l
     );
     expect(await readdir(outside)).toEqual([]);
     await rm(path.join(dir, "audio"));
-    // The destination file is a link to a file elsewhere.
+    // The destination file (named for the segment) is a link elsewhere.
     await mkdir(path.join(dir, "audio"));
     await writeFile(path.join(outside, "victim.wav"), "keep");
     await symlink(
       path.join(outside, "victim.wav"),
-      path.join(dir, "audio/key-Thesameamount.wav"),
+      path.join(dir, "audio/n1-key-Thesamea.wav"),
     );
     // (The linked name makes the fingerprint read it as "not a file": fine.)
     expect((await regenerateNarration(dir, { resolve })).generated).toBe(1);
     expect(await readFile(path.join(outside, "victim.wav"), "utf8")).toBe("keep");
-    const placed = await lstat(path.join(dir, "audio/key-Thesameamount.wav"));
+    const placed = await lstat(path.join(dir, "audio/n1-key-Thesamea.wav"));
     expect(placed.isFile()).toBe(true);
     expect(placed.size).toBe(wavBytes().length);
     expect(

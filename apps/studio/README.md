@@ -66,7 +66,7 @@ The [agent skill](../../.agents/skills/demohunter-replay/SKILL.md) and each new 
 
 ## Narration and export
 
-Edit transcript cards, see real waveforms, and regenerate a segment or all speech. Voice settings and timing live in project.json and narration.json (or go through your agent). Old speech is marked stale and suppressed. Provider settings live in project.json; API keys come from OPENAI_API_KEY/ELEVENLABS_API_KEY in the service environment only. Synthesis reuses DemoHunter's validated cache (`<workspace>/.demohunter/cache` by default, or `--cache-dir`); complete cache hits work offline. Sample flite audio is clearly labeled.
+Edit transcript cards, see real waveforms, and regenerate a segment or all speech. Voice settings and timing live in project.json and narration.json (or go through your agent). Each segment's speech is its own file, `audio/<segment-id>-<key>.mp3`, so one line can be found, played or replaced on its own; export stitches them. Old speech is marked stale and suppressed. Provider settings live in project.json; API keys come from OPENAI_API_KEY/ELEVENLABS_API_KEY in the service environment only. Synthesis reuses DemoHunter's validated cache (`<workspace>/.demohunter/cache` by default, or `--cache-dir`); complete cache hits work offline. Sample flite audio is clearly labeled.
 
 Playback waits for active speech to load before advancing the timeline. Small audio timing differences use a gradual speed correction; timeline seeks reposition speech once. Removed or stale speech stops immediately. If the browser blocks audio, click Play again to retry.
 

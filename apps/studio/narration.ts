@@ -61,12 +61,20 @@ export async function regenerateNarration(
           },
         },
       });
-      const extension = path.extname(resolved.audioPath) || ".mp3";
-      const audioPath = `audio/${resolved.cacheKey}${extension}`;
+      // Provider formats name the cache file (".mp3_44100_128"); keep the
+      // container so players and the browser recognise it.
+      const extension =
+        /^\.(mp3|wav|opus|ogg|aac|flac|pcm|m4a)/i.exec(path.extname(resolved.audioPath))?.[0].toLowerCase() ??
+        ".mp3";
+      // One file per segment, named for it so a single line is easy to find,
+      // listen to or replace; export stitches them. The key keeps each take
+      // distinct, so a stale file never shadows the current one.
+      const name = `${safeName(segment.id)}-${resolved.cacheKey.slice(0, 12)}${extension}`;
+      const audioPath = `audio/${name}`;
       await copyIntoFolder(
         resolved.audioPath,
         await ensureRealFolders(dir, "audio"),
-        `${resolved.cacheKey}${extension}`,
+        name,
       );
       // Merge just this result into the latest files. Never overwrite concurrent agent edits.
       await mutateProject(
@@ -126,6 +134,8 @@ export async function regenerateNarration(
     await lock.release();
   }
 }
+const safeName = (id: string) =>
+  id.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 60) || "segment";
 /** Copy to a fresh temp file beside the target, then rename into place. A
  * plain copyFile follows a symlink committed at the destination name and would
  * overwrite whatever it points to; rename replaces the link itself. */
