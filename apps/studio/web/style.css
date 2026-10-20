@@ -2873,6 +2873,51 @@ body.inline-text-editing #stage iframe.inline-text-frame {
   padding: 12px 16px;
   border-bottom: 1px solid var(--color-line);
 }
+.agent-roster:has(+ .agent-setup:not([hidden])) {
+  border-bottom: 0;
+  padding-bottom: 6px;
+}
+/* Where the agent works, and its model and mode. */
+.agent-setup {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px 10px;
+  border-bottom: 1px solid var(--color-line);
+}
+.agent-place {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-micro);
+  color: var(--color-graphite);
+}
+.agent-choice select {
+  max-width: 140px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper);
+  color: var(--color-ink-2);
+  font: 500 var(--text-micro) var(--font-sans);
+  cursor: pointer;
+}
+.agent-choice select:focus-visible {
+  outline: 2px solid var(--color-agent);
+  outline-offset: 1px;
+}
+.agent-notice-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.agent-empty-trust .button {
+  margin-top: 8px;
+}
 .agent-roster:empty {
   display: none;
 }
@@ -3128,7 +3173,7 @@ body.inline-text-editing #stage iframe.inline-text-frame {
   font-size: var(--text-micro);
   color: var(--color-graphite);
 }
-.agent-notice.error {
+.agent-notice.is-error {
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   background: var(--color-correction-soft);

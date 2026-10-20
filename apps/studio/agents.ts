@@ -1,12 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
+import { accessSync, constants as fsConstants } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import * as acp from "@agentclientprotocol/sdk";
 import { ensureIgnoredFolder, writeJson } from "./storage.js";
+import { openTerminal, type TerminalResult } from "./terminal.js";
 
 /**
  * Agents running inside Studio, over the Agent Client Protocol. Studio starts
@@ -32,9 +34,66 @@ const ADAPTERS: Adapter[] = [
   {
     kind: "codex",
     name: "Codex",
-    entry: () => packageFile("@zed-industries/codex-acp", "bin/codex-acp.js"),
+    entry: () => packageFile("@agentclientprotocol/codex-acp", "dist/index.js"),
   },
 ];
+
+/** An executable on the person's PATH, if there is one. */
+function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
+  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+    const file = path.join(dir, name);
+    try {
+      accessSync(file, fsConstants.X_OK);
+      return file;
+    } catch {}
+  }
+}
+/** The person's environment for an agent. Codex runs the person's own
+ * `codex` when they have one, so it matches their login, config and models
+ * (the adapter's bundled copy can lag behind them). */
+function agentEnv(kind: AgentKind): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  if (kind === "codex" && !env.CODEX_PATH) {
+    const own = onPath("codex", env);
+    if (own) env.CODEX_PATH = own;
+  }
+  return env;
+}
+
+/** A choice the agent offers for its session: the model or the mode. */
+export type AgentOption = {
+  id: string;
+  name: string;
+  category: "model" | "mode";
+  current: string;
+  choices: { value: string; name: string; description?: string }[];
+};
+function readOptions(raw: unknown): AgentOption[] {
+  if (!Array.isArray(raw)) return [];
+  const options: AgentOption[] = [];
+  for (const o of raw as Record<string, unknown>[]) {
+    const category = o.category === "model" || o.id === "model" ? "model" : o.category === "mode" || o.id === "mode" ? "mode" : undefined;
+    if (!category || o.type !== "select" || typeof o.id !== "string" || !Array.isArray(o.options)) continue;
+    // Options can be grouped; flatten the groups.
+    const flat = (o.options as Record<string, unknown>[]).flatMap((c) =>
+      Array.isArray(c.options) ? (c.options as Record<string, unknown>[]) : [c],
+    );
+    options.push({
+      id: o.id,
+      name: typeof o.name === "string" ? o.name : o.id,
+      category,
+      current: String(o.currentValue ?? ""),
+      choices: flat
+        .filter((c) => typeof c.value === "string")
+        .map((c) => ({
+          value: c.value as string,
+          name: typeof c.name === "string" ? c.name : (c.value as string),
+          ...(typeof c.description === "string" ? { description: c.description } : {}),
+        })),
+    });
+  }
+  return options;
+}
 /**
  * DemoHunter tools that only read (their readOnlyHint), asked from Studio's
  * own MCP server. Agents use these without stopping to ask; anything that
@@ -64,15 +123,21 @@ function readOnlyTools(root: string): Promise<Set<string>> {
     return new Set<string>();
   }));
 }
-/** "mcp__demohunter__get_guide" (Claude) or "demohunter.get_guide" → "get_guide". */
+/** "mcp__demohunter__get_guide" (Claude), "mcp.demohunter.get_guide" (Codex)
+ * or "demohunter.get_guide" → "get_guide". */
 function demoToolName(call: acp.ToolCallUpdate): string | undefined {
   const meta = (call._meta as { claudeCode?: { toolName?: unknown } } | undefined)?.claudeCode?.toolName;
   const name = typeof meta === "string" ? meta : (call.title ?? "");
-  return /^(?:mcp__demohunter__|demohunter[./:])([a-z0-9_]+)$/i.exec(name.trim())?.[1];
+  return /^(?:mcp__demohunter__|(?:mcp\.)?demohunter[./:])([a-z0-9_]+)$/i.exec(name.trim())?.[1];
 }
 
 /** Tests point a kind at a scripted agent. */
 const overrides = new Map<AgentKind, string>();
+/** Tests record terminal launches instead of opening Terminal. */
+let terminalLauncher: ((script: string) => Promise<unknown>) | undefined;
+export function useTerminalLauncher(launch: ((script: string) => Promise<unknown>) | undefined) {
+  terminalLauncher = launch;
+}
 export function useAdapterScript(kind: AgentKind, script: string | undefined) {
   if (script) overrides.set(kind, script);
   else overrides.delete(kind);
@@ -107,7 +172,15 @@ export type AgentEvent =
       options: { optionId: string; name: string; kind: string }[];
       chosen?: string;
     }
-  | { seq: number; at: string; type: "notice"; text: string; tone?: "error" }
+  | {
+      seq: number;
+      at: string;
+      type: "notice";
+      text: string;
+      tone?: "error";
+      /** The agent needs the person to sign in; the panel offers it. */
+      signIn?: boolean;
+    }
   | { seq: number; at: string; type: "done"; stopReason: string };
 
 export type AgentStatus =
@@ -121,7 +194,8 @@ export type AgentStatus =
 /** What the editor's stream receives: a new or updated event, or a status. */
 export type AgentMessage =
   | { type: "event"; event: AgentEvent }
-  | { type: "status"; status: AgentStatus };
+  | { type: "status"; status: AgentStatus }
+  | { type: "options"; options: AgentOption[] };
 
 export type AgentSummary = {
   id: string;
@@ -130,6 +204,8 @@ export type AgentSummary = {
   root: string;
   status: AgentStatus;
   startedAt: string;
+  /** Model and mode choices the agent offers, with the current ones. */
+  options: AgentOption[];
 };
 
 type Pending = {
@@ -151,6 +227,7 @@ class AgentSession {
   private queue: Promise<unknown> = Promise.resolve();
   private stderr = "";
   private tools = new Map<string, Extract<AgentEvent, { type: "tool" }>>();
+  options: AgentOption[] = [];
 
   constructor(
     readonly adapter: Adapter,
@@ -166,6 +243,7 @@ class AgentSession {
       root: this.root,
       status: this.status,
       startedAt: this.startedAt,
+      options: this.options,
     };
   }
   subscribe(listener: (message: AgentMessage) => void) {
@@ -195,13 +273,13 @@ class AgentSession {
     for (const listener of this.listeners) listener({ type: "status", status });
   }
 
-  async start(): Promise<void> {
+  async start(preferred: { model?: string; mode?: string } = {}): Promise<void> {
     const entry = overrides.get(this.adapter.kind) ?? this.adapter.entry();
     // The agent runs as the person, in the demo's worktree, with their own
-    // environment (login, PATH, API keys) — Studio adds nothing to it.
+    // environment (login, PATH, API keys).
     const child = spawn(process.execPath, [entry], {
       cwd: this.root,
-      env: process.env,
+      env: agentEnv(this.adapter.kind),
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
@@ -246,9 +324,16 @@ class AgentSession {
         ],
       });
       this.acpSession = session.sessionId;
+      this.options = readOptions((session as { configOptions?: unknown }).configOptions);
+      // The person's last choices for this worktree, when the agent still offers them.
+      for (const [category, value] of Object.entries(preferred) as ["model" | "mode", string | undefined][]) {
+        const option = this.options.find((o) => o.category === category);
+        if (value && option && option.current !== value && option.choices.some((c) => c.value === value))
+          await this.setOption(option.id, value).catch(() => {});
+      }
       this.setStatus("idle");
     } catch (error) {
-      this.add("notice", { text: startError(this.adapter, error, this.stderr), tone: "error" });
+      this.add("notice", { ...startError(this.adapter, error, this.stderr), tone: "error" });
       this.setStatus("error");
       child.kill();
       throw error;
@@ -285,6 +370,11 @@ class AgentSession {
         if (update.title) event.title = update.title;
         if (update.status) event.status = update.status;
         this.emit(event, false);
+        return;
+      }
+      case "config_option_update": {
+        this.options = readOptions((update as { configOptions?: unknown }).configOptions);
+        for (const listener of this.listeners) listener({ type: "options", options: this.options });
         return;
       }
       case "plan":
@@ -350,13 +440,31 @@ class AgentSession {
         });
         this.add("done", { stopReason: result.stopReason });
       } catch (error) {
-        this.add("notice", { text: message(error), tone: "error" });
+        // A signed-out agent starts fine and fails on its first message.
+        this.add(
+          "notice",
+          needsSignIn(message(error))
+            ? { text: `${this.adapter.name} isn't signed in. Sign in, then send your message again.`, tone: "error", signIn: true }
+            : { text: message(error), tone: "error" },
+        );
       } finally {
         if (this.status !== "error" && this.status !== "stopped")
           this.setStatus(this.pending.size ? "waiting" : "idle");
       }
     };
     this.queue = this.queue.then(run, run);
+  }
+
+  /** Choose a model or mode for this session. */
+  async setOption(id: string, value: string): Promise<AgentOption[]> {
+    if (!this.conn || !this.acpSession) throw new Error(`${this.adapter.name} isn't ready yet.`);
+    const option = this.options.find((o) => o.id === id);
+    if (!option) throw new Error(`${this.adapter.name} has no ${id} setting.`);
+    if (!option.choices.some((c) => c.value === value)) throw new Error(`Unknown ${option.name.toLowerCase()}: ${value}`);
+    const result = await this.conn.setSessionConfigOption({ sessionId: this.acpSession, configId: id, value });
+    this.options = readOptions(result.configOptions);
+    for (const listener of this.listeners) listener({ type: "options", options: this.options });
+    return this.options;
   }
 
   async cancel() {
@@ -379,16 +487,57 @@ class AgentSession {
 function message(error: unknown) {
   return error instanceof Error ? error.message : typeof error === "object" && error && "message" in error ? String((error as { message: unknown }).message) : String(error);
 }
+const needsSignIn = (text: string) => /auth|log ?in|sign.?in|credential|api key|unauthori[sz]ed|401/i.test(text);
 function startError(adapter: Adapter, error: unknown, stderr: string) {
-  const text = `${message(error)}\n${stderr}`;
-  if (/auth|login|sign.?in|credential|api key/i.test(text))
-    return `${adapter.name} isn't signed in. Run \`${adapter.kind === "claude" ? "claude" : "codex"}\` once in a terminal to sign in, then start it again.`;
-  return `Couldn't start ${adapter.name}: ${message(error)}`;
+  if (needsSignIn(`${message(error)}\n${stderr}`))
+    return {
+      text: `${adapter.name} isn't signed in. Sign in (or run \`${adapter.kind === "claude" ? "claude" : "codex"}\` once in a terminal), then start it again.`,
+      signIn: true,
+    };
+  return { text: `Couldn't start ${adapter.name}: ${message(error)}` };
+}
+
+/** The command line for an agent in a terminal: its own sign-in, or the
+ * agent itself in the worktree with Studio's MCP server and the chosen model. */
+export function terminalCommand(
+  kind: AgentKind,
+  root: string,
+  purpose: "signin" | "run",
+  model?: string,
+): string[] {
+  const env = agentEnv(kind);
+  const mcp = { command: process.execPath, args: [path.join(here, "cli.ts"), "mcp", root] };
+  if (kind === "claude") {
+    // The adapter's --cli runs the Claude Code it ships with, so this works
+    // without a separate install; it shares the person's ~/.claude login.
+    const claude = [process.execPath, ADAPTERS[0]!.entry(), "--cli"];
+    if (purpose === "signin") return [...claude, "auth", "login", "--claudeai"];
+    return [
+      ...claude,
+      ...(model && model !== "default" ? ["--model", model] : []),
+      "--mcp-config",
+      JSON.stringify({ mcpServers: { demohunter: { ...mcp, env: { DEMOHUNTER_AGENT_NAME: "Claude Code" } } } }),
+    ];
+  }
+  const codex = env.CODEX_PATH
+    ? [env.CODEX_PATH]
+    : [process.execPath, createRequire(ADAPTERS[1]!.entry()).resolve("@openai/codex/bin/codex.js")];
+  if (purpose === "signin") return [...codex, "login"];
+  return [
+    ...codex,
+    ...(model ? ["-m", model] : []),
+    "-c",
+    `mcp_servers.demohunter.command=${JSON.stringify(mcp.command)}`,
+    "-c",
+    `mcp_servers.demohunter.args=${JSON.stringify(mcp.args)}`,
+  ];
 }
 
 /** All agent sessions of one Studio service. */
 export class AgentHub {
   private sessions = new Map<string, AgentSession>();
+  /** Starts in flight, so a warm-up and a click share one session. */
+  private starting = new Map<string, Promise<AgentSummary>>();
 
   kinds() {
     return ADAPTERS.map((a) => {
@@ -411,7 +560,12 @@ export class AgentHub {
     return session;
   }
   /** One running session per worktree and agent; reuses a live one. */
-  async start(kind: AgentKind, root: string, restricted: boolean): Promise<AgentSummary> {
+  async start(
+    kind: AgentKind,
+    root: string,
+    restricted: boolean,
+    preferred: { model?: string; mode?: string } = {},
+  ): Promise<AgentSummary> {
     if (restricted)
       throw Object.assign(
         new Error("Agents run code in this folder. Trust the folder first, then start the agent."),
@@ -421,6 +575,9 @@ export class AgentHub {
       (s) => s.adapter.kind === kind && s.root === root && !["stopped", "error"].includes(s.status),
     );
     if (live) return live.summary();
+    const key = `${kind}\0${root}`;
+    const inFlight = this.starting.get(key);
+    if (inFlight) return inFlight;
     const adapter = ADAPTERS.find((a) => a.kind === kind);
     if (!adapter) throw new Error(`Unknown agent: ${kind}`);
     const session = new AgentSession(adapter, root, {
@@ -428,16 +585,43 @@ export class AgentHub {
       args: [path.join(here, "cli.ts"), "mcp", root],
     });
     this.sessions.set(session.id, session);
-    await session.start();
-    return session.summary();
+    const started = session.start(preferred).then(() => session.summary());
+    this.starting.set(key, started);
+    try {
+      return await started;
+    } finally {
+      this.starting.delete(key);
+    }
+  }
+  /** Open a terminal in the worktree for an agent: sign in, or run it there. */
+  terminal(kind: AgentKind, root: string, restricted: boolean, purpose: "signin" | "run", model?: string): Promise<TerminalResult> {
+    if (restricted)
+      throw Object.assign(new Error("Agents run code in this folder. Trust the folder first."), { status: 403 });
+    if (!ADAPTERS.some((a) => a.kind === kind)) throw new Error(`Unknown agent: ${kind}`);
+    return openTerminal(root, terminalCommand(kind, root, purpose, model), terminalLauncher);
   }
   stopAll() {
     for (const s of this.sessions.values()) s.stop();
   }
 }
 
-/** Per-worktree agent preferences (auto-send notes, preferred agent). */
-export type AgentSettings = { autoSendNotes: boolean; agent: AgentKind };
+/** Per-worktree agent preferences: auto-send notes, the preferred agent, and
+ * each agent's last model and mode. */
+export type AgentSettings = {
+  autoSendNotes: boolean;
+  agent: AgentKind;
+  models: Partial<Record<AgentKind, string>>;
+  modes: Partial<Record<AgentKind, string>>;
+};
+const choiceMap = (value: unknown): Partial<Record<AgentKind, string>> => {
+  const out: Partial<Record<AgentKind, string>> = {};
+  if (value && typeof value === "object")
+    for (const kind of ["claude", "codex"] as const) {
+      const v = (value as Record<string, unknown>)[kind];
+      if (typeof v === "string" && v.length <= 200) out[kind] = v;
+    }
+  return out;
+};
 const settingsFile = (root: string) => path.join(root, ".demohunter", "studio", "agents.json");
 export async function readAgentSettings(root: string): Promise<AgentSettings> {
   try {
@@ -445,9 +629,11 @@ export async function readAgentSettings(root: string): Promise<AgentSettings> {
     return {
       autoSendNotes: value.autoSendNotes === true,
       agent: value.agent === "codex" ? "codex" : "claude",
+      models: choiceMap(value.models),
+      modes: choiceMap(value.modes),
     };
   } catch {
-    return { autoSendNotes: false, agent: "claude" };
+    return { autoSendNotes: false, agent: "claude", models: {}, modes: {} };
   }
 }
 export async function writeAgentSettings(root: string, settings: AgentSettings) {

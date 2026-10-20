@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { promisify } from "node:util";
 import { z } from "zod";
 import {
   AgentHub,
@@ -10,6 +12,21 @@ import {
 import type { LocalLibrary } from "./library.js";
 import { loadBundle } from "./storage.js";
 import { scenesTrusted } from "./trust.js";
+
+const run = promisify(execFile);
+const branches = new Map<string, { at: number; branch?: string }>();
+/** The worktree's branch, read-only and cached briefly (the panel polls). */
+async function branchOf(root: string): Promise<string | undefined> {
+  const cached = branches.get(root);
+  if (cached && Date.now() - cached.at < 10_000) return cached.branch;
+  let branch: string | undefined;
+  try {
+    const { stdout } = await run("git", ["-C", root, "rev-parse", "--abbrev-ref", "HEAD"], { timeout: 3000 });
+    branch = stdout.trim() || undefined;
+  } catch {}
+  branches.set(root, { at: Date.now(), branch });
+  return branch;
+}
 
 /** HTTP surface of the in-Studio agents (library service, same origin). */
 export async function handleAgentRoute(
@@ -41,6 +58,9 @@ export async function handleAgentRoute(
       return (
         json({
           root,
+          // Where agents run: the repository checkout or worktree of this demo.
+          // Restricted folders get no git calls.
+          place: { name: path.basename(root), ...(trusted ? { branch: await branchOf(root) } : {}) },
           trusted,
           kinds: hub.kinds(),
           sessions: hub.list(root),
@@ -54,7 +74,16 @@ export async function handleAgentRoute(
         .object({ project: z.string(), kind: z.enum(["claude", "codex"]) })
         .parse(await body(req));
       const { root, trusted } = await where(input.project);
-      return json(await hub.start(input.kind, root, !trusted)), true;
+      const settings = await readAgentSettings(root);
+      return (
+        json(
+          await hub.start(input.kind, root, !trusted, {
+            model: settings.models[input.kind],
+            mode: settings.modes[input.kind],
+          }),
+        ),
+        true
+      );
     }
     if (req.method === "POST" && url.pathname === "/api/agents/settings") {
       const input = z
@@ -65,13 +94,28 @@ export async function handleAgentRoute(
         })
         .parse(await body(req));
       const { root } = await where(input.project);
+      const current = await readAgentSettings(root);
       await writeAgentSettings(root, {
+        ...current,
         autoSendNotes: input.autoSendNotes,
         agent: input.agent,
       });
       return json({ ok: true }), true;
     }
-    const match = /^\/api\/agents\/([0-9a-f-]{36})\/(stream|prompt|permission|cancel|stop)$/.exec(
+    if (req.method === "POST" && url.pathname === "/api/agents/terminal") {
+      const input = z
+        .object({
+          project: z.string(),
+          kind: z.enum(["claude", "codex"]),
+          purpose: z.enum(["signin", "run"]),
+          model: z.string().max(200).regex(/^[\w.:-]+$/).optional(),
+        })
+        .strict()
+        .parse(await body(req));
+      const { root, trusted } = await where(input.project);
+      return json(await hub.terminal(input.kind, root, !trusted, input.purpose, input.model)), true;
+    }
+    const match = /^\/api\/agents\/([0-9a-f-]{36})\/(stream|prompt|permission|option|cancel|stop)$/.exec(
       url.pathname,
     );
     if (!match) return json({ error: "Not found." }, 404), true;
@@ -84,7 +128,7 @@ export async function handleAgentRoute(
         Connection: "keep-alive",
       });
       const send = (value: unknown) => res.write(`data: ${JSON.stringify(value)}\n\n`);
-      send({ type: "snapshot", status: session.status, events: session.events });
+      send({ type: "snapshot", status: session.status, events: session.events, options: session.options });
       const unsubscribe = session.subscribe((message: AgentMessage) => send(message));
       const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 15_000);
       req.on("close", () => {
@@ -120,6 +164,24 @@ export async function handleAgentRoute(
         .parse(await body(req));
       session.answer(input.requestId, input.optionId);
       return json({ ok: true }), true;
+    }
+    if (action === "option") {
+      const input = z
+        .object({ project: z.string(), id: z.string().max(100), value: z.string().max(200) })
+        .strict()
+        .parse(await body(req));
+      const { root } = await where(input.project);
+      if (root !== session.root) throw new Error("This demo belongs to another worktree.");
+      const options = await session.setOption(input.id, input.value);
+      // Remembered for this worktree, so the next start uses the same model and mode.
+      const category = options.find((o) => o.id === input.id)?.category;
+      if (category) {
+        const settings = await readAgentSettings(root);
+        const key = category === "model" ? "models" : "modes";
+        settings[key] = { ...settings[key], [session.adapter.kind]: input.value };
+        await writeAgentSettings(root, settings);
+      }
+      return json({ options }), true;
     }
     if (action === "cancel") return await session.cancel(), json({ ok: true }), true;
     session.stop();

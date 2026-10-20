@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { realpathSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -6,7 +7,7 @@ import { serveLibrary } from "./library-server.js";
 import { serveReplay } from "./server.js";
 import { projectFixture } from "./test-support.js";
 import { writeJson } from "./storage.js";
-import { useAdapterScript } from "./agents.js";
+import { useAdapterScript, useTerminalLauncher } from "./agents.js";
 import { restrictFolder } from "./trust.js";
 
 // The Agents panel in a real (headless) browser, against the scripted agent.
@@ -41,7 +42,7 @@ const recording = [
   },
 ];
 
-async function openStudio(restricted = false) {
+async function openStudio(restricted = false, desktop = false) {
   const { root, dir } = await projectFixture();
   await writeJson(path.join(dir, "events.json"), recording);
   if (restricted) restrictFolder(root);
@@ -51,6 +52,11 @@ async function openStudio(restricted = false) {
   page.setDefaultTimeout(10_000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  // The desktop app's bridge, as far as the Agents panel uses it.
+  if (desktop)
+    await page.addInitScript(() => {
+      (window as any).demohunterDesktop = { platform: "darwin", trust: () => ((window as any).__trustAsked = true) };
+    });
   await page.goto(`${app.url}/projects/${project}/`);
   await page.waitForFunction(() => (window as any).__replayLab?.state().ready);
   await page.click('[data-tab="agent"]');
@@ -58,6 +64,7 @@ async function openStudio(restricted = false) {
   return {
     page,
     errors,
+    root,
     async close() {
       await page.close();
       await app.close();
@@ -76,7 +83,17 @@ test("chat with the agent: context, replies, plan, tools, approvals and stop", a
   const studio = await openStudio();
   const { page } = studio;
   try {
-    expect(await page.textContent('.roster-pill[data-kind="claude"]')).toContain("start");
+    // Opening a demo starts the preferred agent in its worktree: no click.
+    await page.waitForSelector('.roster-pill[data-kind="claude"][data-status="idle"]');
+    expect(await page.textContent("#agent-place")).toContain(path.basename(studio.root));
+    // Its models and modes, from the agent itself.
+    await page.waitForSelector("#agent-model option", { state: "attached" });
+    expect(await page.$$eval("#agent-model option", (o) => o.map((x) => x.textContent))).toEqual(["Opus 5.5", "Fable 5.1", "Sonnet 5.5"]);
+    expect(await page.inputValue("#agent-model")).toBe("opus");
+    await page.selectOption("#agent-model", "fable");
+    await page.selectOption("#agent-mode", "plan");
+    await ask(page, "which model?");
+    await page.waitForSelector('.agent-msg.agent:has-text("[model fable, mode plan]")');
     await page.waitForSelector("#agent-chips .agent-chip");
     await shot(page, "agent-empty");
 
@@ -86,8 +103,8 @@ test("chat with the agent: context, replies, plan, tools, approvals and stop", a
     await page.waitForSelector(".agent-plan li.completed");
     await page.waitForSelector('.agent-tool.completed:has-text("DemoHunter · get basic info")');
     expect(await page.inputValue("#agent-input")).toBe("");
-    expect(await page.textContent(".agent-msg.user")).toContain("Make a plan");
-    expect(await page.textContent(".agent-msg.user .agent-chips")).toMatch(/^00:00\.\d$/);
+    expect(await page.locator(".agent-msg.user").last().textContent()).toContain("Make a plan");
+    expect(await page.locator(".agent-msg.user .agent-chips").last().textContent()).toMatch(/^00:00\.\d$/);
     await page.waitForSelector('.roster-pill[data-status="idle"]');
 
     // Approvals show as a card; answering it resumes the turn.
@@ -147,8 +164,73 @@ test("an untrusted folder can't start an agent", async () => {
     expect(await page.isDisabled('.roster-pill[data-kind="claude"]')).toBe(true);
     expect(await page.isDisabled("#agent-input")).toBe(true);
     expect(await page.isVisible(".agent-empty-trust")).toBe(true);
+    // Outside the desktop app there is nothing to click; it says where to go.
+    expect(await page.isVisible("#agent-trust")).toBe(false);
+    expect(await page.isVisible(".agent-trust-hint")).toBe(true);
+    expect(await page.isVisible("#agent-setup")).toBe(false);
     expect(studio.errors).toEqual([]);
   } finally {
+    await studio.close();
+  }
+}, 60_000);
+
+test("in the desktop app, an untrusted folder offers Trust right in the panel", async () => {
+  const studio = await openStudio(true, true);
+  const { page } = studio;
+  try {
+    await page.click("#agent-trust");
+    expect(await page.evaluate(() => (window as any).__trustAsked)).toBe(true);
+    await shot(page, "agent-trust");
+    expect(studio.errors).toEqual([]);
+  } finally {
+    await studio.close();
+  }
+}, 60_000);
+
+test("Terminal opens the agent in the worktree; a signed-out agent offers Sign in", async () => {
+  const scripts: string[] = [];
+  useTerminalLauncher(async (script) => scripts.push(script));
+  process.env.FAKE_AGENT_FAIL = "prompt-auth";
+  const studio = await openStudio();
+  const { page } = studio;
+  try {
+    await page.waitForSelector('.roster-pill[data-kind="claude"][data-status="idle"]');
+    await page.click("#agent-terminal");
+    await page.waitForSelector('.toast:has-text("Opened in Terminal")');
+    expect(scripts[0]).toContain(`cd '${realpathSync(studio.root)}'`);
+    expect(scripts[0]).toContain("'--model' 'opus'");
+    // Signed out: the first message fails, with a way to sign in right there.
+    await ask(page, "hello");
+    await page.waitForSelector('#agent-thread .agent-notice.is-error:has-text("isn\'t signed in") button:has-text("Sign in…")');
+    await shot(page, "agent-signin");
+    await page.click('.agent-notice button:has-text("Sign in…")');
+    await page.waitForFunction(() => document.querySelectorAll(".toast").length > 0);
+    expect(scripts[1]).toContain("'auth' 'login' '--claudeai'");
+    // Signed in now: Start again brings up a fresh session that answers.
+    delete process.env.FAKE_AGENT_FAIL;
+    await page.click('.agent-notice button:has-text("Start again")');
+    // A message typed straight away waits for the new session.
+    await ask(page, "hello again");
+    await page.waitForSelector('.agent-msg.agent:has-text("Got: Demo:")');
+    expect(studio.errors).toEqual([]);
+  } finally {
+    delete process.env.FAKE_AGENT_FAIL;
+    useTerminalLauncher(undefined);
+    await studio.close();
+  }
+}, 60_000);
+
+test("a signed-out agent says how to sign in, right after the demo opens", async () => {
+  process.env.FAKE_AGENT_FAIL = "auth";
+  const studio = await openStudio();
+  const { page } = studio;
+  try {
+    await page.waitForSelector('.agent-notice:has-text("isn\'t signed in")');
+    expect(await page.textContent(".agent-notice")).toContain("or run `claude` once in a terminal");
+    expect(await page.isVisible('.agent-notice button:has-text("Sign in…")')).toBe(true);
+    expect(studio.errors).toEqual([]);
+  } finally {
+    delete process.env.FAKE_AGENT_FAIL;
     await studio.close();
   }
 }, 60_000);

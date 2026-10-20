@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 import { serveLibrary } from "./library-server.js";
 import { projectFixture } from "./test-support.js";
-import { useAdapterScript } from "./agents.js";
+import { useAdapterScript, useTerminalLauncher } from "./agents.js";
 import { restrictFolder } from "./trust.js";
 
 const FAKE = path.join(import.meta.dir, "fixtures/fake-acp-agent.ts");
@@ -68,6 +68,9 @@ async function watch(id: string, done: (state: { events: any[]; status: string }
   }
   throw new Error(`Timed out; last state ${JSON.stringify(state).slice(0, 600)}`);
 }
+/** Every message so far has its answer. */
+const settled = (s: { events: any[] }) =>
+  s.events.filter((e) => e.type === "done").length >= s.events.filter((e) => e.type === "user").length;
 const agentText = (s: { events: any[] }) =>
   s.events.filter((e) => e.type === "agent").map((e) => e.text).join("\n");
 
@@ -77,19 +80,37 @@ describe("agents in Studio", () => {
     const info = await fetch(`${app.url}/api/agents?project=${project}`).then((r) => r.json());
     expect(info.trusted).toBe(true);
     expect(info.kinds.find((k: any) => k.kind === "claude").available).toBe(true);
-    expect(info.settings).toEqual({ autoSendNotes: false, agent: "claude" });
+    expect(info.settings).toEqual({ autoSendNotes: false, agent: "claude", models: {}, modes: {} });
+    expect(info.place.name).toBe(path.basename(info.root));
     const started = await post("/api/agents/start", { project, kind: "claude" }).then((r) => r.json());
     expect(started).toMatchObject({ kind: "claude", name: "Claude Code", root: info.root, status: "idle" });
     const again = await post("/api/agents/start", { project, kind: "claude" }).then((r) => r.json());
     expect(again.id).toBe(started.id);
     id = started.id;
+    // The agent says which models and modes it offers.
+    expect(started.options.find((o: any) => o.category === "model")).toMatchObject({
+      current: "opus",
+      choices: [{ value: "opus" }, { value: "fable" }, { value: "sonnet" }],
+    });
+  });
+
+  test("the model and mode are chosen in Studio and remembered for the worktree", async () => {
+    const r = await post(`/api/agents/${id}/option`, { project, id: "model", value: "fable" });
+    expect(r.status).toBe(200);
+    expect((await r.json()).options.find((o: any) => o.id === "model").current).toBe("fable");
+    expect((await post(`/api/agents/${id}/option`, { project, id: "model", value: "gpt" })).status).toBe(400);
+    await post(`/api/agents/${id}/prompt`, { text: "which model?", project });
+    const state = await watch(id, (s) => agentText(s).includes("[model fable") && s.status === "idle");
+    expect(agentText(state)).toContain("[model fable, mode default]");
+    const info = await fetch(`${app.url}/api/agents?project=${project}`).then((r) => r.json());
+    expect(info.settings.models).toEqual({ claude: "fable" });
   });
 
   test("prompts carry Studio's context and stream the reply, plan and tool calls", async () => {
     const r = await post(`/api/agents/${id}/prompt`, { text: "Make a plan", project, outputMs: 17_900, selection: { ref: "d3-approve", label: "Approve" } });
     expect(r.status).toBe(202);
-    const state = await watch(id, (s) => s.events.some((e) => e.type === "done") && s.status === "idle");
-    const user = state.events.find((e) => e.type === "user");
+    const state = await watch(id, (s) => settled(s) && s.status === "idle");
+    const user = state.events.findLast((e) => e.type === "user");
     expect(user.text).toBe("Make a plan");
     expect(user.context).toEqual(["00:17.9", "Approve"]);
     expect(agentText(state)).toContain('Got: Demo: "Test replay"');
@@ -157,6 +178,54 @@ describe("agents in Studio", () => {
     expect(form.status).toBe(415);
   });
 
+  test("a restarted agent comes back with the remembered model; concurrent starts share one session", async () => {
+    await post(`/api/agents/${id}/stop`, {});
+    const [a, b] = await Promise.all([
+      post("/api/agents/start", { project, kind: "claude" }).then((r) => r.json()),
+      post("/api/agents/start", { project, kind: "claude" }).then((r) => r.json()),
+    ]);
+    expect(a.id).toBe(b.id);
+    expect(a.options.find((o: any) => o.id === "model").current).toBe("fable");
+    id = a.id;
+  });
+
+  test("Terminal opens in the worktree: the agent with Studio's tools and model, or its sign-in", async () => {
+    const scripts: string[] = [];
+    useTerminalLauncher(async (script) => scripts.push(script));
+    try {
+      const info = await fetch(`${app.url}/api/agents?project=${project}`).then((r) => r.json());
+      const run = await post("/api/agents/terminal", { project, kind: "claude", purpose: "run", model: "sonnet" });
+      expect(await run.json()).toMatchObject({ opened: true });
+      expect(scripts[0]).toContain(`cd '${info.root}'`);
+      expect(scripts[0]).toContain("'--cli' '--model' 'sonnet' '--mcp-config'");
+      // The folder twice: where it runs, and the demo Studio's MCP server edits.
+      expect(scripts[0].split(info.root).length - 1).toBe(2);
+      await post("/api/agents/terminal", { project, kind: "claude", purpose: "signin" });
+      expect(scripts[1]).toContain("'auth' 'login' '--claudeai'");
+      await post("/api/agents/terminal", { project, kind: "codex", purpose: "run", model: "gpt-6-luna" });
+      expect(scripts[2]).toContain("'-m' 'gpt-6-luna' '-c' 'mcp_servers.demohunter.command=");
+      // Only a plain model name goes on the command line.
+      expect((await post("/api/agents/terminal", { project, kind: "claude", purpose: "run", model: "x'; rm -rf ~" })).status).toBe(400);
+      expect(scripts).toHaveLength(3);
+    } finally {
+      useTerminalLauncher(undefined);
+    }
+  });
+
+  test("an agent that is signed out fails its first message with a way to sign in", async () => {
+    await post(`/api/agents/${id}/stop`, {});
+    process.env.FAKE_AGENT_FAIL = "prompt-auth";
+    try {
+      const started = await post("/api/agents/start", { project, kind: "claude" }).then((r) => r.json());
+      await post(`/api/agents/${started.id}/prompt`, { text: "hello", project });
+      const state = await watch(started.id, (s) => s.events.some((e) => e.type === "notice"));
+      expect(state.events.find((e) => e.type === "notice")).toMatchObject({ signIn: true, text: "Claude Code isn't signed in. Sign in, then send your message again." });
+      await post(`/api/agents/${started.id}/stop`, {});
+    } finally {
+      delete process.env.FAKE_AGENT_FAIL;
+    }
+  });
+
   test("a signed-out agent says how to sign in", async () => {
     await post(`/api/agents/${id}/stop`, {});
     process.env.FAKE_AGENT_FAIL = "auth";
@@ -168,6 +237,7 @@ describe("agents in Studio", () => {
       const failed = info.sessions.find((s: any) => s.status === "error");
       expect(failed).toBeTruthy();
       const state = await watch(failed.id, (s) => s.events.some((e) => e.type === "notice"));
+      expect(state.events.find((e) => e.type === "notice")).toMatchObject({ signIn: true });
       expect(state.events.find((e) => e.type === "notice").text).toContain("isn't signed in");
     } finally {
       delete process.env.FAKE_AGENT_FAIL;
@@ -187,6 +257,12 @@ describe("agents in Studio", () => {
       });
       expect(r.status).toBe(403);
       expect((await r.json()).error).toContain("Trust the folder");
+      const terminal = await fetch(`${restricted.url}/api/agents/terminal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: id, kind: "claude", purpose: "run" }),
+      });
+      expect(terminal.status).toBe(403);
     } finally {
       await restricted.close();
       await rm(other, { recursive: true, force: true });

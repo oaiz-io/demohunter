@@ -973,6 +973,7 @@ async function runReload(): Promise<void> {
               }
             : undefined,
         error: report,
+        toast,
         status: (status) => {
           const dot = $("#agent-dot");
           dot.hidden = status !== "working" && status !== "waiting";

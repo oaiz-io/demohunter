@@ -73,7 +73,7 @@ async function trustFolder() {
     defaultId: 1,
     cancelId: 1,
     message: `Trust “${path.basename(target)}”?`,
-    detail: `${target}\n\nScene pages in this folder's demos are code: trusting it lets their scripts run, and Studio starts inside the folder with its Bun settings and .env file. Only trust folders whose authors you trust.`,
+    detail: `${target}\n\nScene pages in this folder's demos are code: trusting it lets their scripts run, lets Claude Code or Codex work in it from the Agents panel, and starts Studio inside the folder with its Bun settings and .env file. Only trust folders whose authors you trust.`,
   });
   if (response !== 0) return false;
   save({ trusted: [...new Set([...(settings().trusted ?? []), target])] });

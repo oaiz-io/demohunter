@@ -383,6 +383,20 @@
         </section>
         <section id="panel-agent" class="panel agent-panel" hidden>
           <div id="agent-roster" class="agent-roster" aria-label="Agents"></div>
+          <div id="agent-setup" class="agent-setup" hidden>
+            <span id="agent-place" class="agent-place mono" title="Where the agent works"></span>
+            <label class="agent-choice"
+              ><span class="sr-only">Model</span
+              ><select id="agent-model" aria-label="Model"></select
+            ></label>
+            <label class="agent-choice"
+              ><span class="sr-only">Mode</span
+              ><select id="agent-mode" aria-label="Mode"></select
+            ></label>
+            <button type="button" id="agent-terminal" class="quiet small-text" title="Open this agent in Terminal, in the same worktree with Studio's tools">
+              Terminal
+            </button>
+          </div>
           <div class="panel-scroll" id="agent-scroll">
             <div id="agent-empty" class="agent-empty">
               <p class="agent-empty-title">Work with your agent here</p>
@@ -391,10 +405,15 @@
                 your own login and Studio's tools — ask it anything, approve
                 what it runs, or send it notes.
               </p>
-              <p class="agent-empty-trust" hidden>
-                Agents run code, so trust this folder first (File → Trust This
-                Folder…).
-              </p>
+              <div class="agent-empty-trust" hidden>
+                <p>Agents run code, so this folder has to be trusted first.</p>
+                <button type="button" id="agent-trust" class="button small primary" hidden>
+                  Trust this folder…
+                </button>
+                <p class="agent-trust-hint muted" hidden>
+                  In the desktop app: File → Trust This Folder…
+                </p>
+              </div>
             </div>
             <div id="agent-thread" class="agent-thread" aria-live="polite" hidden></div>
             <details id="agent-activity-details" class="agent-activity">
