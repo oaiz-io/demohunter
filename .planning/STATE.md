@@ -43,6 +43,7 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
+| 2026-10-20 | 261020-l51 | Capture bundles and BYOK Git LFS migration | Studio v2 ZIP captures; v1 pack migration; frozen refs and edits preserved. Full verify: 467 passed, 1 skipped; final focused checks pass. BYOK film: 6,900 to 77 files; PR 99 files. Fresh LFS clone and full 1080p30 export verified. |
 | 2026-10-16 | 261016-moj | Restore direct element editing | Research/plan/implement loops: drag, resize, text/colors, hide/remove/reset, scene targets, disk autosave, revision-safe conflicts and undo. Full verify: 369 passed, 1 skipped; final browser regression and typecheck passed. |
 | 2026-10-16 | 261016-exp | Faster Studio export | Parallel chunked rendering in new-headless Chromium, JPEG frames, still-frame reuse, one-pass loudness prepared during render: 67 s 1080p30 export 482 s → ~23 s. 66 Studio tests pass. |
 | 2026-10-16 | 261016-dsk | Desktop app | Electron shell with icon, welcome/loading/error pages, window memory, single instance, Dock drop, `.app` bundle builder; 4 Electron e2e tests pass. |
