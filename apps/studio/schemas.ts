@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { z } from "zod";
-import { formatSchema } from "./contract.js";
+import { bundledFormatSchema, legacyFormatSchema } from "./contract.js";
 import {
   projectSchema,
   editsSchema,
@@ -16,7 +16,7 @@ export async function writeSchemas() {
   );
   await mkdir(root, { recursive: true });
   for (const [name, schema] of Object.entries({
-    studio: formatSchema,
+    studio: legacyFormatSchema,
     project: projectSchema,
     edits: editsSchema,
     narration: narrationSchema,
@@ -31,5 +31,16 @@ export async function writeSchemas() {
       ) + "\n",
     );
   }
+  await writeFile(
+    path.join(root, "studio.v2.schema.json"),
+    JSON.stringify(
+      z.toJSONSchema(bundledFormatSchema, {
+        unrepresentable: "any",
+        io: "input",
+      }),
+      null,
+      2,
+    ) + "\n",
+  );
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) await writeSchemas();

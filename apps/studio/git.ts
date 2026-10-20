@@ -328,13 +328,15 @@ export async function listDemoSources(
         "project.json",
         "*/events.json",
         "events.json",
+        "*/capture.dhcapture",
+        "capture.dhcapture",
       ]),
       git(dir, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"]).catch(() => ""),
     ]);
     for (const entry of listed.split("\0").filter(Boolean))
       if (entry.endsWith(".tour.ts")) tours.add(entry);
       else if (
-        /(^|\/)(project|events)\.json$/.test(entry) &&
+        /(^|\/)((project|events)\.json|capture\.dhcapture)$/.test(entry) &&
         !/(^|\/)\.demohunter\//.test(entry)
       )
         (entry.endsWith("project.json") ? projects : events).add(

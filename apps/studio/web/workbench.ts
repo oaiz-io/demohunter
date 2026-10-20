@@ -25,6 +25,7 @@ export const changesSeenKey = () => `demohunter-changes-seen:${location.pathname
 export type WorkspaceData = {
   index: ElementIndex;
   projectDir: string;
+  captureBundle?: string;
   connection: {
     command: string;
     args: string[];
@@ -440,9 +441,9 @@ export class AgentWorkbench {
             name: element.name,
             documentId: element.documentId,
             nodeId: element.nodeId,
-            capturedHtml: `${data.projectDir}/${element.source.file}`,
+            capturedHtml: data.captureBundle ? `MCP get_html(${element.ref})` : `${data.projectDir}/${element.source.file}`,
             htmlAnchor: element.source.htmlAnchor,
-            registry: `elements.json#${element.source.registryPointer}`,
+            registry: `${data.captureBundle ? "capture.dhcapture!/" : ""}elements.json#${element.source.registryPointer}`,
             editFile: "edits.json",
             narrationFile: "narration.json",
             commentsFile: "comments.json",
@@ -518,7 +519,7 @@ export class AgentWorkbench {
           element: element
             ? {
                 ref: element.ref,
-                capturedHtml: `${data.projectDir}/${element.source.file}`,
+                capturedHtml: data.captureBundle ? `MCP get_html(${element.ref})` : `${data.projectDir}/${element.source.file}`,
                 htmlAnchor: element.source.htmlAnchor,
               }
             : undefined,

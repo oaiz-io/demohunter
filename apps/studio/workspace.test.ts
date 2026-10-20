@@ -306,6 +306,8 @@ test("agent can inspect and edit through the real stdio MCP transport", async ()
     });
     expect((await loadBundle(dir)).edits.camera).toHaveLength(0);
     expect((await call("get_schema", { file: "edits" })).type).toBe("object");
+    expect((await call("get_schema", { file: "studio" })).properties.formatVersion.const).toBe(2);
+    expect((await call("get_schema", { file: "studio", version: 1 })).properties.formatVersion.const).toBe(1);
 
     expect(
       (

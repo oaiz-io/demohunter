@@ -88,7 +88,21 @@ Or choose **Export video** in the editor (24 fps; missing speech is left silent)
 
 ## Contract and boundaries
 
-[Format/protocol v1](FORMAT.md) fixes filenames, identity, time semantics, revision rules and compatibility; [JSON Schemas](schemas/) support tools. [Architecture](ARCHITECTURE.md) describes the browser/service/storage boundaries and the desktop/hosting path.
+New recordings store their immutable DOM, assets and element index in one
+`capture.dhcapture` ZIP file. Keep edits, narration text, comments, overrides and
+scene code as normal Git files. Inspection HTML is generated on request.
+Migrate an existing project with `bun run studio pack <project-directory>`.
+This preserves its capture identity and edits; it does not record the app again.
+
+For shared repositories, track `**/capture.dhcapture`, project audio and master
+video files with Git LFS. Commit the generated `.gitattributes`. Install Git LFS
+on collaborators' machines and use `git lfs pull` after checkout; CI jobs that
+render demos must fetch LFS objects too. LFS is optional for local projects.
+Keep runtime state and export working directories ignored. Publish the chosen
+video encode through the website's normal asset pipeline. Do not mark all scene
+and edit files as generated: these files need readable diffs.
+
+[Format and protocol](FORMAT.md) fixes filenames, identity, time semantics, revision rules and compatibility; [JSON Schemas](schemas/) support tools. [Architecture](ARCHITECTURE.md) describes the browser/service/storage boundaries and the desktop/hosting path.
 
 This is an application workspace under apps/studio. The macOS desktop app (apps/desktop, alpha) wraps the same service in an Electron window; its workflow builds an unsigned Apple-silicon app on each push and publishes a GitHub pre-release only when run by hand. The local service has no account/auth layer; use localhost or a trusted private network. Hosting with multiple users requires authorization and tenant scoping. Studio answers only loopback host names (DNS-rebinding guard) unless started with an explicit `--host`. Scene pages are project code and run their scripts; `--restricted` (used by the desktop app for folders you haven't trusted) renders them without scripts. Captured assets are served as inert data and the replay player ships with Studio, never from a project folder.
 

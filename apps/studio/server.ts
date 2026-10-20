@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { z } from "zod";
-import { loadBundle, safeFile, writeJson } from "./storage.js";
+import { loadBundle, readProjectFile, safeFile, writeJson } from "./storage.js";
 import { targetSchema, validateBundle } from "./model.js";
 import { elementPatchSchema } from "./element-edit.js";
 import { regenerateNarration } from "./narration.js";
@@ -20,6 +20,7 @@ import { fontFile } from "./fonts.js";
 import { projectFrame } from "./poster.js";
 import { createRequire } from "node:module";
 import { hostAllowed, scenesTrusted } from "./trust.js";
+import { readFormat } from "./format.js";
 
 const require = createRequire(import.meta.url);
 /** The replay player ships with Studio; project folders never supply code. */
@@ -195,6 +196,7 @@ export async function createReplayHandler(
         return json(res, {
           index: workspace.index,
           projectDir: dir,
+          captureBundle: (await readFormat(dir))?.formatVersion === 2 ? "capture.dhcapture" : undefined,
           // Workspace-scoped: the MCP server edits whichever demo is open
           // in Studio, so one connection serves every demo in the library.
           connection: options.workspaceRoot
@@ -237,7 +239,7 @@ export async function createReplayHandler(
       if (req.method === "GET" && url.pathname === "/api/events")
         return send(
           res,
-          (await readFile(await safeFile(dir, "events.json"), "utf8")).replace(
+          (await readProjectFile(dir, "events.json")).replace(
             assetUrl,
             `${basePath}/files/assets/`,
           ),
@@ -557,16 +559,18 @@ export async function createReplayHandler(
             "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; font-src 'self' data:",
           );
         }
-        const file = await safeFile(dir, relative);
-        let data = await readFile(file);
-        if (path.extname(file) === ".css" && basePath)
+        const file = relative.startsWith("assets/") ? relative : await safeFile(dir, relative);
+        if (path.extname(file).toLowerCase() !== extension)
+          return json(res, { error: "Unknown file." }, 404);
+        let data = relative.startsWith("assets/")
+          ? await readProjectFile(dir, relative, null)
+          : await readFile(file);
+        if (extension === ".css" && basePath)
           data = Buffer.from(
             data.toString().replace(assetUrl, `${basePath}/files/assets/`),
           );
         // The type follows the requested name, and a link may not change it
         // (a.json pointing at b.js must not be served as a script).
-        if (path.extname(file).toLowerCase() !== extension)
-          return json(res, { error: "Unknown file." }, 404);
         const type = mime[extension] ?? "application/octet-stream";
         res.setHeader("Accept-Ranges", "bytes");
         if (req.headers.range) {

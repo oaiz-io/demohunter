@@ -1,10 +1,28 @@
-# Studio format and editing protocol v1
+# Studio format and editing protocol
 
 This directory defines the local, portable source of truth. No database, account, hosted API or agent vendor is needed. The committed [JSON Schemas](schemas/) describe the individual files. `loadBundle` additionally validates cross-file constraints, source bounds, target exclusivity and unique IDs. Agent clients can call `get_contract` and `get_schema`.
 
 ## Identity and compatibility
 
-`studio.json` identifies `format: "demohunter.studio"`, `formatVersion: 1`, `protocolVersion: 1`, a UUID `projectId`, and a `captureId` derived from the SHA-256 of immutable events.json bytes. project.json retains its own `schemaVersion: 1`. The manifest fixes the canonical filenames; arbitrary file indirection is not accepted. Optional source tour/config paths are provenance relative to the capture's consumer repository, not executable commands. An optional `source.tourSha256` records the tour file's SHA-256 at capture so a library can show that the tour changed after recording; readers that do not know it may ignore it.
+`studio.json` identifies `format: "demohunter.studio"`, `formatVersion: 2`, `protocolVersion: 1`, a UUID `projectId`, and a `captureId` derived from the SHA-256 of immutable events.json bytes. project.json retains its own `schemaVersion: 1`. The manifest fixes the canonical filenames; arbitrary file indirection is not accepted. Optional source tour/config paths are provenance relative to the capture's consumer repository, not executable commands. An optional `source.tourSha256` records the tour file's SHA-256 at capture so a library can show that the tour changed after recording; readers that do not know it may ignore it.
+
+
+v2 stores immutable files in `capture.dhcapture`, a ZIP archive. The manifest's
+`capture: {file: "capture.dhcapture", sha256: "<64 hex characters>"}` fixes its
+identity. Inside are `capture.json` (`format: "demohunter.capture"`,
+`formatVersion: 1`, full `captureHash`), original `events.json` bytes, the matching
+`elements.json`, and `assets/`. Entry order and timestamps are fixed when packed.
+Readers check the archive hash, recording hash and element identity. Archives
+are read in memory; entries are not extracted. Paths and duplicate entries are
+checked before decompression. Compressed and expanded size is limited to 256 MiB,
+with at most 10,000 files. Missing LFS objects produce a `git lfs pull` error.
+
+v1 loose projects remain readable. `bun run studio pack <project>` explicitly
+migrates them, without recording again. It preserves event bytes, element refs,
+project identity, source provenance, edits, comments, audio, scenes and content
+revision. It writes and validates the bundle, commits the v2 manifest, then
+removes loose capture files and derived `sources/`. Older Studio readers reject
+v2 instead of treating it as a damaged v1 project. New captures use v2.
 
 A project without studio.json is a supported legacy capture. First open adds the manifest without changing its content revision or rewriting captured events. Manifest creation is atomic across cooperating processes. Unknown major versions and malformed files fail before content mutation. There is no automatic lossy downgrade. Compatible readers must preserve v1 field meanings; new semantics requiring new reader behavior require explicit version/capability negotiation. Recapturing creates a new capture/project, never overwrites edited data.
 
@@ -16,8 +34,8 @@ DOM events currently use pinned rrweb 2.1.7. A different incompatible event enco
 | ----------------------- | ---------------------------------------------------------------------------------------------------- |
 | studio.json             | Identity, format/protocol versions, filenames, optional source provenance                            |
 | project.json            | Title, source viewport/duration, TTS configuration, capture warnings                                 |
-| events.json, assets/    | Original recording and bundled resources; immutable                                                  |
-| elements.json, sources/ | Versioned index and readable captured HTML; derived from the immutable capture, then stable          |
+| capture.dhcapture       | Immutable recording, assets and frozen element index; ZIP with manifest checksum                      |
+| sources/ (v1 only)      | Derived inspection HTML; v2 generates requested HTML through MCP without writing files                |
 | edits.json              | Clips (recording or HTML scene), element overrides, camera, highlights, animations, overlays, audio  |
 | scenes/                 | Scene and overlay pages (HTML/CSS/JS/fonts/images); part of the content revision                     |
 | narration.json, audio/  | Script/voice overrides and portable generated audio with request identity                            |

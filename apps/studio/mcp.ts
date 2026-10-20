@@ -220,14 +220,15 @@ export function createReplayMcp(
   }
   plain(
     "get_schema",
-    "Read a Studio v1 JSON Schema. Runtime validation also enforces time ranges, uniqueness and cross-file invariants.",
+    "Read a Studio JSON Schema. The studio manifest defaults to v2; request version 1 for a loose legacy capture. Other files use v1. Runtime validation also enforces time ranges, uniqueness and cross-file invariants.",
     z.object({
       file: z.enum(["studio", "project", "edits", "narration", "comments"]),
+      version: z.union([z.literal(1), z.literal(2)]).optional(),
     }),
-    async ({ file }) =>
+    async ({ file, version }) =>
       JSON.parse(
         await readFile(
-          new URL(`./schemas/${file}.v1.schema.json`, import.meta.url),
+          new URL(`./schemas/${file}.v${version ?? (file === "studio" ? 2 : 1)}.schema.json`, import.meta.url),
           "utf8",
         ),
       ),

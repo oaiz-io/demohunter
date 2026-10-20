@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { readFormat } from "./format.js";
 import {
   atomicWrite,
   ensureRealFolders,
@@ -69,7 +70,10 @@ const slug = (value: string) =>
     .replace(/^-|-$/g, "")
     .slice(0, 48);
 
-export async function ensureElementIndex(dir: string): Promise<ElementIndex> {
+export async function ensureElementIndex(
+  dir: string,
+  writeSources = true,
+): Promise<ElementIndex> {
   const bytes = await readProjectFile(dir, "events.json", null);
   const hash = createHash("sha256").update(bytes).digest("hex");
   try {
@@ -84,7 +88,10 @@ export async function ensureElementIndex(dir: string): Promise<ElementIndex> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  const result = indexEvents(JSON.parse(bytes.toString()));
+  const result = indexEvents(
+    JSON.parse(bytes.toString()),
+    writeSources ? undefined : "",
+  );
   const index: ElementIndex = {
     schemaVersion: 1,
     captureId: hash.slice(0, 16),
@@ -93,7 +100,7 @@ export async function ensureElementIndex(dir: string): Promise<ElementIndex> {
   };
   // A repository can commit `sources` (or a snippet) as a link; a write must
   // never leave the project through it. Check every target before writing any.
-  const sources = await ensureRealFolders(dir, "sources");
+  const sources = writeSources ? await ensureRealFolders(dir, "sources") : "";
   for (const { ref } of result.snippets) {
     const existing = await lstat(path.join(sources, `${ref}.html`)).catch(
       () => undefined,
@@ -110,7 +117,11 @@ export async function ensureElementIndex(dir: string): Promise<ElementIndex> {
   return index;
 }
 
-export function indexEvents(events: CaptureEvent[]): {
+export function indexEvents(
+  events: CaptureEvent[],
+  snippetRef?: string,
+  frozenElements: ElementRecord[] = [],
+): {
   elements: ElementRecord[];
   snippets: { ref: string; html: string }[];
 } {
@@ -120,7 +131,9 @@ export function indexEvents(events: CaptureEvent[]): {
   let documentId = 0;
   const firstTime = events[0]?.timestamp ?? 0;
   const key = (nodeId: number) => `${documentId}:${nodeId}`;
-  const refs = new Map<string, string>();
+  const refs = new Map(
+    frozenElements.map((e) => [`${e.documentId}:${e.nodeId}`, e.ref]),
+  );
   function visit(
     node: CapturedNode,
     parentRef: string | undefined,
@@ -186,7 +199,11 @@ export function indexEvents(events: CaptureEvent[]): {
     }
     for (const child of node.childNodes ?? [])
       visit(child, ref ?? parentRef, time);
-    if (ref && !snippets.some((s) => s.ref === ref))
+    if (
+      ref &&
+      (snippetRef === undefined || snippetRef === ref) &&
+      !snippets.some((s) => s.ref === ref)
+    )
       snippets.push({
         ref,
         html: `<!-- Captured DOM at ${(time / 1000).toFixed(3)}s. Inspect this source; apply changes through edits.json. -->\n${serialize(node, 0)}\n`,
@@ -294,6 +311,21 @@ export async function elementHtml(
   element: ElementRecord,
   maxChars = 30000,
 ): Promise<{ html: string; truncated: boolean }> {
+  if ((await readFormat(dir))?.formatVersion === 2) {
+    const events = JSON.parse(await readProjectFile(dir, "events.json"));
+    const index = JSON.parse(
+      await readProjectFile(dir, "elements.json"),
+    ) as ElementIndex;
+    const html = indexEvents(events, element.ref, index.elements).snippets[0]
+      ?.html;
+    if (html === undefined)
+      throw new Error("Captured element is missing from its recording.");
+    if (Buffer.byteLength(html) > 5_000_000)
+      throw new Error(
+        "Captured HTML is too large; inspect a smaller child element.",
+      );
+    return { html: html.slice(0, maxChars), truncated: html.length > maxChars };
+  }
   const file = await safeFile(dir, element.source.file);
   const size = (await stat(file)).size;
   if (size > 5_000_000)

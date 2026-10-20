@@ -181,7 +181,7 @@ export class LocalLibrary {
         visited += entries.length;
         if (
           entries.some((e) => e.name === "project.json") &&
-          entries.some((e) => e.name === "events.json")
+          entries.some((e) => e.name === "events.json" || e.name === "capture.dhcapture")
         ) {
           recordings.push(await this.recording(dir, base, worktree));
           return;
@@ -322,6 +322,7 @@ export class LocalLibrary {
           "overrides.css",
           "studio.json",
           "elements.json",
+          "capture.dhcapture",
           ".history/edits.json",
           ".studio/activity",
         ]

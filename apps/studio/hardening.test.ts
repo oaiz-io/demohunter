@@ -30,6 +30,7 @@ import { SeenDemos } from "./seen.js";
 import {
   atomicWrite,
   loadBundle,
+  readProjectFile,
   mutateProject,
   undoProject,
   writeJson,
@@ -814,7 +815,7 @@ test("capture records a warning and stops cleanly at the event limit", async () 
     expect(bundle.project.capture.warnings.join(" ")).toContain(
       "Recording stopped after 3 events",
     );
-    const events = JSON.parse(await readFile(path.join(dir, "events.json"), "utf8"));
+    const events = JSON.parse(await readProjectFile(dir, "events.json"));
     expect(events).toHaveLength(3);
     expect(events.some((e: { type: number }) => e.type === 2)).toBe(true);
   } finally {

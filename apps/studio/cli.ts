@@ -2,6 +2,7 @@ import { LocalLibrary } from "./library.js";
 import { serveLibrary } from "./library-server.js";
 import { exportReplay } from "./export.js";
 import { contract } from "./contract.js";
+import { packCapture } from "./capture-bundle.js";
 import {
   copyFile,
   mkdir,
@@ -38,6 +39,7 @@ bun run studio capture <tour.ts> [--project <new-dir>]
 bun run studio demo [--sample invoices|fractions] [--project <new-dir>]
 bun run studio narrate <project-dir> [--fit] [--cache-dir <dir>]
 bun run studio inspect <project-dir>
+bun run studio pack <project-dir>            Bundle a v1 capture; keep edits and media
 bun run studio kit <project-dir> [--mood calm|bright|cinematic] [--seed 1]
     Add the scene kit (scenes/kit/: motion.js, show.js, show.css) and a license-free
     score with matching sound effects (audio/score-<mood>.wav, audio/sfx/).
@@ -59,6 +61,7 @@ Saved demos can be exported without the source application.`;
 
 const commands = new Set([
   "capture",
+  "pack",
   "demo",
   "narrate",
   "inspect",
@@ -207,6 +210,10 @@ export async function main(args: string[]): Promise<void> {
   if (!positions[0] || positions.length > (command === "resolve" ? 2 : 1))
     throw new Error(help);
   const target = path.resolve(positions[0]);
+  if (command === "pack") {
+    console.log(JSON.stringify(await packCapture(target), null, 2));
+    return;
+  }
   if (command === "resolve") {
     if (!positions[1]) throw new Error(help);
     console.log(

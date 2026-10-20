@@ -1,12 +1,11 @@
-/** Portable, browser-safe Studio v1 contracts. Files are canonical; adapters
+/** Portable, browser-safe Studio contracts. Files are canonical; adapters
  * must reject unknown major versions and require revisions for mutations. */
 import { z } from "zod";
-export const FORMAT_VERSION = 1 as const;
+export const FORMAT_VERSION = 2 as const;
 export const PROTOCOL_VERSION = 1 as const;
-export const formatSchema = z
+const manifestSchema = z
   .object({
     format: z.literal("demohunter.studio"),
-    formatVersion: z.literal(FORMAT_VERSION),
     protocolVersion: z.literal(PROTOCOL_VERSION),
     projectId: z.string().uuid(),
     captureId: z.string().regex(/^[a-f0-9]{16}$/),
@@ -37,6 +36,22 @@ export const formatSchema = z
       .optional(),
   })
   .strict();
+export const legacyFormatSchema = manifestSchema.extend({
+  formatVersion: z.literal(1),
+});
+export const bundledFormatSchema = manifestSchema.extend({
+  formatVersion: z.literal(2),
+  capture: z
+    .object({
+      file: z.literal("capture.dhcapture"),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    })
+    .strict(),
+});
+export const formatSchema = z.discriminatedUnion("formatVersion", [
+  legacyFormatSchema,
+  bundledFormatSchema,
+]);
 export type StudioFormat = z.infer<typeof formatSchema>;
 export const contract = {
   format: "demohunter.studio",
@@ -46,13 +61,14 @@ export const contract = {
   schemas: "schemas/",
   content:
     "project.json, edits.json, narration.json, comments.json, overrides.css",
-  immutable: "events.json, assets/, elements.json, sources/",
+  immutable:
+    "capture.dhcapture (ZIP: events.json, elements.json, assets/); v1 loose captures remain readable",
   times:
     "Clip ranges use source milliseconds; narration offsets and effects use output milliseconds.",
   concurrency:
     "Content revisions are opaque hashes. UI/MCP mutations require expectedRevision. On conflict reread and merge. Direct file writers use atomic replacement and coordinate writes; runtime state never changes content revisions.",
   compatibility:
-    "Unknown major versions fail without rewriting. Legacy projects without studio.json remain readable and get a v1 manifest on first open. New optional features require explicit reader support; existing v1 field semantics cannot change.",
+    "v2 uses a checksummed capture bundle. v1 loose projects remain readable; studio pack migrates explicitly and preserves event bytes and element refs. Unknown versions fail without rewriting.",
   activity:
     "Observed MCP tool operations only; no model reasoning. .studio runtime data is disposable and excluded from content revision/export.",
 };

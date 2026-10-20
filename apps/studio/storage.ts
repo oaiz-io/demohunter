@@ -13,6 +13,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { readFormat } from "./format.js";
+import { readCaptureEntry } from "./capture-bundle.js";
 import { validateBundle, type ReplayBundle } from "./model.js";
 
 export async function atomicWrite(
@@ -44,6 +45,13 @@ export async function readProjectFile(
   relative: string,
   encoding: "utf8" | null = "utf8",
 ): Promise<string | Buffer> {
+  if (relative === "events.json" || relative === "elements.json" || relative.startsWith("assets/")) {
+    const format = await readFormat(dir);
+    if (format?.formatVersion === 2) {
+      const data = await readCaptureEntry(dir, format, relative);
+      return encoding ? data.toString(encoding) : data;
+    }
+  }
   let current = dir;
   for (const part of relative.split("/")) {
     current = path.join(current, part);
@@ -120,7 +128,8 @@ export async function writeJson(file: string, value: unknown): Promise<void> {
   await atomicWrite(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 export async function loadBundle(dir: string): Promise<ReplayBundle> {
-  await readFormat(dir);
+  const format = await readFormat(dir);
+  if (format?.formatVersion === 2) await readCaptureEntry(dir, format, "events.json");
   const files = await Promise.all(
     ["project.json", "edits.json", "narration.json", "overrides.css"].map(
       (name) => readProjectFile(dir, name),

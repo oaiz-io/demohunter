@@ -115,7 +115,7 @@ Trim dead time. Speed travel to `rate` 1.3–2. Use `holdMs` to give reads time.
 
 ### 5. Lift the hero elements
 
-1. Find refs in `elements.json`, with MCP `find_elements`, or from Studio's "Copy for agent".
+1. Find refs with MCP `find_elements`, in the capture bundle's `elements.json` (loose in v1), or from Studio's "Copy for agent".
 2. Pick `--at` at a settled moment: the element is fully rendered, nothing is mid-animation, and **the camera is at scale 1**. Lift rects are viewport coordinates.
 3. Run the lift. Then check `scenes/lifts/<name>.json` (`{x,y,width,height,atMs}`) against a `get_screenshot` at that time.
 

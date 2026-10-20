@@ -13,6 +13,7 @@ import type { SmokeGenerateInput } from "../../packages/generator-playwright/src
 import { writeJson } from "./storage.js";
 import { ensureFormat } from "./format.js";
 import { ensureElementIndex } from "./elements.js";
+import { packCapture } from "./capture-bundle.js";
 import {
   validateBundle,
   type RecordingClip,
@@ -433,7 +434,7 @@ export async function captureReplay(
         ),
       ),
     );
-    const index = await ensureElementIndex(dir);
+    const index = await ensureElementIndex(dir, false);
     const format = await ensureFormat(dir, index);
     if (!input.tourFile.path.startsWith("built-in:")) {
       format.source = {
@@ -452,6 +453,7 @@ export async function captureReplay(
       if (!format.source.tourSha256) delete format.source.tourSha256;
       await writeJson(path.join(dir, "studio.json"), format);
     }
+    await packCapture(dir);
     return dir;
   } catch (error) {
     // A failed capture must not leave a half-written project behind: the

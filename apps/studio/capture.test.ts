@@ -25,7 +25,8 @@ import { wavBytes } from "./test-support.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { renderReplayFrame, openReplayRenderer } from "./render.js";
-import { loadBundle, writeJson } from "./storage.js";
+import { loadBundle, readProjectFile, writeJson } from "./storage.js";
+import { unzipSync } from "fflate";
 
 test("captures editable DOM replay and exports saved narration and video without the source app", async () => {
   const app = createServer((req, res) => {
@@ -92,7 +93,7 @@ test("captures editable DOM replay and exports saved narration and video without
     });
     await new Promise<void>((resolve) => app.close(() => resolve()));
     const bundle = await loadBundle(dir);
-    const eventText = await readFile(path.join(dir, "events.json"), "utf8");
+    const eventText = await readProjectFile(dir, "events.json");
     expect(bundle.project.capture.assetCount).toBeGreaterThanOrEqual(2);
     expect(eventText).toContain("Original heading");
     expect(eventText).toContain("Changed heading");
@@ -113,11 +114,14 @@ test("captures editable DOM replay and exports saved narration and video without
     const files = await readdir(dir);
     expect(files).not.toContain("video.mp4");
     expect(files).toContain("AGENTS.md");
-    const assetNames = await readdir(path.join(dir, "assets"));
+    expect(files).toContain("capture.dhcapture");
+    expect(files).not.toContain("sources");
+    const assetNames = Object.keys(unzipSync(await readFile(path.join(dir, "capture.dhcapture"))))
+      .filter((name) => name.startsWith("assets/")).map((name) => name.slice(7));
     const cssName = assetNames.find(
       (name) => name.endsWith(".css") && name !== "rrweb.css",
     )!;
-    expect(await readFile(path.join(dir, "assets", cssName), "utf8")).toContain(
+    expect(await readProjectFile(dir, `assets/${cssName}`)).toContain(
       "/files/assets/",
     );
     await expect(captureReplay({ projectDir: dir } as any)).rejects.toThrow();
@@ -211,7 +215,7 @@ test("captures editable DOM replay and exports saved narration and video without
       expect(handoff.element.ref).toBe(heading.ref);
       expect(handoff.reference).toContain(heading.ref);
       expect(handoff.element.capturedHtml).toContain(
-        `/sources/${heading.ref}.html`,
+        `get_html(${heading.ref})`,
       );
       await page.keyboard.press("c");
       await clickHeading();
@@ -243,7 +247,7 @@ test("captures editable DOM replay and exports saved narration and video without
       ).toBe(copied.comment.id);
       expect(copied.element.ref).toBe(heading.ref);
       expect(copied.element.capturedHtml).toContain(
-        `/sources/${heading.ref}.html`,
+        `get_html(${heading.ref})`,
       );
       await page
         .getByRole("button", { name: "Copy comment ID", exact: true })

@@ -1,4 +1,4 @@
-import { ensureFormat } from "./format.js";
+import { ensureFormat, readFormat } from "./format.js";
 import {
   elementPatchSchema,
   elementKey,
@@ -106,6 +106,7 @@ export class ReplayWorkspace {
   }
   async basicInfo() {
     const bundle = await loadBundle(this.dir);
+    const bundled = (await readFormat(this.dir))?.formatVersion === 2;
     const preview = await this.previewState();
     return {
       contract,
@@ -125,8 +126,8 @@ export class ReplayWorkspace {
           !!preview && Date.now() - Date.parse(preview.updatedAt) < 8000,
       },
       files: {
-        registry: "elements.json",
-        capturedHtml: "sources/<element-ref>.html",
+        registry: bundled ? "capture.dhcapture!/elements.json" : "elements.json",
+        capturedHtml: bundled ? "MCP get_html(ref); generated from capture.dhcapture" : "sources/<element-ref>.html",
         edits: "edits.json",
         narration: "narration.json",
         comments: "comments.json",
@@ -511,7 +512,7 @@ export class ProjectTargets {
   async workspaceFor(dir: string): Promise<ReplayWorkspace> {
     const key = (
       await Promise.all(
-        ["events.json", "elements.json"].map((name) =>
+        ["events.json", "elements.json", "capture.dhcapture", "studio.json"].map((name) =>
           stat(path.join(dir, name))
             .then((s) => `${s.size}:${s.mtimeMs}`)
             .catch(() => "-"),

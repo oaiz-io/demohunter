@@ -12,9 +12,10 @@ import {
 } from "./agents.js";
 import type { LocalLibrary } from "./library.js";
 import { open, readFile, stat } from "node:fs/promises";
-import { ensureElementIndex, type ElementIndex, type ElementRecord } from "./elements.js";
+import { elementHtml, ensureElementIndex, type ElementIndex, type ElementRecord } from "./elements.js";
 import { clipDuration, isScene, narrationStart, outputToSource } from "./model.js";
-import { loadBundle, safeFile } from "./storage.js";
+import { loadBundle, readProjectFile, safeFile } from "./storage.js";
+import { readFormat } from "./format.js";
 import { restrictFolder, scenesTrusted } from "./trust.js";
 import { capturesInProgress, creationBrief, installSkills, recentTours } from "./create-demo.js";
 
@@ -261,7 +262,8 @@ export async function handleAgentRoute(
  * whole recording). */
 const indexes = new Map<string, { key: string; index: Promise<ElementIndex | undefined> }>();
 async function indexFor(dir: string): Promise<ElementIndex | undefined> {
-  const info = await stat(await safeFile(dir, "events.json")).catch(() => undefined);
+  const capture = (await readFormat(dir))?.formatVersion === 2 ? "capture.dhcapture" : "events.json";
+  const info = await stat(await safeFile(dir, capture)).catch(() => undefined);
   const key = info ? `${info.mtimeMs}:${info.size}` : "none";
   const cached = indexes.get(dir);
   if (cached?.key === key) return cached.index;
@@ -275,7 +277,7 @@ async function pageAt(dir: string, capture: string, sourceMs: number): Promise<s
   let cached = pages.get(dir);
   if (cached?.capture !== capture) {
     try {
-      const events = JSON.parse(await readFile(await safeFile(dir, "events.json"), "utf8")) as {
+      const events = JSON.parse(await readProjectFile(dir, "events.json")) as {
         type: number;
         timestamp: number;
         data?: { href?: string };
@@ -397,7 +399,7 @@ async function context(
     lines.push(`Selected element: ${JSON.stringify(ref)}${label ? ` (${JSON.stringify(label)})` : ""}.`);
     const record = byRef.get(ref);
     if (record) {
-      const html = await head(await safeFile(dir, record.source.file).catch(() => ""), 64_000);
+      const html = (await elementHtml(dir, record, 64_000).catch(() => undefined))?.html;
       if (html) {
         // Captured text can't close the block (the fence is longer than any
         // backtick run in it) or pose as Studio's own context line.
