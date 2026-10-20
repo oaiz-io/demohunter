@@ -6,7 +6,8 @@ import { z } from "zod";
 import {
   AgentHub,
   readAgentSettings,
-  writeAgentSettings,
+  unsafeMode,
+  updateAgentSettings,
   type AgentMessage,
 } from "./agents.js";
 import type { LocalLibrary } from "./library.js";
@@ -94,11 +95,9 @@ export async function handleAgentRoute(
         })
         .parse(await body(req));
       const { root } = await where(input.project);
-      const current = await readAgentSettings(root);
-      await writeAgentSettings(root, {
-        ...current,
-        autoSendNotes: input.autoSendNotes,
-        agent: input.agent,
+      await updateAgentSettings(root, (settings) => {
+        settings.autoSendNotes = input.autoSendNotes;
+        settings.agent = input.agent;
       });
       return json({ ok: true }), true;
     }
@@ -108,7 +107,8 @@ export async function handleAgentRoute(
           project: z.string(),
           kind: z.enum(["claude", "codex"]),
           purpose: z.enum(["signin", "run"]),
-          model: z.string().max(200).regex(/^[\w.:-]+$/).optional(),
+          // Model ids like "opus[1m]"; the terminal line quotes every argument.
+          model: z.string().max(200).regex(/^[\w.:[\]-]+$/).optional(),
         })
         .strict()
         .parse(await body(req));
@@ -173,13 +173,15 @@ export async function handleAgentRoute(
       const { root } = await where(input.project);
       if (root !== session.root) throw new Error("This demo belongs to another worktree.");
       const options = await session.setOption(input.id, input.value);
-      // Remembered for this worktree, so the next start uses the same model and mode.
-      const category = options.find((o) => o.id === input.id)?.category;
-      if (category) {
-        const settings = await readAgentSettings(root);
-        const key = category === "model" ? "models" : "modes";
-        settings[key] = { ...settings[key], [session.adapter.kind]: input.value };
-        await writeAgentSettings(root, settings);
+      // Remembered for this worktree, so the next start uses the same model
+      // and mode — except modes that stop asking, which are chosen each time.
+      const option = options.find((o) => o.id === input.id);
+      const choice = option?.choices.find((c) => c.value === input.value);
+      if (option && choice && !(option.category === "mode" && unsafeMode(choice))) {
+        const key = option.category === "model" ? "models" : "modes";
+        await updateAgentSettings(root, (settings) => {
+          settings[key] = { ...settings[key], [session.adapter.kind]: input.value };
+        });
       }
       return json({ options }), true;
     }
@@ -220,8 +222,11 @@ async function context(
     chips.push(clock(input.outputMs));
   }
   if (input.selection?.ref) {
-    lines.push(`Selected element: ${input.selection.ref}${input.selection.label ? ` (${input.selection.label})` : ""}.`);
-    chips.push(input.selection.label ?? input.selection.ref);
+    // Captured page text: quoted like note bodies, so it can't pose as Studio.
+    const ref = plain(input.selection.ref);
+    const label = input.selection.label ? plain(input.selection.label) : undefined;
+    lines.push(`Selected element: ${JSON.stringify(ref)}${label ? ` (${JSON.stringify(label)})` : ""}.`);
+    chips.push(label ?? ref);
   }
   const notes = (input.notes ?? [])
     .map((id) => bundle.comments.threads.find((t) => t.id === id))
@@ -241,6 +246,9 @@ async function context(
   );
   return { preamble: lines.join("\n"), chips };
 }
+
+/** One line of text: control characters (newlines included) become spaces. */
+const plain = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").trim();
 
 async function body(req: IncomingMessage): Promise<unknown> {
   let text = "";

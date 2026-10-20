@@ -172,6 +172,9 @@ export class AgentChat {
   /** Start (or reuse) the preferred agent for this demo's worktree. */
   async start(kind = this.info?.settings.agent ?? "claude"): Promise<AgentSummary> {
     if (this.restarting) return this.restarting;
+    return this.startNow(kind);
+  }
+  private async startNow(kind: AgentSummary["kind"]): Promise<AgentSummary> {
     if (this.session && this.session.kind === kind && !["error", "stopped"].includes(this.session.status))
       return this.session;
     this.starting = kind;
@@ -227,6 +230,8 @@ export class AgentChat {
       });
       session.options = options;
     } catch (error) {
+      // Show the choice that still applies.
+      delete document.querySelector<HTMLSelectElement>(`#agent-${category}`)!.dataset.key;
       this.hooks.error(error);
     }
     this.renderSetup();
@@ -282,7 +287,8 @@ export class AgentChat {
     }
   }
   async send(text: string, notes?: string[]): Promise<void> {
-    const session = await this.start();
+    // To the agent whose thread is open (else the preferred one).
+    const session = await this.start(this.session?.kind);
     const selection = this.hooks.selection();
     await this.post(`/api/agents/${session.id}/prompt`, {
       text,
@@ -508,10 +514,8 @@ export class AgentChat {
                 : Promise.resolve();
             if (session) session.status = "stopped";
             this.renderRoster();
-            const restart = stopping.then(() => {
-              this.restarting = undefined;
-              return this.start(kind);
-            });
+            // Held until the new session is up, so a message typed now goes to it.
+            const restart = stopping.then(() => this.startNow(kind));
             this.restarting = restart;
             void restart.catch(this.hooks.error).finally(() => {
               if (this.restarting === restart) this.restarting = undefined;

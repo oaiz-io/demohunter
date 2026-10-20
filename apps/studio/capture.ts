@@ -54,6 +54,7 @@ export async function captureReplay(
   const events: eventWithTime[] = [];
   const segments: NarrationSegment[] = [];
   const warnings = new Set<string>();
+  const failedAssets = new Set<string>();
   const assets = new Map<
     string,
     { file: string; body: Buffer; css: boolean }
@@ -106,11 +107,9 @@ export async function captureReplay(
           css: contentType === "text/css",
         });
       } catch {
-        // A repeat request after navigation has no body; the first copy counts.
-        if (!assets.has(response.url()))
-          warnings.add(
-            `Could not bundle asset: ${new URL(response.url()).pathname}`,
-          );
+        // Decided at the end, by exact URL: a repeat request after navigation
+        // has no body, but an earlier or later copy may have been bundled.
+        failedAssets.add(response.url());
       }
     })();
     pending.add(task);
@@ -173,6 +172,23 @@ export async function captureReplay(
         events.push(event);
       },
     );
+    /** What a tour types is demo content; anything that looks secret is
+     * masked: password fields (also after a show-password toggle), password,
+     * one-time-code and card autocomplete, secret-looking names, and anything
+     * inside [data-dh-mask]. */
+    const defineMask = () => {
+      (window as any).__dhMaskInput = (text: string, el: HTMLElement) => {
+        const input = el as HTMLInputElement;
+        const named = `${input.name ?? ""} ${input.id ?? ""} ${el.getAttribute("aria-label") ?? ""}`;
+        const secret =
+          input.type === "password" ||
+          el.hasAttribute("data-rr-is-password") ||
+          /password|one-time-code|cc-/i.test(el.getAttribute("autocomplete") ?? "") ||
+          /password|passcode|passphrase|\bpass\b|secret|token|api[-_ ]?key|\botp\b|\bpin\b|cvc|cvv|\bssn\b|personnummer/i.test(named) ||
+          !!el.closest("[data-dh-mask]");
+        return secret ? "*".repeat(text.length) : text;
+      };
+    };
     const armRecorder = () => {
       const w = window as any;
       // Re-arm on full navigation, but do not capture setup/beforeRecord.
@@ -184,8 +200,9 @@ export async function captureReplay(
           inlineStylesheet: true,
           inlineImages: true,
           collectFonts: true,
-          // Typed text is part of the demo; only passwords are masked.
-          maskInputOptions: { password: true },
+          // Every field goes through __dhMaskInput, which masks secrets only.
+          maskInputOptions: { input: true, textarea: true, select: true, password: true },
+          maskInputFn: (text: string, el: HTMLElement) => w.__dhMaskInput(text, el),
           recordCanvas: false,
           // Smooth scrolls replay smoothly (rrweb's default is 100 ms).
           sampling: { scroll: 16 },
@@ -194,7 +211,7 @@ export async function captureReplay(
     };
     // A single init script guarantees the recorder exists before re-arming on navigation.
     await context.addInitScript({
-      content: `${await readFile(rrwebPath, "utf8")}\n;(${armRecorder.toString()})();`,
+      content: `${await readFile(rrwebPath, "utf8")}\n;(${defineMask.toString()})();\n;(${armRecorder.toString()})();`,
     });
     const page = await context.newPage();
     await replayTimeline({
@@ -214,7 +231,8 @@ export async function captureReplay(
             inlineStylesheet: true,
             inlineImages: true,
             collectFonts: true,
-            maskInputOptions: { password: true },
+            maskInputOptions: { input: true, textarea: true, select: true, password: true },
+            maskInputFn: (text: string, el: HTMLElement) => w.__dhMaskInput(text, el),
             recordCanvas: false,
             sampling: { scroll: 16 },
           });
@@ -273,8 +291,6 @@ export async function captureReplay(
         warnings.add(`Could not bundle font: ${new URL(url).pathname}`);
         continue;
       }
-      // Bundled after all: drop the warning from the failed first attempt.
-      warnings.delete(`Could not bundle asset: ${new URL(url).pathname}`);
       const extension = /\.(woff2?|ttf|otf)(?:\?|$)/.exec(url)?.[1] ?? "bin";
       assets.set(url, {
         file: `assets/${createHash("sha256").update(url).digest("hex").slice(0, 20)}.${extension}`,
@@ -287,9 +303,8 @@ export async function captureReplay(
     if (!events.some((event) => event.type === 2))
       throw new Error("No DOM snapshot was captured.");
 
-    // A failed repeat may finish before the copy that succeeded.
-    for (const url of assets.keys())
-      warnings.delete(`Could not bundle asset: ${new URL(url).pathname}`);
+    for (const url of failedAssets)
+      if (!assets.has(url)) warnings.add(`Could not bundle asset: ${new URL(url).pathname}`);
     const replacements = [...assets].sort(([a], [b]) => b.length - a.length);
     const rewrite = (text: string): string =>
       replacements.reduce(

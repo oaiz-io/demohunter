@@ -13,6 +13,10 @@ export const shellQuote = (arg: string) => `'${arg.replace(/'/g, `'\\''`)}'`;
 
 /** The line typed into the terminal: change to the folder, then run argv. */
 export function terminalLine(cwd: string, argv: string[]): string {
+  // The line is typed into an interactive shell, whose line editor acts on
+  // control characters (Ctrl-U erases what came before) even inside quotes.
+  if ([cwd, ...argv].some((a) => /[\u0000-\u001f\u007f]/.test(a)))
+    throw Object.assign(new Error("That folder or command can't be opened in Terminal."), { status: 400 });
   return `cd ${shellQuote(cwd)} && ${argv.map(shellQuote).join(" ")}`;
 }
 

@@ -114,9 +114,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          # Passed as data, never pasted into the script.
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          TAG="${{ inputs.tag }}"
+          if ! [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]]; then
+            echo "Invalid tag: use letters, digits, dot, dash or underscore." >&2
+            exit 1
+          fi
           cat > notes.md <<EOF
           **DemoHunter Studio desktop — alpha.** Unsigned test build from \`${GITHUB_REF_NAME}\` @ \`${GITHUB_SHA::7}\` ($(date -u +%Y-%m-%d)). Expect rough edges; projects you open are only read and edited locally.
 

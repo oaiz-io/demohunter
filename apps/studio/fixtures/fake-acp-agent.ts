@@ -3,6 +3,7 @@
 //  - "plan" → a plan update and a tool call
 //  - "permission" → asks for permission and reports the outcome
 //  - "peek" → asks to use a read-only DemoHunter tool
+//  - "spoof" → a shell command titled like a DemoHunter tool
 //  - "slow" → waits until cancelled
 //  - "which model" → reports the chosen model and mode
 //  - FAKE_AGENT_FAIL=auth makes session/new fail like a signed-out agent;
@@ -27,6 +28,7 @@ const configOptions = () => [
     options: [
       { value: "default", name: "Manual" },
       { value: "plan", name: "Plan" },
+      { value: "bypassPermissions", name: "Bypass permissions" },
     ],
   },
   {
@@ -48,6 +50,8 @@ new acp.AgentSideConnection(
       return { protocolVersion: acp.PROTOCOL_VERSION, agentCapabilities: { loadSession: false } };
     },
     async newSession(params) {
+      // Slow to start, like a real agent signing in to its service.
+      if (process.env.FAKE_AGENT_SLOW_START) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_AGENT_SLOW_START)));
       if (process.env.FAKE_AGENT_FAIL === "auth")
         throw acp.RequestError.authRequired();
       // Report what Studio handed us, so tests can check cwd and MCP wiring.
@@ -116,13 +120,30 @@ new acp.AgentSideConnection(
         // A read-only DemoHunter tool: Studio answers without asking.
         const answer = await client.requestPermission({
           sessionId: params.sessionId,
-          toolCall: { toolCallId: "t3", title: "mcp__demohunter__get_basic_info" },
+          // As Claude Code sends it: the MCP tool and server in _meta.
+          toolCall: {
+            toolCallId: "t3",
+            title: "mcp__demohunter__get_basic_info",
+            _meta: { claudeCode: { toolName: "mcp__demohunter__get_basic_info", mcpServer: { name: "demohunter" } } },
+          },
           options: [
             { optionId: "yes", name: "Allow once", kind: "allow_once" },
             { optionId: "no", name: "Deny", kind: "reject_once" },
           ],
         });
         await say(`\nRead: ${answer.outcome.outcome === "selected" ? answer.outcome.optionId : "cancelled"}`);
+      }
+      if (text.includes("spoof")) {
+        // A shell command titled like a DemoHunter tool: must still ask.
+        const answer = await client.requestPermission({
+          sessionId: params.sessionId,
+          toolCall: { toolCallId: "t4", title: "demohunter/get_guide", kind: "execute", rawInput: { command: "demohunter/get_guide" } },
+          options: [
+            { optionId: "yes", name: "Allow once", kind: "allow_once" },
+            { optionId: "no", name: "Deny", kind: "reject_once" },
+          ],
+        });
+        await say(`\nSpoof: ${answer.outcome.outcome === "selected" ? answer.outcome.optionId : "cancelled"}`);
       }
       if (text.includes("slow")) {
         await new Promise<void>((resolve) => (cancelled = resolve));

@@ -50,7 +50,7 @@ test("captures editable DOM replay and exports saved narration and video without
     }
     res.setHeader("Content-Type", "text/html");
     res.end(
-      `<html><head><link rel="stylesheet" href="/theme.css"><link rel="icon" href="/favicon.png"></head><body><h1>${req.url === "/second" ? "Second document" : "Original heading"}</h1><button onclick="document.querySelector('h1').textContent='Changed heading'">Change</button><textarea aria-label="Message"></textarea><input type="password" aria-label="Password"></body></html>`,
+      `<html><head><link rel="stylesheet" href="/theme.css"><link rel="icon" href="/favicon.png"></head><body><h1>${req.url === "/second" ? "Second document" : "Original heading"}</h1><button onclick="document.querySelector('h1').textContent='Changed heading'">Change</button><textarea aria-label="Message"></textarea><input type="password" aria-label="Password"><input type="text" name="api_key" aria-label="API key"><input autocomplete="one-time-code" aria-label="Code"><div data-dh-mask><input aria-label="Private"></div></body></html>`,
     );
   });
   await new Promise<void>((resolve) => app.listen(0, "127.0.0.1", resolve));
@@ -80,6 +80,9 @@ test("captures editable DOM replay and exports saved narration and video without
             await page.getByRole("button", { name: "Change" }).click();
             await page.getByLabel("Message").fill("Typed in the demo");
             await page.getByLabel("Password").fill("hunter2-secret");
+            await page.getByLabel("API key").fill("sk-live-abc123");
+            await page.getByLabel("Code").fill("482913");
+            await page.getByLabel("Private").fill("private-note-text");
             await page.waitForTimeout(80);
             await goto("/second");
             await page.waitForTimeout(80);
@@ -97,6 +100,8 @@ test("captures editable DOM replay and exports saved narration and video without
     // What a tour types is demo content; passwords stay masked.
     expect(eventText).toContain("Typed in the demo");
     expect(eventText).not.toContain("hunter2-secret");
+    // Secrets in ordinary text fields are masked too.
+    for (const secret of ["sk-live-abc123", "482913", "private-note-text"]) expect(eventText).not.toContain(secret);
     expect(eventText).toContain("/files/assets/");
     // Declared but unused fonts are bundled; unfetched icons are dropped.
     expect(eventText).not.toContain(`127.0.0.1:${port}/unused.woff2`);

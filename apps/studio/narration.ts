@@ -65,7 +65,7 @@ export async function regenerateNarration(
       // container so players and the browser recognise it.
       const extension =
         /^\.(mp3|wav|opus|ogg|aac|flac|pcm|m4a)/i.exec(path.extname(resolved.audioPath))?.[0].toLowerCase() ??
-        ".mp3";
+        ".bin";
       // One file per segment, named for it so a single line is easy to find,
       // listen to or replace; export stitches them. The key keeps each take
       // distinct, so a stale file never shadows the current one.

@@ -12,6 +12,23 @@ import { projectFixture } from "../../studio/test-support.js";
 
 const bundle = process.argv[2];
 if (!bundle) throw new Error("Usage: bun smoke.ts <path to .app>");
+
+// The agents ship inside the app (see apps/studio/agents.ts): both must run
+// from it with a bare PATH, as for someone who installed neither.
+const resources = path.join(bundle, "Contents/Resources/app");
+for (const [name, args] of [
+  ["Claude Code", [path.join(resources, "node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"), "--cli", "--version"]],
+  ["Codex", [path.join(resources, "node_modules/@openai/codex/bin/codex.js"), "--version"]],
+] as const) {
+  const version = execFileSync(path.join(resources, "bin/bun"), [...args], {
+    env: { HOME: process.env.HOME!, PATH: "/usr/bin:/bin" },
+    timeout: 60_000,
+  })
+    .toString()
+    .trim();
+  if (!version) throw new Error(`${name} did not run from the app.`);
+  console.log(`${name}: ${version}`);
+}
 const base = await realpath(await mkdtemp(path.join(tmpdir(), "dh-smoke-")));
 const repo = path.join(base, "repo"),
   feature = path.join(base, "feature");

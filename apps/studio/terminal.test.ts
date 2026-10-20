@@ -5,6 +5,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { terminalLine, terminalScript } from "./terminal.js";
 
+test("control characters never reach the terminal line (the line editor would act on them)", () => {
+  expect(() => terminalLine("/tmp/a\u0015open -a Calculator", ["claude"])).toThrow("can't be opened in Terminal");
+  expect(() => terminalLine("/tmp/a", ["claude", "x\ny"])).toThrow();
+});
+
 test("the terminal line runs exactly the argv, in the folder, whatever the quotes", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "dh term 'q' "));
   try {

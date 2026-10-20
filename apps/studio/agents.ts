@@ -40,7 +40,8 @@ const ADAPTERS: Adapter[] = [
 
 /** An executable on the person's PATH, if there is one. */
 function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
-  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+  // Absolute entries only: "." would find a `codex` shipped in the repository.
+  for (const dir of (env.PATH ?? "").split(path.delimiter).filter((d) => path.isAbsolute(d))) {
     const file = path.join(dir, name);
     try {
       accessSync(file, fsConstants.X_OK);
@@ -123,13 +124,30 @@ function readOnlyTools(root: string): Promise<Set<string>> {
     return new Set<string>();
   }));
 }
-/** "mcp__demohunter__get_guide" (Claude), "mcp.demohunter.get_guide" (Codex)
- * or "demohunter.get_guide" → "get_guide". */
-function demoToolName(call: acp.ToolCallUpdate): string | undefined {
-  const meta = (call._meta as { claudeCode?: { toolName?: unknown } } | undefined)?.claudeCode?.toolName;
-  const name = typeof meta === "string" ? meta : (call.title ?? "");
-  return /^(?:mcp__demohunter__|(?:mcp\.)?demohunter[./:])([a-z0-9_]+)$/i.exec(name.trim())?.[1];
+/** Which DemoHunter tool a permission request is for, from what the agent
+ * reports about the call — never its free-form title, which for a shell
+ * command is the command itself and can say anything. Claude Code names the
+ * tool and its MCP server in _meta; Codex's MCP call announces itself as
+ * "mcp.<server>.<tool>" in its tool_call event. */
+function demoToolName(
+  call: acp.ToolCallUpdate,
+  announced?: { title: string; kind?: string },
+): string | undefined {
+  const claude = (call._meta as { claudeCode?: { toolName?: unknown; mcpServer?: { name?: unknown } } } | undefined)
+    ?.claudeCode;
+  if (claude) {
+    if (typeof claude.toolName !== "string" || (claude.mcpServer && claude.mcpServer.name !== "demohunter")) return;
+    return /^mcp__demohunter__([a-z0-9_]+)$/.exec(claude.toolName)?.[1];
+  }
+  if (!announced || ["execute", "edit", "delete", "move"].includes(announced.kind ?? "")) return;
+  return /^mcp\.demohunter\.([a-z0-9_]+)$/.exec(announced.title)?.[1];
 }
+
+/** Modes that stop asking before the agent acts. They are offered, but never
+ * restored on their own: a repository could otherwise ship (or an agent
+ * write) settings that start the next session with no prompts. */
+export const unsafeMode = (choice: { value: string; name?: string }) =>
+  /bypass|full|never|danger|yolo/i.test(`${choice.value} ${choice.name ?? ""}`);
 
 /** Tests point a kind at a scripted agent. */
 const overrides = new Map<AgentKind, string>();
@@ -228,6 +246,8 @@ class AgentSession {
   private stderr = "";
   private tools = new Map<string, Extract<AgentEvent, { type: "tool" }>>();
   options: AgentOption[] = [];
+  /** Settles when the session can take prompts (or failed to start). */
+  private ready: Promise<void> = Promise.resolve();
 
   constructor(
     readonly adapter: Adapter,
@@ -285,10 +305,14 @@ class AgentSession {
     this.child = child;
     child.stderr!.on("data", (d) => (this.stderr = (this.stderr + d).slice(-4000)));
     child.once("exit", (code, signal) => {
-      for (const p of this.pending.values())
+      for (const p of this.pending.values()) {
+        p.event.chosen = "cancelled";
+        this.emit(p.event, false);
         p.resolve({ outcome: { outcome: "cancelled" } });
+      }
       this.pending.clear();
-      if (this.status === "stopped") return;
+      // Stopped on purpose, or a failed start that already said why.
+      if (this.status === "stopped" || this.status === "error") return;
       this.add("notice", {
         text: `${this.adapter.name} stopped (${signal ?? `exit ${code}`}).`,
         tone: "error",
@@ -306,6 +330,8 @@ class AgentSession {
       }),
       stream,
     );
+    let settle!: () => void;
+    this.ready = new Promise<void>((resolve) => (settle = resolve));
     try {
       await this.conn.initialize({
         protocolVersion: acp.PROTOCOL_VERSION,
@@ -325,14 +351,19 @@ class AgentSession {
       });
       this.acpSession = session.sessionId;
       this.options = readOptions((session as { configOptions?: unknown }).configOptions);
-      // The person's last choices for this worktree, when the agent still offers them.
+      for (const listener of this.listeners) listener({ type: "options", options: this.options });
+      // The person's last choices for this worktree, when the agent still
+      // offers them; never a mode that stops asking.
       for (const [category, value] of Object.entries(preferred) as ["model" | "mode", string | undefined][]) {
         const option = this.options.find((o) => o.category === category);
-        if (value && option && option.current !== value && option.choices.some((c) => c.value === value))
-          await this.setOption(option.id, value).catch(() => {});
+        const choice = option?.choices.find((c) => c.value === value);
+        if (!option || !choice || option.current === value || (category === "mode" && unsafeMode(choice))) continue;
+        await this.setOption(option.id, choice.value).catch(() => {});
       }
       this.setStatus("idle");
+      settle();
     } catch (error) {
+      settle();
       this.add("notice", { ...startError(this.adapter, error, this.stderr), tone: "error" });
       this.setStatus("error");
       child.kill();
@@ -349,6 +380,8 @@ class AgentSession {
         const last = this.events.at(-1);
         // Stream chunks into the current message.
         if (last && last.type === type) {
+          // One message is capped, so a runaway stream can't grow without bound.
+          if (last.text.length > 200_000) return;
           last.text += update.content.text;
           this.emit(last, false);
         } else this.add(type, { text: update.content.text });
@@ -388,7 +421,7 @@ class AgentSession {
   }
 
   private async onPermission(params: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
-    const tool = demoToolName(params.toolCall);
+    const tool = demoToolName(params.toolCall, this.tools.get(params.toolCall.toolCallId));
     if (tool && (await readOnlyTools(this.root)).has(tool)) {
       const allow =
         params.options.find((o) => o.kind === "allow_once") ??
@@ -427,11 +460,15 @@ class AgentSession {
 
   /** Queue a prompt; prompts run one at a time. */
   prompt(text: string, context: string[], preamble: string) {
-    if (!this.conn || !this.acpSession) throw new Error(`${this.adapter.name} isn't ready yet.`);
     if (this.status === "error" || this.status === "stopped")
       throw new Error(`${this.adapter.name} stopped. Start it again.`);
+    if (!this.conn) throw new Error(`${this.adapter.name} isn't ready yet.`);
     this.add("user", { text, context });
     const run = async () => {
+      // A message sent while the agent starts waits for it.
+      await this.ready;
+      // (The status may have changed while waiting.)
+      if (!this.acpSession || ["error", "stopped"].includes(this.status as AgentStatus)) return;
       this.setStatus("working");
       try {
         const result = await this.conn!.prompt({
@@ -530,6 +567,8 @@ export function terminalCommand(
     `mcp_servers.demohunter.command=${JSON.stringify(mcp.command)}`,
     "-c",
     `mcp_servers.demohunter.args=${JSON.stringify(mcp.args)}`,
+    "-c",
+    'mcp_servers.demohunter.env.DEMOHUNTER_AGENT_NAME="Codex"',
   ];
 }
 
@@ -571,13 +610,17 @@ export class AgentHub {
         new Error("Agents run code in this folder. Trust the folder first, then start the agent."),
         { status: 403 },
       );
+    const key = `${kind}\0${root}`;
+    // A start in flight answers first: its session is listed as "starting".
+    const inFlight = this.starting.get(key);
+    if (inFlight) return inFlight;
     const live = [...this.sessions.values()].find(
       (s) => s.adapter.kind === kind && s.root === root && !["stopped", "error"].includes(s.status),
     );
     if (live) return live.summary();
-    const key = `${kind}\0${root}`;
-    const inFlight = this.starting.get(key);
-    if (inFlight) return inFlight;
+    // Ended sessions of this agent and worktree go; the new one replaces them.
+    for (const [id, s] of this.sessions)
+      if (s.adapter.kind === kind && s.root === root && ["stopped", "error"].includes(s.status)) this.sessions.delete(id);
     const adapter = ADAPTERS.find((a) => a.kind === kind);
     if (!adapter) throw new Error(`Unknown agent: ${kind}`);
     const session = new AgentSession(adapter, root, {
@@ -639,4 +682,20 @@ export async function readAgentSettings(root: string): Promise<AgentSettings> {
 export async function writeAgentSettings(root: string, settings: AgentSettings) {
   await ensureIgnoredFolder(root, ".demohunter/studio");
   await writeJson(settingsFile(root), settings);
+}
+/** Change some settings: read, change and write one at a time per worktree,
+ * so two quick changes (model, then mode) don't overwrite each other. */
+const settingsQueues = new Map<string, Promise<unknown>>();
+export function updateAgentSettings(root: string, change: (settings: AgentSettings) => void): Promise<AgentSettings> {
+  const run = (settingsQueues.get(root) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    const settings = await readAgentSettings(root);
+    change(settings);
+    await writeAgentSettings(root, settings);
+    return settings;
+  });
+  settingsQueues.set(root, run);
+  void run.finally(() => {
+    if (settingsQueues.get(root) === run) settingsQueues.delete(root);
+  });
+  return run;
 }
