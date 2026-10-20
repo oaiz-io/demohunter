@@ -56,9 +56,10 @@ function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
 const bunArgs = process.versions.bun ? ["--no-env-file"] : [];
 /** A Studio script run with Studio's Bun (or Node), without `.env` files. */
 const script = (file: string, ...args: string[]) => [process.execPath, ...bunArgs, file, ...args];
-/** API keys never reach an agent: it runs on the person's own subscription
- * login (`claude` / `codex` signed in), the same as in their terminal. */
-const API_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"];
+/** Keys and tokens never reach an agent: it runs on the login the person
+ * made with `claude` / `codex` (their subscription), never on an account a
+ * repository's .env or a key in the environment names. */
+const API_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"];
 /** The person's own CLI on PATH: what they run in a terminal, with its login. */
 const ownCli = (kind: AgentKind) => onPath(kind === "claude" ? "claude" : "codex", process.env);
 /** The person's environment for an agent, running their own `claude` or

@@ -188,9 +188,12 @@ function startStudio(dir) {
   stopStudio();
   return new Promise((resolve, reject) => {
     const trusted = isTrusted(dir);
-    const child = spawn(bun(), [cli, dir, "--port", "0", ...(trusted ? [] : ["--restricted"])], {
+    // --no-env-file: Bun never loads the repository's .env into Studio (or
+    // the agents it starts) — a repo's CLAUDE_CODE_OAUTH_TOKEN would sign
+    // Claude Code into that account instead of the person's own.
+    const child = spawn(bun(), ["--no-env-file", cli, dir, "--port", "0", ...(trusted ? [] : ["--restricted"])], {
       // Untrusted folders never become Bun's working directory, so a
-      // repository's bunfig.toml preload or .env can't run or load.
+      // repository's bunfig.toml preload can't run.
       cwd: trusted ? dir : app.getPath("userData"),
       env: { ...loginEnv(), FORCE_COLOR: "0", DEMOHUNTER_EXIT_WITH_STDIN: "1" },
       stdio: ["pipe", "pipe", "pipe"],
