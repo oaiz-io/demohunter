@@ -213,7 +213,8 @@ export type AgentStatus =
 export type AgentMessage =
   | { type: "event"; event: AgentEvent }
   | { type: "status"; status: AgentStatus }
-  | { type: "options"; options: AgentOption[] };
+  | { type: "options"; options: AgentOption[] }
+  | { type: "yolo"; on: boolean };
 
 export type AgentSummary = {
   id: string;
@@ -224,6 +225,8 @@ export type AgentSummary = {
   startedAt: string;
   /** Model and mode choices the agent offers, with the current ones. */
   options: AgentOption[];
+  /** Every tool request is approved without asking. */
+  yolo: boolean;
 };
 
 type Pending = {
@@ -246,6 +249,8 @@ class AgentSession {
   private stderr = "";
   private tools = new Map<string, Extract<AgentEvent, { type: "tool" }>>();
   options: AgentOption[] = [];
+  /** Approve every tool request without asking (this session only; never saved). */
+  yolo = false;
   /** Settles when the session can take prompts (or failed to start). */
   private ready: Promise<void> = Promise.resolve();
 
@@ -264,6 +269,7 @@ class AgentSession {
       status: this.status,
       startedAt: this.startedAt,
       options: this.options,
+      yolo: this.yolo,
     };
   }
   subscribe(listener: (message: AgentMessage) => void) {
@@ -421,6 +427,10 @@ class AgentSession {
   }
 
   private async onPermission(params: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
+    if (this.yolo) {
+      const allow = params.options.find((o) => o.kind === "allow_once") ?? params.options.find((o) => o.kind === "allow_always");
+      if (allow) return { outcome: { outcome: "selected", optionId: allow.optionId } };
+    }
     const tool = demoToolName(params.toolCall, this.tools.get(params.toolCall.toolCallId));
     if (tool && (await readOnlyTools(this.root)).has(tool)) {
       const allow =
@@ -490,6 +500,17 @@ class AgentSession {
       }
     };
     this.queue = this.queue.then(run, run);
+  }
+
+  /** YOLO: approve every tool request from now on (and the ones waiting). */
+  setYolo(on: boolean) {
+    this.yolo = on;
+    if (on)
+      for (const [id, p] of [...this.pending]) {
+        const allow = p.event.options.find((o) => o.kind === "allow_once") ?? p.event.options.find((o) => o.kind === "allow_always");
+        if (allow) this.answer(id, allow.optionId);
+      }
+    for (const listener of this.listeners) listener({ type: "yolo", on });
   }
 
   /** Choose a model or mode for this session. */

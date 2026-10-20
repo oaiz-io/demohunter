@@ -296,10 +296,15 @@ export class AgentChat {
       const data = JSON.parse(message.data);
       if (data.type === "snapshot") {
         if (data.options) summary.options = data.options;
+        summary.yolo = !!data.yolo;
+        this.renderSetup();
         this.setStatus(data.status);
         for (const e of data.events as AgentEvent[]) this.upsert(e);
       } else if (data.type === "status") this.setStatus(data.status);
-      else if (data.type === "options") {
+      else if (data.type === "yolo") {
+        summary.yolo = data.on;
+        this.renderSetup();
+      } else if (data.type === "options") {
         summary.options = data.options;
         this.renderSetup();
       } else this.upsert(data.event as AgentEvent);
@@ -448,6 +453,9 @@ export class AgentChat {
     const info = this.info;
     setup.hidden = !info || !info.trusted;
     if (!info) return;
+    const yolo = document.querySelector<HTMLButtonElement>("#agent-yolo")!;
+    yolo.hidden = !this.session?.yolo || this.session.status === "error";
+    yolo.onclick = () => void this.post(`/api/agents/${this.session?.id}/yolo`, { on: false }).catch(this.hooks.error);
     const place = document.querySelector<HTMLElement>("#agent-place")!;
     place.textContent = `${info.place.name}${info.place.branch ? ` · ${info.place.branch}` : ""}`;
     place.title = `${this.session?.name ?? "Agents"} work in ${info.root}`;
@@ -613,6 +621,14 @@ export class AgentChat {
           card.append(make("div", "agent-permission-answer", e.chosen === "cancelled" ? "Cancelled" : chosen?.kind.startsWith("allow") ? `Allowed — ${chosen.name}` : "Denied"));
         } else {
           const actions = make("div", "agent-permission-actions");
+          // YOLO: approve this and everything after it in this session.
+          const yolo = make("button", "button small yolo", "YOLO") as HTMLButtonElement;
+          yolo.type = "button";
+          yolo.title = "Approve this and every tool request from now on (this session)";
+          yolo.onclick = () => {
+            for (const other of actions.querySelectorAll("button")) other.disabled = true;
+            void this.post(`/api/agents/${this.session?.id}/yolo`, { on: true }).catch(this.hooks.error);
+          };
           for (const option of e.options) {
             const b = make("button", option.kind === "allow_once" ? "button small primary" : option.kind.startsWith("reject") ? "quiet small-text deny" : "button small secondary", option.name) as HTMLButtonElement;
             b.type = "button";
@@ -622,6 +638,7 @@ export class AgentChat {
             };
             actions.append(b);
           }
+          actions.append(yolo);
           card.append(actions);
         }
         return card;

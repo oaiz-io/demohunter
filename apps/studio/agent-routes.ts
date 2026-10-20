@@ -118,7 +118,7 @@ export async function handleAgentRoute(
       const { root, trusted } = await where(input.project);
       return json(await hub.terminal(input.kind, root, !trusted, input.purpose, input.model)), true;
     }
-    const match = /^\/api\/agents\/([0-9a-f-]{36})\/(stream|prompt|permission|option|cancel|stop)$/.exec(
+    const match = /^\/api\/agents\/([0-9a-f-]{36})\/(stream|prompt|permission|option|yolo|cancel|stop)$/.exec(
       url.pathname,
     );
     if (!match) return json({ error: "Not found." }, 404), true;
@@ -131,7 +131,7 @@ export async function handleAgentRoute(
         Connection: "keep-alive",
       });
       const send = (value: unknown) => res.write(`data: ${JSON.stringify(value)}\n\n`);
-      send({ type: "snapshot", status: session.status, events: session.events, options: session.options });
+      send({ type: "snapshot", status: session.status, events: session.events, options: session.options, yolo: session.yolo });
       const unsubscribe = session.subscribe((message: AgentMessage) => send(message));
       const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 15_000);
       req.on("close", () => {
@@ -171,6 +171,11 @@ export async function handleAgentRoute(
         .parse(await body(req));
       session.answer(input.requestId, input.optionId);
       return json({ ok: true }), true;
+    }
+    if (action === "yolo") {
+      const input = z.object({ on: z.boolean() }).strict().parse(await body(req));
+      session.setYolo(input.on);
+      return json({ ok: true, yolo: session.yolo }), true;
     }
     if (action === "option") {
       const input = z
