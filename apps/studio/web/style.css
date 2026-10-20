@@ -3534,7 +3534,13 @@ body.no-agent-chat .comment-send {
 .agent-tools > summary::-webkit-details-marker {
   display: none;
 }
+/* "Used 2 tools" stays on one line; the tool names give way. */
+.agent-tools-title {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .agent-tools-names {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

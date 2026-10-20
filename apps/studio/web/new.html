@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>New demo · DemoHunter Studio (alpha)</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 20'%3E%3Cpath d='M6 1h19l-5 18H1z' fill='white' stroke='%23111' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M8.5 7h11l-1.6 6h-11z' fill='%23ffe53d'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/new.css" />
+    <script defer src="/new.js"></script>
+  </head>
+  <body class="new-demo">
+    <header class="nd-bar">
+      <a class="nd-brand" href="/" aria-label="Back to demos"
+        ><svg viewBox="0 0 26 20" aria-hidden="true">
+          <path class="logo-frame" d="M6 1h19l-5 18H1z" />
+          <path class="logo-mark" d="M8.5 7h11l-1.6 6h-11z" /></svg
+      ></a>
+      <a class="nd-back" href="/">Demos</a>
+      <span class="nd-crumb" aria-hidden="true">/</span>
+      <strong>New demo</strong>
+      <span class="alpha-badge" title="DemoHunter Studio is in alpha: expect rough edges, and keep your demos in git">Alpha</span>
+      <span class="nd-spacer"></span>
+      <label class="nd-where" title="The repository checkout, worktree or folder the agent works in"
+        ><span class="muted">in</span> <select id="nd-root" aria-label="Where to create the demo"></select
+      ></label>
+    </header>
+    <div id="error" class="error" role="alert" hidden>
+      <span id="error-text"></span
+      ><button id="error-dismiss" class="error-dismiss" type="button" aria-label="Dismiss message">×</button>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <div class="nd-layout">
+      <main class="nd-stage" aria-label="The demo, taking shape">
+        <!-- Before the first message: what to ask for. -->
+        <div id="nd-intro" class="nd-intro">
+          <p class="micro-label">New demo</p>
+          <h1>What should the demo show?</h1>
+          <p class="nd-lede">
+            Describe it in the chat: a flow, a feature, who it is for. Your
+            agent reads this project, writes a tour and records it as an
+            editable demo, right here.
+          </p>
+          <div class="nd-examples" id="nd-examples"></div>
+          <ol class="nd-preview" aria-hidden="true">
+            <li>Brief</li>
+            <li>Tour</li>
+            <li>Recording</li>
+            <li>Demo</li>
+          </ol>
+        </div>
+        <!-- After it: the demo taking shape. -->
+        <div id="nd-live" class="nd-live" hidden>
+          <ol id="nd-steps" class="nd-steps" aria-label="Progress"></ol>
+          <section id="nd-result" class="nd-result" hidden>
+            <a id="nd-result-art" class="nd-result-art"><img id="nd-poster" alt="" /><span id="nd-duration" class="nd-duration mono"></span></a>
+            <div class="nd-result-body">
+              <p class="micro-label">Your demo is ready</p>
+              <h2 id="nd-result-title"></h2>
+              <code id="nd-result-path" class="mono muted"></code>
+              <div class="nd-result-actions">
+                <button type="button" id="nd-open" class="button primary">Open in editor</button>
+                <button type="button" id="nd-again" class="button secondary">Create another</button>
+              </div>
+              <p class="muted nd-result-note">Narration is a draft: generate the voice in the editor.</p>
+            </div>
+          </section>
+          <section id="nd-recording" class="nd-recording" hidden>
+            <span class="nd-rec-dot" aria-hidden="true"></span>
+            <div>
+              <strong>Recording</strong>
+              <p class="muted" id="nd-recording-text">Playing the tour in a headless browser…</p>
+            </div>
+            <span id="nd-recording-time" class="mono muted"></span>
+            <div class="nd-rec-bar" aria-hidden="true"><i></i></div>
+          </section>
+          <section id="nd-board" class="nd-board" hidden>
+            <header class="nd-board-head">
+              <p class="micro-label">Tour</p>
+              <h2 id="nd-title"></h2>
+              <code id="nd-path" class="mono muted"></code>
+            </header>
+            <ol id="nd-items" class="nd-items"></ol>
+          </section>
+          <p id="nd-waiting" class="nd-waiting muted" hidden></p>
+        </div>
+      </main>
+      <aside class="inspector nd-chat">
+        <section id="panel-agent" class="panel agent-panel">
+          <div class="agent-bar">
+            <div id="agent-roster" class="agent-roster" aria-label="Agents"></div>
+          </div>
+          <div id="agent-setup" class="agent-setup" hidden>
+            <span id="agent-place" class="agent-place mono" title="Where the agent works"></span>
+            <label class="agent-choice"
+              ><span class="sr-only">Model</span
+              ><select id="agent-model" aria-label="Model"></select
+            ></label>
+            <label class="agent-choice"
+              ><span class="sr-only">Mode</span
+              ><select id="agent-mode" aria-label="Mode"></select
+            ></label>
+            <button type="button" id="agent-yolo" class="agent-yolo" title="Every tool request is approved without asking. Click to ask again." hidden>
+              YOLO on · ask again
+            </button>
+            <button type="button" id="agent-terminal" class="quiet small-text" title="Open this agent in Terminal, in the same folder with Studio's tools">
+              Terminal
+            </button>
+          </div>
+          <div class="panel-scroll" id="agent-scroll">
+            <div id="agent-empty" class="agent-empty">
+              <p class="agent-empty-title">Tell your agent what to make</p>
+              <p class="agent-empty-text">
+                Claude Code or Codex runs here with your own login. It writes
+                the tour and records it; you approve what it runs.
+              </p>
+              <div class="agent-empty-trust" hidden>
+                <p>Agents run code, so this folder has to be trusted first.</p>
+                <button type="button" id="agent-trust" class="button small primary" hidden>
+                  Trust this folder…
+                </button>
+                <p class="agent-trust-hint muted" hidden>
+                  In the desktop app: File → Trust This Folder…
+                </p>
+              </div>
+            </div>
+            <div id="agent-thread" class="agent-thread" aria-live="polite" hidden></div>
+            <div id="agent-working" class="agent-working" role="status" aria-live="polite" hidden>
+              <span class="agent-working-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span id="agent-working-text"></span>
+              <span id="agent-working-time" class="agent-working-time mono"></span>
+            </div>
+            <div id="agent-changes" hidden></div>
+          </div>
+          <form id="agent-composer" class="agent-composer">
+            <div class="agent-input-box">
+              <textarea id="agent-input" rows="3" aria-label="Describe the demo"></textarea>
+              <div class="agent-input-row">
+                <div id="agent-chips" class="agent-chips"></div>
+                <button type="button" id="agent-stop" class="quiet small-text" hidden>Stop</button>
+                <button type="submit" id="agent-send" class="agent-send" aria-label="Send">↑</button>
+              </div>
+            </div>
+            <label class="agent-autosend" hidden>
+              <input type="checkbox" id="agent-autosend" />
+              <span id="agent-autosend-name"></span>
+            </label>
+          </form>
+        </section>
+      </aside>
+    </div>
+  </body>
+</html>

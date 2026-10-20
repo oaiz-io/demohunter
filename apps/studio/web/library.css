@@ -626,3 +626,34 @@ h1 {
   white-space: nowrap;
   cursor: default;
 }
+/* Create new demo: the agent makes it on the New demo page. */
+.main-head h1 {
+  margin-right: auto;
+}
+.main-head {
+  gap: 12px;
+}
+.create-demo {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  background: var(--color-ink);
+  color: #fff;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.create-demo span {
+  color: var(--color-highlighter);
+  font-weight: 600;
+}
+.create-demo:hover {
+  background: #2b2b2b;
+}
+.empty .create-demo {
+  margin-top: 4px;
+}

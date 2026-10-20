@@ -36,6 +36,11 @@ type Hooks = {
   receipt?: (actor: string, fromMs: number, toMs: number) => HTMLElement | undefined;
   /** The Changes view was opened (its count resets). */
   changesSeen?: () => void;
+  /** New demo page: agents run in this worktree (or opened folder), with no
+   * demo open yet; sessions are the page's own (purpose "create"). */
+  root?: () => string;
+  /** Every event of the open thread, as it arrives or changes. */
+  event?: (event: AgentEvent) => void;
 };
 
 export type AgentView = "chat" | "changes";
@@ -171,6 +176,24 @@ export class AgentChat {
   get settings(): AgentSettings | undefined {
     return this.info?.settings;
   }
+  /** The agent whose thread is open. */
+  get current(): AgentSummary | undefined {
+    return this.session;
+  }
+  /** The New demo page names a worktree; the editor, its demo. */
+  private get target(): { project: string } | { root: string } {
+    return this.hooks.root ? { root: this.hooks.root() } : { project: this.hooks.project() };
+  }
+  /** The New demo page's agent across reloads of the page. */
+  private get rememberedKey() {
+    return `demohunter-new-agent:${this.hooks.root?.()}`;
+  }
+  /** Hand the New demo agent to the editor, which then shows its thread. */
+  async adopt(): Promise<void> {
+    if (!this.session) return;
+    await this.post(`/api/agents/${this.session.id}/adopt`, {});
+    sessionStorage.removeItem(this.rememberedKey);
+  }
   private async post<T = unknown>(url: string, body: unknown): Promise<T> {
     const r = await fetch(url, {
       method: "POST",
@@ -183,13 +206,17 @@ export class AgentChat {
   }
 
   async refresh(): Promise<void> {
-    const r = await fetch(`/api/agents?project=${encodeURIComponent(this.hooks.project())}`);
+    const query = new URLSearchParams(this.hooks.root ? { root: this.hooks.root(), purpose: "create" } : { project: this.hooks.project() });
+    const r = await fetch(`/api/agents?${query}`);
     if (!r.ok) throw new Error("Agents are unavailable.");
     this.info = (await r.json()) as Info;
     const preferred = this.info.settings.agent;
-    const live =
-      this.info.sessions.find((s) => s.kind === preferred && s.status !== "error") ??
-      this.info.sessions.find((s) => s.status !== "error");
+    // The New demo page follows only its own agent (after a reload).
+    const remembered = this.hooks.root && sessionStorage.getItem(this.rememberedKey);
+    const live = this.hooks.root
+      ? this.info.sessions.find((s) => s.id === remembered && s.status !== "error")
+      : (this.info.sessions.find((s) => s.kind === preferred && s.status !== "error") ??
+        this.info.sessions.find((s) => s.status !== "error"));
     // Follow a live agent only when the open thread has none: nothing open,
     // or it stopped or failed (a failed thread says why until then).
     const open = this.session && this.info.sessions.find((s) => s.id === this.session!.id);
@@ -208,7 +235,7 @@ export class AgentChat {
     this.warmed = true;
     const kind = info.settings.agent;
     if (!info.kinds.some((k) => k.kind === kind && k.available)) return;
-    if (info.sessions.some((s) => s.kind === kind && s.status !== "error")) return;
+    if (this.hooks.root ? this.session : info.sessions.some((s) => s.kind === kind && s.status !== "error")) return;
     // A failure shows in the thread (e.g. "isn't signed in"); no toast.
     void this.start(kind).catch(() => {});
   }
@@ -225,7 +252,12 @@ export class AgentChat {
     this.renderRoster();
     this.renderActivity();
     try {
-      const summary = await this.post<AgentSummary>("/api/agents/start", { project: this.hooks.project(), kind });
+      // A new demo gets an agent of its own, not the last demo's.
+      const summary = await this.post<AgentSummary>("/api/agents/start", {
+        ...this.target,
+        kind,
+        ...(this.hooks.root ? { purpose: "create", fresh: true } : {}),
+      });
       if (this.info && this.info.settings.agent !== kind) void this.saveSettings({ agent: kind });
       this.connect(summary);
       return summary;
@@ -248,7 +280,7 @@ export class AgentChat {
     const model = this.session?.kind === kind ? this.session.options?.find((o) => o.category === "model")?.current : undefined;
     try {
       const result = await this.post<{ opened: boolean; line: string }>("/api/agents/terminal", {
-        project: this.hooks.project(),
+        ...this.target,
         kind,
         purpose,
         ...(purpose === "run" && model ? { model } : {}),
@@ -270,7 +302,7 @@ export class AgentChat {
     if (!session || !option || option.current === value) return;
     try {
       const { options } = await this.post<{ options: AgentOption[] }>(`/api/agents/${session.id}/option`, {
-        project: this.hooks.project(),
+        ...this.target,
         id: option.id,
         value,
       });
@@ -286,6 +318,7 @@ export class AgentChat {
   private connect(summary: AgentSummary) {
     this.stream?.close();
     this.session = summary;
+    if (this.hooks.root) sessionStorage.setItem(this.rememberedKey, summary.id);
     this.events.clear();
     this.nodes.clear();
     this.pendingRender.clear();
@@ -349,6 +382,10 @@ export class AgentChat {
   async send(text: string, notes?: string[]): Promise<void> {
     // To the agent whose thread is open (else the preferred one).
     const session = await this.start(this.session?.kind);
+    if (this.hooks.root) {
+      await this.post(`/api/agents/${session.id}/prompt`, { text, ...this.target });
+      return;
+    }
     const selection = this.hooks.selection();
     await this.post(`/api/agents/${session.id}/prompt`, {
       text,
@@ -370,7 +407,8 @@ export class AgentChat {
   private async saveSettings(patch: Partial<AgentSettings>) {
     if (!this.info) return;
     this.info.settings = { ...this.info.settings, ...patch };
-    await this.post("/api/agents/settings", { project: this.hooks.project(), ...this.info.settings }).catch(this.hooks.error);
+    const { autoSendNotes, agent } = this.info.settings;
+    await this.post("/api/agents/settings", { ...this.target, autoSendNotes, agent }).catch(this.hooks.error);
     this.renderComposer();
   }
 
@@ -486,7 +524,7 @@ export class AgentChat {
       this.info?.kinds.find((k) => k.kind === this.info?.settings.agent)?.name ??
       "Claude Code";
     const input = document.querySelector<HTMLTextAreaElement>("#agent-input")!;
-    input.placeholder = `Ask ${name}… (Enter to send)`;
+    input.placeholder = this.hooks.root ? `Describe the demo for ${name}… (Enter to send)` : `Ask ${name}… (Enter to send)`;
     input.disabled = this.info?.trusted === false;
     const working = this.session && ["working", "waiting"].includes(this.session.status);
     document.querySelector<HTMLButtonElement>("#agent-stop")!.hidden = !working;
@@ -498,7 +536,7 @@ export class AgentChat {
 
   private renderContext() {
     const chips = document.querySelector<HTMLElement>("#agent-chips");
-    if (!chips || document.querySelector<HTMLElement>("#panel-agent")?.hidden) return;
+    if (!chips || this.hooks.root || document.querySelector<HTMLElement>("#panel-agent")?.hidden) return;
     const selection = this.hooks.selection();
     const text = [clock(this.hooks.time()), selection?.label ?? selection?.ref].filter(Boolean) as string[];
     const key = text.join("|");
@@ -526,6 +564,7 @@ export class AgentChat {
   }
   private place(event: AgentEvent, follow: boolean) {
     this.events.set(event.seq, event);
+    this.hooks.event?.(event);
     const thread = document.querySelector<HTMLElement>("#agent-thread")!;
     const scroller = document.querySelector<HTMLElement>("#agent-scroll")!;
     const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;

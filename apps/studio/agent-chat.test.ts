@@ -418,3 +418,47 @@ test("standalone Studio (one demo) shows outside agents' activity, no chat", asy
     await rm(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+test("Create new demo: the agent is briefed, the tour and recording show as they happen, and the editor carries on", async () => {
+  const { root, dir } = await projectFixture();
+  await writeJson(path.join(dir, "events.json"), recording);
+  const app = await serveLibrary(root, { port: 0 });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  page.setDefaultTimeout(15_000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  try {
+    await page.goto(app.url);
+    await page.waitForSelector(".recording-card");
+    await page.click("#create-demo");
+    await page.waitForURL(/\/new\?root=/);
+    expect(new URL(page.url()).searchParams.get("root")).toBe(realpathSync(root));
+    expect(await page.isVisible("#nd-intro")).toBe(true);
+    // The agent starts before the first message.
+    await page.waitForSelector('.roster-pill[data-kind="claude"][data-status="idle"]');
+    await page.fill("#agent-input", "create a demo of signing up");
+    await page.press("#agent-input", "Enter");
+    await page.waitForSelector("#nd-live:not([hidden])");
+    await page.waitForSelector('.agent-msg.agent:has-text("Brief: yes")');
+    // The storyboard grows as the file is written.
+    await page.waitForSelector('.nd-item.narrate:has-text("This is where a new account begins.")');
+    await page.waitForSelector('.nd-item.step:has-text("Fill in the form")');
+    expect(await page.textContent("#nd-title")).toBe("Sign up");
+    expect(await page.textContent("#nd-path")).toBe(path.join("demos", "sign-up.tour.ts"));
+    await page.waitForSelector("#nd-recording:not([hidden])");
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "new-demo-recording.png") });
+    await page.waitForSelector("#nd-result:not([hidden])");
+    expect(await page.textContent('.nd-step[data-step="ready"]')).toContain("Demo ready");
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "new-demo-ready.png") });
+    // Opening it hands the agent to the editor, thread and all.
+    await page.click("#nd-open");
+    await page.waitForURL(/\/projects\/[0-9a-f]{16}\/#agent/);
+    await page.waitForFunction(() => (window as any).__replayLab?.state().ready);
+    await page.waitForSelector('#panel-agent:not([hidden]) .agent-msg.user:has-text("create a demo of signing up")');
+    expect(errors).toEqual([]);
+  } finally {
+    await page.close();
+    await app.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 90_000);

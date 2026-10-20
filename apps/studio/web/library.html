@@ -38,6 +38,9 @@
             placeholder="Search demos"
           /><kbd>⌘K</kbd></label
         >
+        <a id="create-demo" class="create-demo" href="/new" title="Describe a demo and have your agent make it (⌘N)"
+          ><span aria-hidden="true">+</span> Create new demo</a
+        >
       </div>
       <div id="error" class="error" role="alert" hidden></div>
       <p id="warnings" class="warnings" hidden></p>
@@ -47,6 +50,7 @@
         <h2 id="empty-title">No demos yet</h2>
         <p id="empty-detail" class="empty-detail" hidden></p>
         <code id="empty-command">bun run studio capture &lt;tour.ts&gt;</code>
+        <a id="empty-create" class="create-demo" href="/new"><span aria-hidden="true">+</span> Create new demo</a>
         <button id="empty-open" class="open-project" type="button" hidden>Open another project…</button>
       </div>
     </main>

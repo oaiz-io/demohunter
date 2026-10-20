@@ -42,16 +42,24 @@ export async function serveLibrary(
   const here = path.dirname(fileURLToPath(import.meta.url)),
     html = await readFile(path.join(here, "web/library.html")),
     css = await readFile(path.join(here, "web/library.css"));
-  const js = (
-    await build({
-      entryPoints: [path.join(here, "web/library-app.ts")],
-      bundle: true,
-      write: false,
-      format: "iife",
-      platform: "browser",
-      target: "es2022",
-    })
-  ).outputFiles[0]!.contents;
+  const bundle = async (entry: string) =>
+    (
+      await build({
+        entryPoints: [path.join(here, entry)],
+        bundle: true,
+        write: false,
+        format: "iife",
+        platform: "browser",
+        target: "es2022",
+      })
+    ).outputFiles[0]!.contents;
+  const js = await bundle("web/library-app.ts");
+  // New demo: a chat with the person's agent and the demo taking shape.
+  const newDemo = {
+    html: await readFile(path.join(here, "web/new.html")),
+    js: await bundle("web/new-app.ts"),
+    css: Buffer.concat([await readFile(path.join(here, "web/style.css")), await readFile(path.join(here, "web/new.css"))]),
+  };
   // Record which demo the person is viewing so the workspace MCP server edits
   // that one. Opening a demo or acting in it (any POST except the periodic
   // preview-state) claims focus; status polls keep the claim alive.
@@ -173,6 +181,12 @@ export async function serveLibrary(
         return send(js, "text/javascript");
       if (req.method === "GET" && url.pathname === "/library.css")
         return send(css, "text/css");
+      if (req.method === "GET" && url.pathname === "/new")
+        return send(newDemo.html, "text/html");
+      if (req.method === "GET" && url.pathname === "/new.js")
+        return send(newDemo.js, "text/javascript");
+      if (req.method === "GET" && url.pathname === "/new.css")
+        return send(newDemo.css, "text/css");
       if (req.method === "GET" && url.pathname === "/api/library") {
         const scan = await library.scan();
         return send(

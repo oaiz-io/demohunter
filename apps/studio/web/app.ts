@@ -1746,6 +1746,8 @@ function applyLocation(): void {
   if (!location.hash || !workspaceData) return;
   try {
     const params = new URLSearchParams(location.hash.slice(1));
+    // From the New demo page: the agent that made the demo, in its panel.
+    if (params.has("agent")) tab("agent");
     if (params.has("comment") || params.has("element")) {
       const reference = parseReference(location.href);
       if (reference.captureId !== workspaceData.index.captureId)

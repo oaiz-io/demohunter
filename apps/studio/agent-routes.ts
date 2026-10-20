@@ -16,6 +16,7 @@ import { ensureElementIndex, type ElementIndex, type ElementRecord } from "./ele
 import { clipDuration, isScene, narrationStart, outputToSource } from "./model.js";
 import { loadBundle, safeFile } from "./storage.js";
 import { scenesTrusted } from "./trust.js";
+import { capturesInProgress, creationBrief, recentTours } from "./create-demo.js";
 
 const run = promisify(execFile);
 const branches = new Map<string, { at: number; branch?: string }>();
@@ -50,41 +51,76 @@ export async function handleAgentRoute(
   if (req.method === "POST" && !/^application\/json\b/i.test(req.headers["content-type"] ?? ""))
     return json({ error: "Expected application/json." }, 415), true;
   try {
-    // Which worktree a demo belongs to decides where its agents run.
-    const where = async (project: unknown) => {
-      if (typeof project !== "string") throw new Error("Missing project.");
-      const dir = await library.resolve(project);
-      const root = library.rootOf(dir) ?? library.root;
-      return { dir, root, trusted: scenesTrusted(root) };
+    // Which worktree a demo belongs to decides where its agents run. The New
+    // demo page names the worktree (or opened folder) itself: one of the
+    // library's own, never any path.
+    const where = async (input: { project?: unknown; root?: unknown }) => {
+      if (typeof input.project === "string") {
+        const dir = await library.resolve(input.project);
+        const root = library.rootOf(dir) ?? library.root;
+        return { dir, root, trusted: scenesTrusted(root) };
+      }
+      if (typeof input.root !== "string") throw new Error("Missing project.");
+      if (!library.roots.includes(input.root)) await library.scan();
+      if (!library.roots.includes(input.root))
+        throw Object.assign(new Error("That folder isn't part of this library."), { status: 404 });
+      return { dir: undefined, root: input.root, trusted: scenesTrusted(input.root) };
     };
+    const query = () => ({
+      project: url.searchParams.get("project") ?? undefined,
+      root: url.searchParams.get("root") ?? undefined,
+    });
+    const place = async (root: string, trusted: boolean) => ({
+      name: path.basename(root),
+      // Restricted folders get no git calls.
+      ...(trusted ? { branch: await branchOf(root) } : {}),
+    });
+    const target = { project: z.string().optional(), root: z.string().max(4096).optional() };
     if (req.method === "GET" && url.pathname === "/api/agents") {
-      const { root, trusted } = await where(url.searchParams.get("project"));
+      const { root, trusted } = await where(query());
       return (
         json({
           root,
           // Where agents run: the repository checkout or worktree of this demo.
-          // Restricted folders get no git calls.
-          place: { name: path.basename(root), ...(trusted ? { branch: await branchOf(root) } : {}) },
+          place: await place(root, trusted),
           trusted,
           kinds: hub.kinds(),
-          sessions: hub.list(root),
+          sessions: hub.list(root, url.searchParams.get("purpose") === "create" ? "create" : undefined),
           settings: await readAgentSettings(root),
         }),
         true
       );
     }
+    // New demo: tours written since the page started, with their storyboards.
+    if (req.method === "GET" && url.pathname === "/api/agents/tours") {
+      const { root, trusted } = await where(query());
+      if (!trusted) return json({ tours: [], capturing: [] }), true;
+      const param = Number(url.searchParams.get("since"));
+      const since = Number.isFinite(param) ? param : Date.now();
+      const [tours, capturing] = await Promise.all([recentTours(root, since), capturesInProgress(root, since)]);
+      return json({ tours, capturing }), true;
+    }
     if (req.method === "POST" && url.pathname === "/api/agents/start") {
       const input = z
-        .object({ project: z.string(), kind: z.enum(["claude", "codex"]) })
+        .object({
+          ...target,
+          kind: z.enum(["claude", "codex"]),
+          /** New demo: a session of its own; `fresh` for each new demo. */
+          purpose: z.literal("create").optional(),
+          fresh: z.boolean().optional(),
+        })
         .parse(await body(req));
-      const { root, trusted } = await where(input.project);
+      const { root, trusted } = await where(input);
       const settings = await readAgentSettings(root);
       return (
         json(
-          await hub.start(input.kind, root, !trusted, {
-            model: settings.models[input.kind],
-            mode: settings.modes[input.kind],
-          }),
+          await hub.start(
+            input.kind,
+            root,
+            !trusted,
+            { model: settings.models[input.kind], mode: settings.modes[input.kind] },
+            { purpose: input.purpose, fresh: input.fresh },
+          ),
         ),
         true
       );
@@ -92,12 +128,12 @@ export async function handleAgentRoute(
     if (req.method === "POST" && url.pathname === "/api/agents/settings") {
       const input = z
         .object({
-          project: z.string(),
+          ...target,
           autoSendNotes: z.boolean(),
           agent: z.enum(["claude", "codex"]),
         })
         .parse(await body(req));
-      const { root } = await where(input.project);
+      const { root } = await where(input);
       await updateAgentSettings(root, (settings) => {
         settings.autoSendNotes = input.autoSendNotes;
         settings.agent = input.agent;
@@ -107,7 +143,7 @@ export async function handleAgentRoute(
     if (req.method === "POST" && url.pathname === "/api/agents/terminal") {
       const input = z
         .object({
-          project: z.string(),
+          ...target,
           kind: z.enum(["claude", "codex"]),
           purpose: z.enum(["signin", "run"]),
           // Model ids like "opus[1m]"; the terminal line quotes every argument.
@@ -115,10 +151,10 @@ export async function handleAgentRoute(
         })
         .strict()
         .parse(await body(req));
-      const { root, trusted } = await where(input.project);
+      const { root, trusted } = await where(input);
       return json(await hub.terminal(input.kind, root, !trusted, input.purpose, input.model)), true;
     }
-    const match = /^\/api\/agents\/([0-9a-f-]{36})\/(stream|prompt|permission|option|yolo|cancel|stop)$/.exec(
+    const match = /^\/api\/agents\/([0-9a-f-]{36})\/(stream|prompt|permission|option|yolo|adopt|cancel|stop)$/.exec(
       url.pathname,
     );
     if (!match) return json({ error: "Not found." }, 404), true;
@@ -145,7 +181,7 @@ export async function handleAgentRoute(
       const input = z
         .object({
           text: z.string().trim().min(1).max(20_000),
-          project: z.string(),
+          ...target,
           outputMs: z.number().finite().nonnegative().optional(),
           selection: z
             .object({ ref: z.string().max(200).optional(), label: z.string().max(200).optional() })
@@ -158,10 +194,13 @@ export async function handleAgentRoute(
         })
         .strict()
         .parse(await body(req));
-      const { dir, root } = await where(input.project);
+      const { dir, root, trusted } = await where(input);
       if (root !== session.root)
         throw new Error("This demo belongs to another worktree; start an agent there.");
-      const { preamble, chips } = await context(dir, root, input);
+      // From the New demo page: how to make a demo here; else the demo on screen.
+      const { preamble, chips } = dir
+        ? await context(dir, root, { ...input, project: input.project! })
+        : { preamble: await creationBrief(root, await place(root, trusted)), chips: [] };
       session.prompt(input.text, chips, preamble);
       return json({ ok: true }, 202), true;
     }
@@ -179,10 +218,10 @@ export async function handleAgentRoute(
     }
     if (action === "option") {
       const input = z
-        .object({ project: z.string(), id: z.string().max(100), value: z.string().max(200) })
+        .object({ ...target, id: z.string().max(100), value: z.string().max(200) })
         .strict()
         .parse(await body(req));
-      const { root } = await where(input.project);
+      const { root } = await where(input);
       if (root !== session.root) throw new Error("This demo belongs to another worktree.");
       const options = await session.setOption(input.id, input.value);
       // Remembered for this worktree, so the next start uses the same model
@@ -197,6 +236,8 @@ export async function handleAgentRoute(
       }
       return json({ options }), true;
     }
+    // New demo → editor: the agent that made the demo carries on there.
+    if (action === "adopt") return json(hub.adopt(session.id)), true;
     if (action === "cancel") return await session.cancel(), json({ ok: true }), true;
     session.stop();
     return json({ ok: true }), true;

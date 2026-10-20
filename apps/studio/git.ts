@@ -385,3 +385,14 @@ export function cachedList<T>(
   }
   return hit.value as Promise<T>;
 }
+
+/** Files matching git pathspecs (tracked and untracked, not ignored),
+ * relative to `dir`; undefined outside a repository. Read-only. */
+export async function listFiles(dir: string, patterns: string[]): Promise<string[] | undefined> {
+  try {
+    const out = await git(dir, ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...patterns]);
+    return [...new Set(out.split("\0").filter(Boolean))];
+  } catch {
+    return undefined;
+  }
+}

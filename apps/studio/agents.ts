@@ -227,6 +227,9 @@ export type AgentSummary = {
   options: AgentOption[];
   /** Every tool request is approved without asking. */
   yolo: boolean;
+  /** Started from the New demo page; the editor doesn't follow it until it
+   * is handed over there. */
+  purpose?: "create";
 };
 
 type Pending = {
@@ -251,6 +254,8 @@ class AgentSession {
   options: AgentOption[] = [];
   /** Approve every tool request without asking (this session only; never saved). */
   yolo = false;
+  /** Set for a New demo session until it is handed over to the editor. */
+  purpose?: "create";
   /** Settles when the session can take prompts (or failed to start). */
   private ready: Promise<void> = Promise.resolve();
 
@@ -270,6 +275,7 @@ class AgentSession {
       startedAt: this.startedAt,
       options: this.options,
       yolo: this.yolo,
+      ...(this.purpose ? { purpose: this.purpose } : {}),
     };
   }
   subscribe(listener: (message: AgentMessage) => void) {
@@ -608,9 +614,12 @@ export class AgentHub {
       return { kind: a.kind, name: a.name, available };
     });
   }
-  list(root?: string): AgentSummary[] {
+  /** Live sessions, newest first: the editor's own, or New demo ones. */
+  list(root?: string, purpose?: "create"): AgentSummary[] {
     return [...this.sessions.values()]
+      .reverse()
       .filter((s) => !root || s.root === root)
+      .filter((s) => s.purpose === purpose)
       .filter((s) => s.status !== "stopped")
       .map((s) => s.summary());
   }
@@ -619,26 +628,33 @@ export class AgentHub {
     if (!session) throw Object.assign(new Error("No such agent session."), { status: 404 });
     return session;
   }
-  /** One running session per worktree and agent; reuses a live one. */
+  /** One running session per worktree and agent; reuses a live one. A New
+   * demo session (`purpose: "create"`) is separate from the editor's, and
+   * `fresh` starts a new one for a new demo instead of reusing it. */
   async start(
     kind: AgentKind,
     root: string,
     restricted: boolean,
     preferred: { model?: string; mode?: string } = {},
+    { purpose, fresh = false }: { purpose?: "create"; fresh?: boolean } = {},
   ): Promise<AgentSummary> {
     if (restricted)
       throw Object.assign(
         new Error("Agents run code in this folder. Trust the folder first, then start the agent."),
         { status: 403 },
       );
-    const key = `${kind}\0${root}`;
+    const key = `${kind}\0${root}\0${purpose ?? ""}`;
     // A start in flight answers first: its session is listed as "starting".
     const inFlight = this.starting.get(key);
     if (inFlight) return inFlight;
-    const live = [...this.sessions.values()].find(
-      (s) => s.adapter.kind === kind && s.root === root && !["stopped", "error"].includes(s.status),
-    );
-    if (live) return live.summary();
+    const same = (s: AgentSession) => s.adapter.kind === kind && s.root === root && s.purpose === purpose;
+    const live = [...this.sessions.values()]
+      .reverse()
+      .find((s) => same(s) && !["stopped", "error"].includes(s.status));
+    if (live && !fresh) return live.summary();
+    // A new demo: earlier New demo agents that sit idle go (one still working
+    // on another demo keeps going).
+    if (fresh) for (const s of this.sessions.values()) if (same(s) && s.status === "idle") s.stop();
     // Ended sessions of this agent and worktree go; the new one replaces them.
     for (const [id, s] of this.sessions)
       if (s.adapter.kind === kind && s.root === root && ["stopped", "error"].includes(s.status)) this.sessions.delete(id);
@@ -648,6 +664,7 @@ export class AgentHub {
       command: process.execPath,
       args: [path.join(here, "cli.ts"), "mcp", root],
     });
+    session.purpose = purpose;
     this.sessions.set(session.id, session);
     const started = session.start(preferred).then(() => session.summary());
     this.starting.set(key, started);
@@ -663,6 +680,15 @@ export class AgentHub {
       throw Object.assign(new Error("Agents run code in this folder. Trust the folder first."), { status: 403 });
     if (!ADAPTERS.some((a) => a.kind === kind)) throw new Error(`Unknown agent: ${kind}`);
     return openTerminal(root, terminalCommand(kind, root, purpose, model), terminalLauncher);
+  }
+  /** Hand a New demo session to the editor: it becomes the worktree's
+   * agent there (the newest one), with its thread. */
+  adopt(id: string): AgentSummary {
+    const session = this.get(id);
+    session.purpose = undefined;
+    this.sessions.delete(id);
+    this.sessions.set(id, session);
+    return session.summary();
   }
   stopAll() {
     for (const s of this.sessions.values()) s.stop();

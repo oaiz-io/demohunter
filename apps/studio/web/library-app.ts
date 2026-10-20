@@ -460,6 +460,12 @@ function render() {
     ? `${uniqueTours} tour${uniqueTours === 1 ? "" : "s"} here, not captured yet. Capture one:`
     : "";
   $("#empty-command").hidden = recordings.length > 0;
+  // A new demo is made where the person is looking: the worktree they
+  // picked, else the opened folder.
+  const createHref = `/new?${new URLSearchParams({ root: active || data.workspace })}`;
+  $<HTMLAnchorElement>("#create-demo").href = createHref;
+  $<HTMLAnchorElement>("#empty-create").href = createHref;
+  $("#create-demo").title = `Describe a demo and have your agent make it in ${tree?.name ?? projectName()} (⌘N)`;
   $("#empty-open").hidden = !desktop || recordings.length > 0;
   const quote = (p: string) =>
     /^[\w./-]+$/.test(p) ? p : `'${p.replaceAll("'", "'\\''")}'`;
@@ -537,6 +543,10 @@ document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
     $("#search").focus();
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n" && data.workspace) {
+    e.preventDefault();
+    location.href = $<HTMLAnchorElement>("#create-demo").href;
   }
 });
 void refresh();

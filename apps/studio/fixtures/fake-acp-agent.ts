@@ -8,6 +8,8 @@
 //  - "markdown" → a reply with Markdown (and things that must stay text)
 //  - "slow" → waits until cancelled
 //  - "which model" → reports the chosen model and mode
+//  - "create a demo" → writes a tour in two passes and "captures" it (a copy
+//    of the folder's project/ demo) into .demohunter/replays/sign-up
 //  - FAKE_AGENT_FAIL=auth makes session/new fail like a signed-out agent;
 //    FAKE_AGENT_FAIL=prompt-auth fails the first message instead
 import { Readable, Writable } from "node:stream";
@@ -179,6 +181,29 @@ new acp.AgentSideConnection(
           ],
         });
         await say(`\nSpoof: ${answer.outcome.outcome === "selected" ? answer.outcome.optionId : "cancelled"}`);
+      }
+      if (text.includes("create a demo")) {
+        const { cp, mkdir, writeFile } = await import("node:fs/promises");
+        const tool = (toolCallId: string, title: string, kind: acp.ToolKind, status: acp.ToolCallStatus) =>
+          client.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "tool_call", toolCallId, title, kind, status } });
+        const done = (toolCallId: string, status: acp.ToolCallStatus = "completed") =>
+          client.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "tool_call_update", toolCallId, status } });
+        const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        await say(`\nBrief: ${text.includes('"New demo" page') && text.includes(" capture <tour file> --project ") ? "yes" : "no"}`);
+        await tool("w1", "Write demos/sign-up.tour.ts", "edit", "in_progress");
+        await mkdir("demos", { recursive: true });
+        const head = 'export default {\n  id: "sign-up",\n  title: "Sign up",\n  async run({ chapter, step, narrate, goto }) {\n    await goto("/signup");\n    await chapter("Getting started");\n    await narrate("This is where a new account begins.");\n';
+        await writeFile("demos/sign-up.tour.ts", head);
+        await wait(1200);
+        await writeFile("demos/sign-up.tour.ts", `${head}    await step("Fill in the form", async () => {});\n    await narrate("Two fields and you're in.");\n  },\n};\n`);
+        await done("w1");
+        await wait(1200);
+        await tool("c1", "`bun cli.ts capture demos/sign-up.tour.ts --project .demohunter/replays/sign-up`", "execute", "in_progress");
+        await mkdir(".demohunter/replays/sign-up/assets", { recursive: true });
+        await wait(1500);
+        await cp("project", ".demohunter/replays/sign-up", { recursive: true });
+        await done("c1");
+        await say("\nCreated: sign-up");
       }
       if (text.includes("slow")) {
         await new Promise<void>((resolve) => (cancelled = resolve));
