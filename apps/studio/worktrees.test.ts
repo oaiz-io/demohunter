@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { LocalLibrary } from "./library.js";
@@ -167,5 +167,36 @@ test("a crafted worktree entry pointing elsewhere is never scanned", async () =>
   } finally {
     await rm(entry, { recursive: true, force: true });
     await rm(decoy, { recursive: true, force: true });
+  }
+});
+
+test("an untrusted worktree never runs git status in the repository's other worktrees", async () => {
+  // A shared .git/config can name a clean filter; `git status` runs it for a
+  // file whose stat changed. Opening a linked worktree untrusted must not run
+  // it in the main checkout (outside the opened folder) either.
+  const trap = path.join(base, "trap");
+  const repo = path.join(trap, "repo");
+  const linked = path.join(trap, "linked");
+  const marker = path.join(trap, "pwned");
+  await mkdir(repo, { recursive: true });
+  git(repo, "init", "-q", "-b", "main");
+  git(repo, "config", "user.email", "test@example.com");
+  git(repo, "config", "user.name", "Test");
+  await writeFile(path.join(repo, "a.txt"), "hello\n");
+  await writeFile(path.join(repo, ".gitattributes"), "a.txt filter=x\n");
+  git(repo, "add", ".");
+  git(repo, "commit", "-q", "-m", "init");
+  git(repo, "worktree", "add", "-q", "-b", "linked", linked);
+  git(repo, "config", "filter.x.clean", `sh -c 'touch "${marker}"; cat'`);
+  const later = new Date(Date.now() + 5000);
+  await utimes(path.join(repo, "a.txt"), later, later);
+  const app = await serveLibrary(linked, { port: 0, restricted: true });
+  try {
+    const scan = await fetch(`${app.url}/api/library`).then((r) => r.json());
+    expect(scan.worktrees.map((w: any) => w.path).sort()).toEqual([linked, repo].sort());
+    await settledWorktreeStates();
+    expect(await stat(marker).catch(() => null)).toBeNull();
+  } finally {
+    await app.close();
   }
 });

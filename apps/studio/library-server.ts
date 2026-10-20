@@ -32,8 +32,7 @@ export async function serveLibrary(
     restricted?: boolean;
   } = {},
 ) {
-  const library = await LocalLibrary.open(root);
-  if (options.restricted) restrictFolder(library.root);
+  const library = await LocalLibrary.open(root, { restricted: options.restricted });
   // Start scanning, but serve right away: the page shows and fills in.
   void library.scan().catch(() => {});
   const seen = new SeenDemos(library.root);

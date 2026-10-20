@@ -7,7 +7,7 @@ import { readFormat } from "./format.js";
 import { totalDuration, audioIsCurrent } from "./model.js";
 import { historySummary } from "./storage.js";
 import { readActivity } from "./activity.js";
-import { scenesTrusted } from "./trust.js";
+import { restrictFolder, scenesTrusted } from "./trust.js";
 import {
   cachedList,
   cachedWorktreeState,
@@ -86,11 +86,17 @@ export class LocalLibrary {
    * opened folder is a repository root. */
   roots: string[];
   private scanning?: ReturnType<LocalLibrary["run"]>;
-  constructor(readonly root: string) {
+  /** Opened without being trusted: every worktree it lists is restricted
+   * before any git work runs in it. */
+  constructor(
+    readonly root: string,
+    readonly restricted = false,
+  ) {
     this.roots = [root];
+    if (restricted) restrictFolder(root);
   }
-  static async open(root: string) {
-    return new LocalLibrary(await realpath(root));
+  static async open(root: string, options: { restricted?: boolean } = {}) {
+    return new LocalLibrary(await realpath(root), options.restricted);
   }
   /** Concurrent callers (several viewers polling, lookups) share one
    * in-flight scan instead of each walking every worktree. */
@@ -113,6 +119,9 @@ export class LocalLibrary {
       ...w,
       main: !!w.main,
     }));
+    // The main checkout or a sibling worktree can sit outside the opened
+    // folder; restrict them before anything below (or a render) runs there.
+    if (this.restricted) for (const w of listed ?? []) restrictFolder(w.path);
     listed?.sort(
       (a, b) =>
         Number(b.main) - Number(a.main) ||
@@ -255,7 +264,7 @@ export class LocalLibrary {
             // Refreshed in the background; never holds up the library.
             // Not in restricted folders: `git status` runs filters a crafted
             // repository can configure (code execution before any trust).
-            ...(w.missing || !scenesTrusted(w.path)
+            ...(w.missing || this.restricted || !scenesTrusted(w.path)
               ? { changed: 0 }
               : cachedWorktreeState(w.path)),
             recordings: recordings.filter((r) => r.worktree === w.path).length,
