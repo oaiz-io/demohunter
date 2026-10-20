@@ -609,3 +609,20 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+
+/* Studio is in alpha: shown next to the logo. */
+.alpha-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-full, 999px);
+  background: var(--color-highlighter, #ffe14d);
+  color: var(--color-ink, #111);
+  font: 600 10px/1 var(--font-sans, system-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: default;
+}

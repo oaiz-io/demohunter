@@ -1,4 +1,6 @@
-# DemoHunter Studio
+# DemoHunter Studio (alpha)
+
+> **Alpha.** Studio, its desktop app and the in-Studio agents are early: expect rough edges and breaking changes to the editor, its APIs and the replay format. Keep your demos in git. The DemoHunter CLI and SDK outside `apps/studio` are not affected.
 
 An open-source, local-first application for captured browser demos. Explore recordings on your filesystem, preview and edit without rendering video, work with your preferred agent, and export the saved result for CI or sharing. No account, hosted backend or built-in language model.
 

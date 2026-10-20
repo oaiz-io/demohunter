@@ -223,7 +223,7 @@ function showStatus(dir, error, stopped = false, message) {
   const q = new URLSearchParams({ name: path.basename(dir), path: dir });
   if (message) q.set("message", message);
   // The startup banner is not part of the problem.
-  if (error) q.set("error", error.replace(/^(DemoHunter Studio: .*|Workspace: .*|No account or hosted service required\.)\n?/gm, "").trim().slice(-4000));
+  if (error) q.set("error", error.replace(/^(DemoHunter Studio: .*|Workspace: .*|No account or hosted service required\.|Studio is in alpha: .*)\n?/gm, "").trim().slice(-4000));
   if (stopped) q.set("stopped", "1");
   return window.loadURL(`app://ui/status.html?${q}`);
 }
@@ -455,7 +455,7 @@ app.whenReady().then(async () => {
   if (process.platform === "darwin" && !app.isPackaged) app.dock?.setIcon(nativeImage.createFromPath(iconPng));
   app.setAboutPanelOptions({
     applicationName: NAME,
-    applicationVersion: app.getVersion(),
+    applicationVersion: `${app.getVersion()} (alpha)`,
     version: `Electron ${process.versions.electron}`,
     copyright: "© OAIZ AB · OAIZ Labs open source",
     website: "https://github.com/oaiz-io/demohunter",

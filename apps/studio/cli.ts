@@ -174,7 +174,7 @@ export async function main(args: string[]): Promise<void> {
       console.error("Studio error:", error),
     );
     console.log(
-      `DemoHunter Studio: ${app.url}\nWorkspace: ${app.library.root}\nNo account or hosted service required.`,
+      `DemoHunter Studio: ${app.url}\nWorkspace: ${app.library.root}\nNo account or hosted service required.\nStudio is in alpha: expect rough edges.`,
     );
     return;
   }

@@ -8,7 +8,7 @@ const ago = (t) => {
 };
 (async () => {
   const info = await api.info();
-  document.getElementById("version").textContent = `Version ${info.version}`;
+  document.getElementById("version").textContent = `Version ${info.version} · alpha — expect rough edges`;
   const list = document.getElementById("recent");
   if (!info.recent.length) {
     document.getElementById("recents").innerHTML =

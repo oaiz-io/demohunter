@@ -109,7 +109,7 @@ Cookie-banner automation is off by default. Enable it for a supported vendor wit
 
 ## Documentation
 
-- [DemoHunter Studio](apps/studio/README.md) — local recording library, agent editing through MCP or files, editable narration and CI video export; setup is documented separately.
+- [DemoHunter Studio](apps/studio/README.md) **(alpha)** — local recording library, agent editing through MCP or files, editable narration and CI video export; setup is documented separately.
 - [Documentation index](https://github.com/oaiz-io/demohunter/blob/main/docs/README.md)
 - [Getting started](https://github.com/oaiz-io/demohunter/blob/main/docs/getting-started.md)
 - [Troubleshooting](https://github.com/oaiz-io/demohunter/blob/main/docs/troubleshooting.md)
