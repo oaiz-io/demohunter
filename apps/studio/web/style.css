@@ -2881,13 +2881,15 @@ body.inline-text-editing #stage iframe.inline-text-frame {
 .agent-setup {
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 0 16px 10px;
   border-bottom: 1px solid var(--color-line);
 }
+/* Where it runs, on its own line; model, mode and Terminal below it. */
 .agent-place {
-  flex: 1;
+  flex: 1 0 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2895,8 +2897,11 @@ body.inline-text-editing #stage iframe.inline-text-frame {
   font-size: var(--text-micro);
   color: var(--color-graphite);
 }
+.agent-choice {
+  min-width: 0;
+}
 .agent-choice select {
-  max-width: 140px;
+  max-width: 128px;
   height: 26px;
   padding: 0 6px;
   border: 1px solid var(--color-line);
@@ -2914,6 +2919,10 @@ body.inline-text-editing #stage iframe.inline-text-frame {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+}
+#agent-terminal {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 .agent-empty-trust .button {
   margin-top: 8px;

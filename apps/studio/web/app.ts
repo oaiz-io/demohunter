@@ -927,7 +927,7 @@ async function runReload(): Promise<void> {
     }
     lastTick = performance.now();
     setText($("#project-title"), bundle.project.title);
-    document.title = `${bundle.project.title} · DemoHunter Studio`;
+    document.title = `${bundle.project.title} · DemoHunter Studio (alpha)`;
     setText($("#file-revision"), bundle.revision.slice(0, 8));
     renderSaveState();
     $("#stage-loading").hidden = true;
