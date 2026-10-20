@@ -164,6 +164,10 @@ new acp.AgentSideConnection(
           "\n**Bold** and *italic*, `code` and [a link](https://example.com).\n\n1. First\n2. Second\n   - nested\n\n<img src=x onerror=\"window.__pwned=1\"> [bad](javascript:alert(1))\n\n| Scene | Time |\n|---|---|\n| Intro | 0:05 |\n\n```\nconst x = 1;\n```",
         );
       }
+      if (text.includes("hostile")) {
+        // Output that used to stall or crash the Markdown renderer.
+        await say(`\n${"`".repeat(8000)}\n\n${">".repeat(5000)} deep\n\n${"[".repeat(80000)}\n\n## Using C#\n\n[plain http](http://example.com)\nafter`);
+      }
       if (text.includes("spoof")) {
         // A shell command titled like a DemoHunter tool: must still ask.
         const answer = await client.requestPermission({

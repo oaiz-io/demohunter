@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentOption, AgentStatus, AgentSummary, AgentSettings } from "../agents.js";
 import { renderMarkdown } from "./markdown.js";
+import { changesSeenKey } from "./workbench.js";
 
 /**
  * The Agents panel: start the person's own coding agent inside Studio, chat
@@ -33,6 +34,8 @@ type Hooks = {
   /** What an agent changed in the demo between two times, as a receipt for
    * the end of its turn (none when it changed nothing). */
   receipt?: (actor: string, fromMs: number, toMs: number) => HTMLElement | undefined;
+  /** The Changes view was opened (its count resets). */
+  changesSeen?: () => void;
 };
 
 export type AgentView = "chat" | "changes";
@@ -154,6 +157,10 @@ export class AgentChat {
 
   showView(view: AgentView) {
     setAgentView(view);
+    if (view === "changes") {
+      localStorage.setItem(changesSeenKey(), String(Date.now()));
+      this.hooks.changesSeen?.();
+    }
     if (view === "chat") document.querySelector<HTMLTextAreaElement>("#agent-input")!.focus({ preventScroll: true });
   }
   /** Re-draw the change receipts (the demo's history changed). */
@@ -281,6 +288,7 @@ export class AgentChat {
     this.session = summary;
     this.events.clear();
     this.nodes.clear();
+    this.pendingRender.clear();
     document.querySelector("#agent-thread")!.replaceChildren();
     const stream = new EventSource(`/api/agents/${summary.id}/stream`);
     this.stream = stream;
@@ -491,7 +499,24 @@ export class AgentChat {
     chips.replaceChildren(...text.map((t) => make("span", "agent-chip", t)));
   }
 
+  /** Streamed text re-renders at most once per frame, not once per chunk. */
+  private pendingRender = new Map<number, AgentEvent>();
+  private renderFrame?: number;
   private upsert(event: AgentEvent, follow = true) {
+    if ((event.type === "agent" || event.type === "thought") && this.nodes.has(event.seq)) {
+      this.events.set(event.seq, event);
+      this.pendingRender.set(event.seq, event);
+      this.renderFrame ??= requestAnimationFrame(() => {
+        this.renderFrame = undefined;
+        const due = [...this.pendingRender.values()];
+        this.pendingRender.clear();
+        for (const e of due) this.place(e, follow);
+      });
+      return;
+    }
+    this.place(event, follow);
+  }
+  private place(event: AgentEvent, follow: boolean) {
     this.events.set(event.seq, event);
     const thread = document.querySelector<HTMLElement>("#agent-thread")!;
     const scroller = document.querySelector<HTMLElement>("#agent-scroll")!;

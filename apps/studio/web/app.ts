@@ -1012,6 +1012,7 @@ async function runReload(): Promise<void> {
             : undefined,
         error: report,
         toast,
+        changesSeen: () => workbench.renderAgent(),
         receipt: (actor, from, to) =>
           workbench.receipt(actor, from, to, () => agentChat?.showView("changes")),
         status: (status) => {

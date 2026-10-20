@@ -2,7 +2,8 @@
  * Markdown for agent replies, rendered safely: the DOM is built with
  * createElement and textContent only, never innerHTML, so whatever an agent
  * (or a prompt-injected page it read) writes stays text. Links open only for
- * http(s) and mailto. Supported: paragraphs, headings, lists (one nested
+ * https (what the desktop app opens). Every pattern is bounded and long lines
+ * are left as text, so no reply can stall rendering. Supported: paragraphs, headings, lists (one nested
  * level), quotes, fenced code, tables, rules, **bold**, *italic*, ~~strike~~,
  * `code` and [links](https://…).
  */
@@ -13,18 +14,26 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) => {
   return node;
 };
 
-const SAFE_URL = /^(https?:\/\/|mailto:)/i;
-// Earliest match wins; bold before italic so ** isn't read as two *.
+const SAFE_URL = /^https:\/\//i;
+// Earliest match wins; bold before italic so ** isn't read as two *. Every
+// part is length-bounded and backtick runs are fixed (` or ``), so matching
+// stays linear-ish even on hostile input.
 const INLINE =
-  /(`+)([\s\S]*?[^`])\1(?!`)|\*\*(?=\S)([\s\S]*?\S)\*\*|__(?=\S)([\s\S]*?\S)__|~~(?=\S)([\s\S]*?\S)~~|\*(?=[^\s*])([^*]*?[^\s*])\*|(?<![\p{L}\p{N}_])_(?=[^\s_])([^_]*?[^\s_])_(?![\p{L}\p{N}_])|\[([^\]\n]+)\]\(\s*(\S+?)\s*\)/gu;
+  /``([^`\n]{1,400}?)``|`([^`\n]{1,400})`|\*\*(?=\S)([^\n]{0,400}?\S)\*\*|__(?=\S)([^\n]{0,400}?\S)__|~~(?=\S)([^\n]{0,400}?\S)~~|\*(?=[^\s*])([^*\n]{0,400}?[^\s*])\*|(?<![\p{L}\p{N}_])_(?=[^\s_])([^_\n]{0,400}?[^\s_])_(?![\p{L}\p{N}_])|\[([^\]\n]{1,200})\]\(\s*(\S{1,800}?)\s*\)/gu;
+/** Lines longer than this are shown as plain text. */
+const MAX_INLINE = 4000;
 
 /** Inline Markdown into `parent`. */
 export function inline(text: string, parent: Node): void {
+  if (text.length > MAX_INLINE) {
+    parent.appendChild(document.createTextNode(text));
+    return;
+  }
   let last = 0;
   for (const m of text.matchAll(INLINE)) {
     if (m.index! > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
     last = m.index! + m[0].length;
-    if (m[1]) parent.appendChild(el("code", m[2]!.replace(/^ (.*) $/s, "$1")));
+    if (m[1] !== undefined || m[2] !== undefined) parent.appendChild(el("code", (m[1] ?? m[2])!.replace(/^ (.*) $/s, "$1")));
     else if (m[3] !== undefined || m[4] !== undefined) {
       const strong = el("strong");
       inline((m[3] ?? m[4])!, strong);
@@ -61,8 +70,15 @@ const cells = (row: string) =>
     .split("|")
     .map((c) => c.trim());
 
-/** Block Markdown into a fragment. */
-export function renderMarkdown(source: string): DocumentFragment {
+const startsBlock = (line: string, next: string | undefined) =>
+  /^\s*(```|~~~)/.test(line) ||
+  /^#{1,6}\s/.test(line) ||
+  /^\s*>/.test(line) ||
+  /^\s*([-*_])(\s*\1){2,}\s*$/.test(line) ||
+  (line.includes("|") && next !== undefined && TABLE_RULE.test(next));
+
+/** Block Markdown into a fragment. Quotes nest at most six deep. */
+export function renderMarkdown(source: string, depth = 0): DocumentFragment {
   const out = document.createDocumentFragment();
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   let i = 0;
@@ -76,7 +92,8 @@ export function renderMarkdown(source: string): DocumentFragment {
     if (fence) {
       const body: string[] = [];
       i++;
-      while (i < lines.length && !lines[i]!.trim().startsWith(fence[1]!)) body.push(lines[i++]!);
+      // Closed only by a bare fence line (```js inside the block is content).
+      while (i < lines.length && lines[i]!.trim() !== fence[1]) body.push(lines[i++]!);
       i++;
       const pre = el("pre");
       const code = el("code", body.join("\n"));
@@ -85,7 +102,7 @@ export function renderMarkdown(source: string): DocumentFragment {
       out.appendChild(pre);
       continue;
     }
-    const heading = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    const heading = /^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(line);
     if (heading) {
       // Replies live in a narrow panel: headings stay small.
       const h = el(heading[1]!.length <= 2 ? "h3" : "h4");
@@ -99,11 +116,11 @@ export function renderMarkdown(source: string): DocumentFragment {
       i++;
       continue;
     }
-    if (/^\s*>/.test(line)) {
+    if (/^\s*>/.test(line) && depth < 6) {
       const quote: string[] = [];
       while (i < lines.length && /^\s*>/.test(lines[i]!)) quote.push(lines[i++]!.replace(/^\s*>\s?/, ""));
       const block = el("blockquote");
-      block.appendChild(renderMarkdown(quote.join("\n")));
+      block.appendChild(renderMarkdown(quote.join("\n"), depth + 1));
       out.appendChild(block);
       continue;
     }
@@ -172,7 +189,7 @@ export function renderMarkdown(source: string): DocumentFragment {
     let first = true;
     while (i < lines.length && lines[i]!.trim()) {
       const next = lines[i]!;
-      if (!first && (LIST.test(next) || /^(#{1,6}\s|\s*>|\s*(```|~~~))/.test(next))) break;
+      if (!first && (LIST.test(next) || startsBlock(next, lines[i + 1]))) break;
       if (!first) p.appendChild(el("br"));
       inline(next.trim(), p);
       first = false;

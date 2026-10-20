@@ -19,6 +19,9 @@ import {
 } from "./agent.js";
 import { clockMs } from "./timeline.js";
 
+/** When the person last opened the Changes view of this demo. */
+export const changesSeenKey = () => `demohunter-changes-seen:${location.pathname}`;
+
 export type WorkspaceData = {
   index: ElementIndex;
   projectDir: string;
@@ -979,12 +982,13 @@ export class AgentWorkbench {
         make("p", "review-empty", "Agent changes appear here, by turn."),
       );
     replaceKeepingFocus($("#review-list"), cards);
-    // The Changes view's count: turns that can still be undone in one step.
+    // The Changes view's count: turns since the person last looked at it.
     const count = document.querySelector<HTMLElement>("#agent-changes-count");
     if (count) {
-      const open = turns.filter((t) => t.undoSteps).length;
-      count.textContent = String(open);
-      count.hidden = !open;
+      const seen = Number(localStorage.getItem(changesSeenKey()) ?? 0);
+      const unseen = turns.filter((t) => Date.parse(t.endedAt) > seen).length;
+      count.textContent = unseen > 9 ? "9+" : String(unseen);
+      count.hidden = !unseen;
     }
   }
   /** What `actor` changed between two times, as a small receipt for the end
@@ -995,21 +999,32 @@ export class AgentWorkbench {
       const at = Date.parse(e.createdAt);
       return e.author?.actor === actor && at >= fromMs - 250 && at < toMs;
     };
+    // History is newest first.
     const entries = this.history.filter(inTurn);
     if (!entries.length) return;
     const card = make("div", "turn receipt");
     const head = make("div", "turn-head");
-    const rows = this.changeRows(entries.slice(-8));
-    head.append(make("strong", undefined, `${rows.length} change${rows.length === 1 ? "" : "s"} in this turn`));
+    const rows = this.changeRows(entries.slice(0, 8));
+    const total = entries.reduce((n, e) => n + Math.max(1, e.changes?.length ?? 0), 0);
+    head.append(make("strong", undefined, `${total} change${total === 1 ? "" : "s"} in this turn`));
     const actions = make("span", "receipt-actions");
     const show = make("button", "quiet small-text", "Review");
     show.onclick = review;
     actions.append(show);
-    // Undo only when this turn is exactly the newest undoable one.
-    const newest = this.turns()[0];
-    if (newest?.undoSteps && newest.entries.every(inTurn) && newest.entries.length === entries.length) {
+    // Undo when these are the newest changes (one locked step back), even
+    // if history groups them with an earlier message of the same session.
+    if (entries.every((e, i) => this.history[i]?.id === e.id)) {
       const undo = make("button", "quiet small-text", "Undo");
-      undo.onclick = () => void this.undoTurn(newest).catch(this.hooks.error);
+      const turn: Turn = {
+        id: entries[0]!.id,
+        actor,
+        sessionId: entries[0]!.author!.sessionId,
+        entries,
+        startedAt: entries.at(-1)!.createdAt,
+        endedAt: entries[0]!.createdAt,
+        undoSteps: entries.length,
+      };
+      undo.onclick = () => void this.undoTurn(turn).catch(this.hooks.error);
       actions.append(undo);
     }
     head.append(actions);
