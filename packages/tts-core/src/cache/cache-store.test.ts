@@ -10,6 +10,39 @@ import { NARRATION_CACHE_SCHEMA_VERSION } from "./cache-key.js";
 import { resolveNarrationFromCache } from "./cache-store.js";
 
 describe("resolveNarrationFromCache", () => {
+  test("never deletes a file outside the cache named by obsolete or invalid metadata", async () => {
+    const fixture = await createFixture();
+
+    try {
+      const provider = createProvider([new Uint8Array([1, 2]), new Uint8Array([3, 4])]);
+      const first = await resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider: provider.provider,
+        measureDurationMs: async () => 500,
+      });
+      // A committed cache folder can carry crafted metadata.
+      const outside = join(fixture.tempRoot, "keep.txt");
+      await writeFile(outside, "keep");
+      const metadata = JSON.parse(await readFile(first.entry.metadataPath, "utf8"));
+      metadata.version = 0;
+      metadata.output.audioPath = "../../keep.txt";
+      await writeFile(first.entry.metadataPath, JSON.stringify(metadata));
+
+      const second = await resolveNarrationFromCache({
+        cacheDir: fixture.cacheDir,
+        request: fixture.request,
+        provider: provider.provider,
+        measureDurationMs: async () => 500,
+      });
+
+      assert.equal(second.source, "provider");
+      assert.equal(await readFile(outside, "utf8"), "keep");
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test("returns persisted audio path and metadata on cache hit without invoking the provider again", async () => {
     const fixture = await createFixture();
 

@@ -219,7 +219,7 @@ export async function inspectNarrationCacheMetadataFile(
       status: "obsolete",
       key: parsed.key,
       metadataPath,
-      audioPath: resolveCacheArtifactPath(cacheDir, parsed.output.audioPath),
+      audioPath: containedArtifactPath(cacheDir, parsed.output.audioPath),
       version: parsed.version,
       issue: `Cache entry uses version ${parsed.version} instead of ${currentVersion}.`,
     };
@@ -230,7 +230,7 @@ export async function inspectNarrationCacheMetadataFile(
       status: "invalid",
       key: parsed.key,
       metadataPath,
-      audioPath: resolveCacheArtifactPath(cacheDir, parsed.output.audioPath),
+      audioPath: containedArtifactPath(cacheDir, parsed.output.audioPath),
       version: parsed.version,
       issue: "Metadata format does not match the cached request format.",
     };
@@ -245,7 +245,7 @@ export async function inspectNarrationCacheMetadataFile(
       status: "invalid",
       key: parsed.key,
       metadataPath,
-      audioPath: resolveCacheArtifactPath(cacheDir, parsed.output.audioPath),
+      audioPath: containedArtifactPath(cacheDir, parsed.output.audioPath),
       version: parsed.version,
       issue: "Metadata key does not match the canonical narration identity.",
     };
@@ -258,7 +258,7 @@ export async function inspectNarrationCacheMetadataFile(
       status: "invalid",
       key: parsed.key,
       metadataPath,
-      audioPath: resolveCacheArtifactPath(cacheDir, parsed.output.audioPath),
+      audioPath: containedArtifactPath(cacheDir, parsed.output.audioPath),
       version: parsed.version,
       issue: "Metadata audio path does not match the local cache naming convention.",
     };
@@ -485,6 +485,13 @@ function resolveCacheDir(cacheDir: string): string {
 
 function resolveCacheArtifactPath(cacheDir: string, relativeArtifactPath: string): string {
   return resolve(cacheDir, relativeArtifactPath);
+}
+
+// Metadata can come from a committed cache folder: an entry that is removed
+// as obsolete or invalid must never name a file outside the cache.
+function containedArtifactPath(cacheDir: string, relativeArtifactPath: string): string | null {
+  const audioPath = resolveCacheArtifactPath(cacheDir, relativeArtifactPath);
+  return isWithinDirectory(cacheDir, audioPath) && audioPath !== cacheDir ? audioPath : null;
 }
 
 function toNarrationCacheEntry(options: {

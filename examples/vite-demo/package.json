@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 3200 --strictPort",
+    "dev": "vite --host 127.0.0.1 --port ${PORT:-3200} --strictPort",
     "build": "vite build",
     "generate": "node node_modules/demohunter/dist/bin/demohunter.js generate demos/vite-demo.tour.ts"
   },

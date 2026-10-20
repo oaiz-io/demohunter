@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +16,6 @@ let repoBuildPromise: Promise<void> | undefined;
 
 const EXAMPLES = [
   {
-    baseURL: "http://127.0.0.1:3100",
     readyText: "Hello DemoHunter!",
     name: "Next.js",
     projectRoot: path.join(repoRoot, "examples", "nextjs-demo"),
@@ -26,7 +26,6 @@ const EXAMPLES = [
     ],
   },
   {
-    baseURL: "http://127.0.0.1:3200",
     name: "Vite",
     projectRoot: path.join(repoRoot, "examples", "vite-demo"),
     tourId: "vite-demo",
@@ -57,10 +56,12 @@ describe("example app contract", () => {
 
         await primeNarrationCache(cacheRoot, example.narrationTexts);
 
-        const stopServer = startServer(example.projectRoot);
+        // Any free port works; the example dev script and config both read PORT.
+        const port = String(await freePort());
+        const stopServer = startServer(example.projectRoot, port);
         serverProcesses.push(stopServer);
 
-        await waitForReady(example.baseURL, example.readyText);
+        await waitForReady(`http://127.0.0.1:${port}`, "readyText" in example ? example.readyText : undefined);
 
         const generateResult = await spawnCommand(
           [process.execPath, "run", "generate"],
@@ -68,6 +69,7 @@ describe("example app contract", () => {
           withoutNarrationEnv({
             DEMOHUNTER_EXAMPLE_CACHE_DIR: cacheRoot,
             DEMOHUNTER_EXAMPLE_OUTPUT_DIR: outputRoot,
+          PORT: port,
           }),
         );
 
@@ -155,13 +157,24 @@ type ManagedServer = {
   process: Subprocess<"ignore", "ignore", "ignore">;
 };
 
-function startServer(cwd: string): ManagedServer {
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address() as { port: number };
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
+
+function startServer(cwd: string, port: string): ManagedServer {
   const serverProcess = Bun.spawn({
     cmd: [process.execPath, "run", "dev"],
     cwd,
     stdout: "ignore",
     stderr: "ignore",
-    env: buildEnv({ CI: "1" }),
+    env: buildEnv({ CI: "1", PORT: port }),
   });
 
   return { cwd, process: serverProcess };

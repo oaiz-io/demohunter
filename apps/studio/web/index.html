@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>DemoHunter Studio (alpha)</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 20'%3E%3Cpath d='M6 1h19l-5 18H1z' fill='white' stroke='%23111' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M8.5 7h11l-1.6 6h-11z' fill='%23ffe53d'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/vendor/rrweb.css" />
+    <link rel="stylesheet" href="/style.css" />
+    <script defer src="/vendor/rrweb.js"></script>
+    <script defer src="/app.js"></script>
+  </head>
+  <body>
+    <svg class="svg-defs" aria-hidden="true">
+      <symbol id="i-select" viewBox="0 0 24 24">
+        <path class="fill" d="M6 3l13 9-6 1-3 7z" />
+      </symbol>
+      <symbol id="i-comment" viewBox="0 0 24 24">
+        <path d="M5 5h14v11H9l-4 4z" />
+      </symbol>
+      <symbol id="i-focus" viewBox="0 0 24 24">
+        <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </symbol>
+      <symbol id="i-pencil" viewBox="0 0 24 24">
+        <path class="fill" d="M4 20l1-5L16 4l4 4L9 19z" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="8" y="8" width="12" height="12" rx="2" />
+        <path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3" />
+      </symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24">
+        <path d="M6 9l6 6 6-6" />
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24">
+        <path class="fill" d="M7 4l13 8-13 8z" />
+      </symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24">
+        <path class="fill" d="M6 4h4v16H6zM14 4h4v16h-4z" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24">
+        <path d="M5 12l5 5 9-10" />
+      </symbol>
+      <symbol id="i-more" viewBox="0 0 24 24">
+        <circle class="fill" cx="5" cy="12" r="1.6" />
+        <circle class="fill" cx="12" cy="12" r="1.6" />
+        <circle class="fill" cx="19" cy="12" r="1.6" />
+      </symbol>
+      <symbol id="i-zoom" viewBox="0 0 24 24">
+        <circle cx="10.5" cy="10.5" r="6" />
+        <path d="M15 15l5 5" />
+      </symbol>
+      <symbol id="i-highlight" viewBox="0 0 24 24">
+        <rect
+          x="4"
+          y="7"
+          width="16"
+          height="10"
+          rx="2"
+          stroke-dasharray="3 2"
+        />
+      </symbol>
+    </svg>
+    <header class="app-header">
+      <div class="crumbs">
+        <a
+          href="#studio-library"
+          class="library-back"
+          aria-label="Back to library"
+          title="Back to library"
+          ><svg class="logo" viewBox="0 0 26 20" aria-hidden="true">
+            <path class="logo-frame" d="M6 1h19l-5 18H1z" />
+            <path class="logo-mark" d="M8.5 7h11l-1.6 6h-11z" /></svg
+        ></a>
+        <span class="alpha-badge" title="DemoHunter Studio is in alpha: expect rough edges, and keep your demos in git">Alpha</span>
+        <span class="crumb-sep" data-library-only>/</span>
+        <a href="#" class="crumb-link" data-library-only>Demos</a>
+        <span class="crumb-sep" data-library-only>/</span>
+        <h1 id="project-title">Loading recording…</h1>
+        <span id="live-status" class="save-state">Connecting…</span>
+        <span id="save-indicator" class="draft-state" hidden></span>
+      </div>
+      <div class="header-actions">
+        <button id="agent-activity" class="presence" hidden>
+          <span class="presence-avatar"
+            ><svg class="icon" aria-hidden="true">
+              <use href="#i-pencil" /></svg></span
+          ><span class="agent-activity-label"></span
+          ><span class="presence-tool"></span>
+        </button>
+        <button id="connect-agent" class="button secondary">
+          Connect agent
+        </button>
+        <button id="export-open" class="button primary">Export</button>
+        <details id="project-menu" class="project-menu">
+          <summary aria-label="More options" title="More options">
+            <svg class="icon" aria-hidden="true"><use href="#i-more" /></svg>
+          </summary>
+          <div class="menu-content">
+            <button id="undo" disabled>Undo last edit <kbd>⌘Z</kbd></button
+            ><button id="timeline-toggle">Show element list</button
+            ><button id="help-open">Keyboard shortcuts</button>
+            <div class="menu-files">
+              <button id="copy-project-path">Copy project path</button>
+              <code>rev <span id="file-revision"></span></code>
+            </div>
+          </div>
+        </details>
+      </div>
+    </header>
+    <div id="error" class="error" role="alert" hidden>
+      <span id="error-text"></span
+      ><button
+        id="error-dismiss"
+        class="error-dismiss"
+        aria-label="Dismiss message"
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+      </button>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <main class="workspace">
+      <aside class="outline" id="scene-drawer" popover>
+        <div class="drawer-heading">
+          <strong>Scenes</strong
+          ><button
+            popovertarget="scene-drawer"
+            popovertargetaction="hide"
+            aria-label="Close scenes"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <div class="sr-only">
+          <strong id="outline-title"></strong><span id="outline-meta"></span
+          ><span id="scene-count"></span>
+        </div>
+        <div id="scene-list" class="scene-list"></div>
+        <details class="element-details" id="element-details">
+          <summary>Find an element <span id="element-count"></span></summary>
+          <div class="element-search-wrap">
+            <input
+              id="element-search"
+              aria-label="Find a captured element"
+              placeholder="Search elements…"
+            />
+          </div>
+          <div id="element-tree" class="element-tree"></div>
+        </details>
+      </aside>
+      <section class="editor">
+        <div class="canvas-bar">
+          <button
+            id="scenes-toggle"
+            class="scene-switch"
+            popovertarget="scene-drawer"
+            aria-expanded="false"
+          >
+            <span id="scene-number" class="mono">01</span
+            ><span id="scene-title">Scene</span
+            ><svg class="icon small" aria-hidden="true">
+              <use href="#i-chevron" />
+            </svg>
+          </button>
+          <span id="scene-trust" class="scene-trust" role="status" hidden
+            ><span>Scene scripts are off for this folder.</span
+            ><button id="trust-folder" class="quiet" hidden>
+              Trust folder…
+            </button></span
+          >
+          <button id="focus-preview" class="quiet" title="Expand preview">
+            <svg class="icon" aria-hidden="true"><use href="#i-focus" /></svg
+            ><span>Focus</span>
+          </button>
+        </div>
+        <div class="canvas-wrap" id="canvas-wrap">
+          <div id="stage" class="stage">
+            <div id="viewport">
+              <div id="camera">
+                <div id="replay"></div>
+                <div id="effects"></div>
+                <div id="agent-target" hidden>
+                  <span class="agent-pill"
+                    ><i></i><span class="agent-pill-name"></span
+                    ><span class="agent-pill-tool"></span
+                  ></span>
+                </div>
+                <div id="comment-pins"></div>
+                <div id="selection-box" hidden>
+                  <span class="selection-label mono"></span>
+                </div>
+                <div id="hover-box" hidden></div>
+              </div>
+              <div id="scene-layer"></div>
+              <div id="select-layer" hidden></div>
+            </div>
+            <div id="stage-loading">Loading recording…</div>
+          </div>
+          <div
+            id="selection-toolbar"
+            class="selection-toolbar"
+            role="toolbar"
+            aria-label="Selected element"
+            hidden
+          >
+            <button id="toolbar-edit">Edit</button>
+            <button id="toolbar-note" class="toolbar-note">
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-comment" /></svg
+              >Note
+            </button>
+            <button id="toolbar-copy">
+              <svg class="icon" aria-hidden="true"><use href="#i-copy" /></svg
+              >Copy for agent
+            </button>
+          </div>
+          <div class="tool-palette" role="toolbar" aria-label="Canvas tools">
+            <button
+              id="inspect-toggle"
+              aria-pressed="true"
+              title="Select element (V)"
+              aria-label="Select element"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-select" /></svg
+              ><kbd>V</kbd></button
+            ><button
+              id="tool-comment"
+              aria-pressed="false"
+              title="Add a note (C)"
+              aria-label="Add a note"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-comment" /></svg
+              ><kbd>C</kbd>
+            </button>
+          </div>
+        </div>
+        <div class="timeline">
+          <div class="transport">
+            <div class="transport-left">
+              <button
+                id="play"
+                class="play-button"
+                aria-label="Play"
+                title="Play (Space)"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-play" />
+                </svg>
+              </button>
+              <span class="timecode"
+                ><span id="time" class="mono">00:00.0</span
+                ><span id="duration-label" class="mono muted"></span
+              ></span>
+            </div>
+          </div>
+          <div class="tracks" id="tracks">
+            <div class="track-labels" aria-hidden="true">
+              <span class="ruler-label"></span>
+              <span class="label-scenes">Scenes</span
+              ><span id="camera-label" class="label-camera">Camera</span
+              ><span class="label-voice">Voice</span
+              ><span id="sound-label" class="label-sound">Sound</span
+              ><span id="notes-label" class="label-notes">Notes</span>
+            </div>
+            <div class="lanes" id="lanes">
+              <div class="ruler" id="ruler"></div>
+              <div id="clip-track" class="lane lane-scenes"></div>
+              <div id="effect-track" class="lane lane-camera"></div>
+              <div id="voice-track" class="lane lane-voice"></div>
+              <div id="sound-track" class="lane lane-sound"></div>
+              <div id="notes-track" class="lane lane-notes"></div>
+              <div id="playhead" class="playhead"><i></i></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <aside class="inspector">
+        <nav class="tabs" aria-label="Panels">
+          <button data-tab="edit" role="tab" aria-selected="false">Edit</button>
+          <button
+            data-tab="comments"
+            class="active"
+            role="tab"
+            aria-selected="true"
+          >
+            Notes <span id="comment-count" class="badge note"></span></button
+          ><button data-tab="narration" role="tab" aria-selected="false">
+            Script <i id="script-dot" class="dot" hidden></i></button
+          ><button data-tab="agent" role="tab" aria-selected="false">
+            Agents <i id="agent-dot" class="dot agent" hidden></i>
+          </button>
+        </nav>
+        <section id="panel-edit" class="panel" hidden></section>
+        <section id="panel-comments" class="panel">
+          <div class="panel-row filter-row">
+            <div class="segmented" id="comment-filter">
+              <button id="filter-open" class="active">
+                Open <span id="comment-summary"></span></button
+              ><button id="toggle-resolved">Resolved</button>
+            </div>
+            <button id="scope-toggle" class="quiet small-text">
+              All scenes
+            </button>
+          </div>
+          <div class="panel-scroll">
+            <div id="comments-list"></div>
+            <div id="comments-empty" class="first-run">
+              <div class="first-run-marks">
+                <span class="pin big">1</span
+                ><span class="presence-avatar"
+                  ><svg class="icon" aria-hidden="true">
+                    <use href="#i-pencil" /></svg
+                ></span>
+              </div>
+              <h2>
+                Point at it. Say what to change. Your agent does the rest.
+              </h2>
+              <p>
+                Press C and click anything in the recording. Notes keep the
+                element and the moment, so the agent knows where to look.
+              </p>
+              <span class="micro-label">Then ask your agent</span>
+              <button id="copy-start-prompt" class="prompt-chip">
+                <span class="mono"
+                  >Work through the open notes in DemoHunter Studio.</span
+                ><svg class="icon" aria-hidden="true">
+                  <use href="#i-copy" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="composer">
+            <div class="composer-anchor">
+              <span class="pin tiny"></span><strong>New note</strong
+              ><span id="comment-anchor" class="mono muted"></span>
+            </div>
+            <textarea
+              id="new-comment"
+              rows="3"
+              placeholder="What should change here?"
+              aria-label="New note"
+            ></textarea>
+            <div class="composer-footer">
+              <label class="sr-only"
+                ><input type="checkbox" id="attach-comment" checked /> Attach
+                selection</label
+              ><kbd class="hint-kbd">⌘↵</kbd
+              ><button id="add-comment" class="button mark small">
+                Add note
+              </button>
+            </div>
+          </div>
+        </section>
+        <section id="panel-narration" class="panel" hidden>
+          <div class="panel-row">
+            <span id="transcript-meta" class="muted"></span>
+          </div>
+          <div class="panel-scroll">
+            <div id="audio-status" class="audio-status" hidden>
+              <div class="audio-status-row">
+                <strong id="audio-status-title"></strong
+                ><button id="regenerate" class="button primary small">
+                  Regenerate
+                </button>
+              </div>
+              <span id="audio-status-detail"></span>
+            </div>
+            <p id="narration-job" class="job-line" role="status"></p>
+            <div id="narration-list"></div>
+            <div class="script-footer">
+              <button id="add-segment" class="quiet">+ Add segment</button
+              ><button id="save-narration" class="quiet small-text">
+                Save all
+              </button>
+            </div>
+          </div>
+        </section>
+        <section id="panel-agent" class="panel agent-panel" hidden>
+          <div class="agent-bar">
+            <div id="agent-roster" class="agent-roster" aria-label="Agents"></div>
+            <div class="agent-views" role="tablist" aria-label="Agents view">
+              <button type="button" role="tab" data-agent-view="chat" aria-selected="true">Chat</button>
+              <button type="button" role="tab" data-agent-view="changes" aria-selected="false">
+                Changes <span id="agent-changes-count" class="agent-count" hidden></span>
+              </button>
+            </div>
+          </div>
+          <div id="agent-setup" class="agent-setup" hidden>
+            <span id="agent-place" class="agent-place mono" title="Where the agent works"></span>
+            <label class="agent-choice"
+              ><span class="sr-only">Model</span
+              ><select id="agent-model" aria-label="Model"></select
+            ></label>
+            <label class="agent-choice"
+              ><span class="sr-only">Mode</span
+              ><select id="agent-mode" aria-label="Mode"></select
+            ></label>
+            <button type="button" id="agent-yolo" class="agent-yolo" title="Every tool request is approved without asking. Click to ask again." hidden>
+              YOLO on · ask again
+            </button>
+            <button type="button" id="agent-terminal" class="quiet small-text" title="Open this agent in Terminal, in the same worktree with Studio's tools">
+              Terminal
+            </button>
+          </div>
+          <div class="panel-scroll" id="agent-scroll">
+            <div id="agent-empty" class="agent-empty">
+              <p class="agent-empty-title">Work with your agent here</p>
+              <p class="agent-empty-text">
+                Start Claude Code or Codex in this demo's worktree. It uses
+                your own login and Studio's tools — ask it anything, approve
+                what it runs, or send it notes.
+              </p>
+              <div class="agent-empty-trust" hidden>
+                <p>Agents run code, so this folder has to be trusted first.</p>
+                <button type="button" id="agent-trust" class="button small primary" hidden>
+                  Trust this folder…
+                </button>
+                <p class="agent-trust-hint muted" hidden>
+                  In the desktop app: File → Trust This Folder…
+                </p>
+              </div>
+            </div>
+            <div id="agent-thread" class="agent-thread" aria-live="polite" hidden></div>
+            <div id="agent-working" class="agent-working" role="status" aria-live="polite" hidden>
+              <span class="agent-working-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span id="agent-working-text"></span>
+              <span id="agent-working-time" class="agent-working-time mono"></span>
+            </div>
+            <!-- Changes view: what agents (in Studio or connected over MCP) changed, by turn. -->
+            <div id="agent-changes" class="agent-changes" hidden>
+              <div id="agent-connection" class="agent-connection"></div>
+              <div id="agent-now" class="agent-now"></div>
+              <div class="agent-review">
+                <span id="review-title" class="micro-label">Changes</span>
+                <div id="review-list"></div>
+              </div>
+            </div>
+          </div>
+          <form id="agent-composer" class="agent-composer">
+            <div class="agent-input-box">
+              <textarea id="agent-input" rows="2" aria-label="Message to the agent"></textarea>
+              <div class="agent-input-row">
+                <div id="agent-chips" class="agent-chips"></div>
+                <button type="button" id="agent-stop" class="quiet small-text" hidden>Stop</button>
+                <button type="submit" id="agent-send" class="agent-send" aria-label="Send">↑</button>
+              </div>
+            </div>
+            <label class="agent-autosend">
+              <input type="checkbox" id="agent-autosend" />
+              Send new notes to <span id="agent-autosend-name">Claude Code</span> automatically
+            </label>
+          </form>
+        </section>
+      </aside>
+    </main>
+    <dialog id="export-dialog" class="dialog">
+      <div class="dialog-head">
+        <h2>Export video</h2>
+        <span id="export-revision" class="mono muted"></span>
+        <button id="export-close" class="icon-button" aria-label="Close export">
+          <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <ul id="export-readiness" class="checklist"></ul>
+      <div class="dialog-settings">
+        <div class="setting">
+          <span>Output</span>
+          <code id="export-output" class="field mono"
+            >.demohunter/replays/…/exports/</code
+          >
+          <span class="mono muted small"
+            >video.mp4 · captions.vtt · captions.json · manifest.json</span
+          >
+        </div>
+      </div>
+      <div id="export-progress" class="progress" hidden><i></i></div>
+      <p id="export-status" class="job-line" role="status"></p>
+      <div id="export-downloads" class="downloads" hidden>
+        <a id="export-video" class="button secondary small">Download MP4</a
+        ><a id="export-captions" class="quiet small-text">Captions</a
+        ><a id="export-manifest" class="quiet small-text">Manifest</a>
+      </div>
+      <div class="dialog-foot">
+        <div class="button-row">
+          <button class="button secondary" id="export-cancel">Cancel</button
+          ><button id="export-start" class="button primary" autofocus>
+            Export
+          </button>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="agent-dialog" class="dialog">
+      <div class="dialog-head">
+        <h2>Connect your agent</h2>
+        <button
+          id="close-agent"
+          class="icon-button"
+          aria-label="Close agent setup"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <p class="dialog-lead">
+        Run once in the repo. Studio does not change your agent settings.
+      </p>
+      <div class="segmented" id="agent-clients">
+        <button data-client="claude" class="active">Claude Code</button
+        ><button data-client="codex">Codex</button
+        ><button data-client="other">Other MCP client</button>
+      </div>
+      <div class="dialog-steps">
+        <span class="step-label">1 · Add the MCP server</span>
+        <div class="command">
+          <pre id="agent-command"></pre>
+          <button id="copy-agent-command" class="quiet copy-mark" autofocus>
+            Copy
+          </button>
+        </div>
+        <pre id="agent-config" hidden></pre>
+        <button id="copy-agent-config" class="quiet small-text" hidden>
+          Copy JSON config
+        </button>
+        <span class="step-label">2 · Ask it to start</span>
+        <div class="command light">
+          <span class="mono" id="agent-prompt"
+            >Work through the open notes in DemoHunter Studio.</span
+          ><button id="copy-agent-prompt" class="quiet">Copy</button>
+        </div>
+        <div id="agent-dialog-status" class="agent-wait"></div>
+        <details class="files-details">
+          <summary>Prefer editing files directly?</summary>
+          <p>
+            Read the project AGENTS.md, then edit edits.json, narration.json,
+            comments.json or overrides.css. Valid changes appear here.
+          </p>
+          <code id="agent-project-path"></code>
+        </details>
+      </div>
+    </dialog>
+    <dialog id="help-dialog" class="dialog small">
+      <div class="dialog-head">
+        <h2>Keyboard shortcuts</h2>
+        <button
+          id="help-close"
+          class="icon-button"
+          aria-label="Close shortcuts"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <dl class="shortcuts">
+        <dt>Select an element</dt>
+        <dd><kbd>V</kbd></dd>
+        <dt>Add a note</dt>
+        <dd><kbd>C</kbd></dd>
+        <dt>Script</dt>
+        <dd><kbd>S</kbd></dd>
+        <dt>Copy for agent</dt>
+        <dd><kbd>⌘⇧C</kbd></dd>
+        <dt>Play or pause</dt>
+        <dd><kbd>Space</kbd></dd>
+        <dt>Seek one second</dt>
+        <dd><kbd>←</kbd> <kbd>→</kbd></dd>
+        <dt>Clear selection</dt>
+        <dd><kbd>Esc</kbd></dd>
+        <dt>Undo</dt>
+        <dd><kbd>⌘Z</kbd></dd>
+      </dl>
+    </dialog>
+  </body>
+</html>

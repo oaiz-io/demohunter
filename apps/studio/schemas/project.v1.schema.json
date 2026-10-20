@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "viewport": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 8192
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 8192
+        }
+      },
+      "required": ["width", "height"],
+      "additionalProperties": false
+    },
+    "durationMs": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "createdAt": {
+      "type": "string"
+    },
+    "tts": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["openai", "elevenlabs"]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "voice": {
+          "type": "string",
+          "minLength": 1
+        },
+        "format": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "voiceSettings": {
+          "type": "object",
+          "properties": {
+            "stability": {
+              "type": "number"
+            },
+            "similarityBoost": {
+              "type": "number"
+            },
+            "style": {
+              "type": "number"
+            },
+            "useSpeakerBoost": {
+              "type": "boolean"
+            },
+            "speed": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["provider", "model", "voice", "format", "instructions"],
+      "additionalProperties": false
+    },
+    "capture": {
+      "type": "object",
+      "properties": {
+        "eventCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "assetCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["eventCount", "assetCount", "warnings"],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "title",
+    "viewport",
+    "durationMs",
+    "createdAt",
+    "tts",
+    "capture"
+  ],
+  "additionalProperties": false
+}

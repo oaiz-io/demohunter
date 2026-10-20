@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1 --port 3100",
+    "dev": "next dev --hostname 127.0.0.1 --port ${PORT:-3100}",
     "build": "next build",
     "generate": "node node_modules/demohunter/dist/bin/demohunter.js generate demos/nextjs-demo.tour.ts"
   },

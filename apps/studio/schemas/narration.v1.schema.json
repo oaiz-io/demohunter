@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "clipId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "offsetMs": {
+            "default": 0,
+            "type": "number",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "audio": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "durationMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "cacheKey": {
+                "type": "string"
+              },
+              "requestKey": {
+                "type": "string"
+              },
+              "origin": {
+                "type": "string",
+                "enum": ["provider", "local-demo"]
+              }
+            },
+            "required": ["path", "durationMs", "cacheKey", "requestKey"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "clipId", "text"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["segments"],
+  "additionalProperties": false
+}

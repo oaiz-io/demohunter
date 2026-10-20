@@ -1,0 +1,90 @@
+/* DemoHunter Studio desktop shell — proof-desk look (matches Studio). */
+@font-face {
+  font-family: "Geist";
+  src: url("app://ui/fonts/geist.woff2") format("woff2");
+  font-weight: 100 900;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("app://ui/fonts/geist-mono.woff2") format("woff2");
+  font-weight: 100 900;
+}
+:root {
+  --paper: #ffffff;
+  --desk: #f3f3f1;
+  --ink: #111111;
+  --muted: #6b6b6b;
+  --line: #e3e3e0;
+  --highlight: #ffe53d;
+  --agent: #2f5bea;
+  --correction: #d9412b;
+  color-scheme: light;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font: 13px/1.45 "Geist", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--desk);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+.titlebar {
+  height: 52px;
+  -webkit-app-region: drag;
+}
+button,
+a,
+.recent li {
+  -webkit-app-region: no-drag;
+}
+.mono {
+  font-family: "Geist Mono", ui-monospace, monospace;
+}
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: #fff;
+  font: 500 13px "Geist", system-ui, sans-serif;
+  cursor: pointer;
+}
+.button.ghost {
+  background: var(--paper);
+  color: var(--ink);
+  border-color: var(--line);
+}
+.button:focus-visible {
+  outline: 2px solid var(--agent);
+  outline-offset: 2px;
+}
+kbd {
+  font: 500 11px "Geist Mono", ui-monospace, monospace;
+  opacity: 0.6;
+}
+
+/* Studio is in alpha: shown next to the logo. */
+.alpha-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-full, 999px);
+  background: var(--color-highlighter, #ffe14d);
+  color: var(--color-ink, #111);
+  font: 600 10px/1 var(--font-sans, system-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: default;
+}

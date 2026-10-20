@@ -4,7 +4,8 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "apps/*"
   ],
   "scripts": {
     "build:internals": "bun x tsc -b tsconfig.json --pretty false",
@@ -14,15 +15,25 @@
     "install:global": "bun run --cwd packages/cli link:global",
     "test:e2e": "bun test tests/e2e",
     "test:unit": "bun test packages",
-    "verify": "bun run build && bun run test",
-    "typecheck": "bun x tsc -b tsconfig.json --pretty false && bun run --cwd packages/cli typecheck",
+    "verify": "bun run build && bun run typecheck:studio && bun run test",
+    "desktop:package": "node apps/desktop/scripts/package.mjs",
+    "typecheck": "bun x tsc -b tsconfig.json --pretty false && bun run --cwd packages/cli typecheck && bun run typecheck:studio",
     "test": "bun test",
-    "uninstall:global": "bun run --cwd packages/cli unlink:global"
+    "uninstall:global": "bun run --cwd packages/cli unlink:global",
+    "studio": "bun apps/studio/cli.ts",
+    "test:studio": "bun test apps/studio",
+    "typecheck:studio": "bun x tsc -p apps/studio/tsconfig.test.json",
+    "desktop": "bun run --cwd apps/desktop start",
+    "desktop:app": "bun run --cwd apps/desktop build && open \"apps/desktop/out/DemoHunter Studio.app\"",
+    "test:desktop": "bun test apps/desktop"
   },
   "devDependencies": {
     "demohunter": "workspace:*",
     "@types/node": "25.6.0",
     "playwright": "1.61.0",
     "typescript": "5.9.3"
-  }
+  },
+  "trustedDependencies": [
+    "electron"
+  ]
 }

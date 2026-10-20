@@ -16,6 +16,9 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    env:
+      # Electron is only needed by the macOS desktop workflow.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     timeout-minutes: 30
 
     steps:
@@ -26,6 +29,8 @@ jobs:
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
 
       - name: Cache Bun download cache
         uses: actions/cache@v5

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>DemoHunter Studio (alpha) · Demos</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 20'%3E%3Cpath d='M6 1h19l-5 18H1z' fill='white' stroke='%23111' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M8.5 7h11l-1.6 6h-11z' fill='%23ffe53d'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/library.css" />
+    <script defer src="/library.js"></script>
+  </head>
+  <body>
+    <header class="title-bar">
+      <a class="brand" href="/" aria-label="DemoHunter Studio"
+        ><svg viewBox="0 0 26 20" aria-hidden="true">
+          <path class="logo-frame" d="M6 1h19l-5 18H1z" />
+          <path class="logo-mark" d="M8.5 7h11l-1.6 6h-11z" /></svg
+      ></a>
+      <span class="alpha-badge" title="DemoHunter Studio is in alpha: expect rough edges, and keep your demos in git">Alpha</span>
+      <strong id="repo-name" class="repo-name"></strong>
+      <span id="branch" class="chip mono" hidden></span>
+    </header>
+    <div class="layout">
+    <nav id="projects" class="projects" aria-label="Projects" hidden></nav>
+    <main>
+      <div class="main-head">
+        <h1>Demos</h1>
+        <label class="search"
+          ><svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6" />
+            <path d="M15 15l5 5" /></svg
+          ><input
+            id="search"
+            type="search"
+            aria-label="Search demos"
+            placeholder="Search demos"
+          /><kbd>⌘K</kbd></label
+        >
+        <a id="create-demo" class="create-demo" href="/new" title="Describe a demo and have your agent make it (⌘N)"
+          ><span aria-hidden="true">+</span> Create new demo</a
+        >
+      </div>
+      <div id="error" class="error" role="alert" hidden></div>
+      <p id="warnings" class="warnings" hidden></p>
+      <p id="loading" class="loading">Looking for demos…</p>
+      <div id="recordings" class="grid"></div>
+      <div id="empty" class="empty" hidden>
+        <h2 id="empty-title">No demos yet</h2>
+        <p id="empty-detail" class="empty-detail" hidden></p>
+        <code id="empty-command">bun run studio capture &lt;tour.ts&gt;</code>
+        <a id="empty-create" class="create-demo" href="/new"><span aria-hidden="true">+</span> Create new demo</a>
+        <button id="empty-open" class="open-project" type="button" hidden>Open another project…</button>
+      </div>
+    </main>
+    </div>
+  </body>
+</html>
