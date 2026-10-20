@@ -3647,3 +3647,119 @@ body.resizing-panel iframe {
   font: 600 var(--text-micro) var(--font-sans);
   cursor: pointer;
 }
+
+/* Styled dropdowns (menu-select.ts): a button and a menu over a hidden select. */
+.agent-choice,
+.nd-where {
+  position: relative;
+}
+select.menu-select-native {
+  position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.menu-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  height: 26px;
+  padding: 0 8px 0 9px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper);
+  color: var(--color-ink-2);
+  font: 500 var(--text-micro) / 1 var(--font-sans);
+  transition: border-color 120ms, background 120ms;
+}
+.menu-select:hover:not(:disabled),
+.menu-select[aria-expanded="true"] {
+  border-color: var(--color-line-strong);
+  background: var(--color-desk);
+  color: var(--color-ink);
+}
+.menu-select:disabled {
+  opacity: 1;
+  cursor: default;
+  background: var(--color-desk);
+}
+.menu-select:disabled .menu-select-chevron {
+  display: none;
+}
+.menu-select-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-select-chevron {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.6;
+}
+.menu-select-menu {
+  position: fixed;
+  z-index: 200;
+  max-width: 320px;
+  max-height: min(360px, 60vh);
+  overflow: auto;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--color-paper);
+  box-shadow: var(--shadow-pop);
+  animation: menu-select-in 140ms var(--ease) both;
+}
+.menu-select-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px 6px 6px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--color-ink);
+}
+.menu-select-item:hover,
+.menu-select-item:focus-visible {
+  background: var(--color-desk);
+  outline: none;
+}
+.menu-select-item[aria-selected="true"] {
+  font-weight: 500;
+}
+.menu-select-check {
+  flex-shrink: 0;
+  width: 14px;
+  font-size: var(--text-micro);
+  line-height: var(--leading-ui);
+  text-align: center;
+}
+.menu-select-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.menu-select-name {
+  font-size: var(--text-sm);
+  line-height: var(--leading-ui);
+}
+.menu-select-detail {
+  font-size: var(--text-micro);
+  line-height: var(--leading-tight);
+  font-weight: 400;
+  color: var(--color-graphite);
+}
+@keyframes menu-select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}

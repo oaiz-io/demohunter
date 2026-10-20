@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentOption, AgentStatus, AgentSummary, AgentSettings } from "../agents.js";
 import { renderMarkdown } from "./markdown.js";
+import { menuSelect } from "./menu-select.js";
 import { changesSeenKey } from "./workbench.js";
 
 /**
@@ -119,9 +120,11 @@ export class AgentChat {
       void this.post(`/api/agents/${this.session?.id}/cancel`, {}).catch(hooks.error);
     document.querySelector<HTMLInputElement>("#agent-autosend")!.onchange = (e) =>
       void this.saveSettings({ autoSendNotes: (e.target as HTMLInputElement).checked });
-    for (const category of ["model", "mode"] as const)
-      document.querySelector<HTMLSelectElement>(`#agent-${category}`)!.onchange = (e) =>
-        void this.choose(category, (e.target as HTMLSelectElement).value);
+    for (const category of ["model", "mode"] as const) {
+      const select = document.querySelector<HTMLSelectElement>(`#agent-${category}`)!;
+      select.onchange = (e) => void this.choose(category, (e.target as HTMLSelectElement).value);
+      menuSelect(select);
+    }
     // The desktop app can trust the folder from here; it reopens Studio trusted.
     const trust = (window as { demohunterDesktop?: { trust?: () => unknown } }).demohunterDesktop?.trust;
     const trustButton = document.querySelector<HTMLButtonElement>("#agent-trust")!;

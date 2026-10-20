@@ -49,15 +49,25 @@ function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
     } catch {}
   }
 }
-/** The person's environment for an agent. Codex runs the person's own
- * `codex` when they have one, so it matches their login, config and models
- * (the adapter's bundled copy can lag behind them). */
+/** Bun loads a `.env` from the folder it starts in. Agents start in the
+ * person's repository, whose `.env` may hold an ANTHROPIC_API_KEY or
+ * OPENAI_API_KEY for the app: the agent would then bill that key instead of
+ * the person's own login. Studio's Bun processes never load it. */
+const bunArgs = process.versions.bun ? ["--no-env-file"] : [];
+/** A Studio script run with Studio's Bun (or Node), without `.env` files. */
+const script = (file: string, ...args: string[]) => [process.execPath, ...bunArgs, file, ...args];
+/** API keys never reach an agent: it runs on the person's own subscription
+ * login (`claude` / `codex` signed in), the same as in their terminal. */
+const API_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"];
+/** The person's own CLI on PATH: what they run in a terminal, with its login. */
+const ownCli = (kind: AgentKind) => onPath(kind === "claude" ? "claude" : "codex", process.env);
+/** The person's environment for an agent, running their own `claude` or
+ * `codex` (the adapter's bundled copy only when they have none). */
 function agentEnv(kind: AgentKind): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  if (kind === "codex" && !env.CODEX_PATH) {
-    const own = onPath("codex", env);
-    if (own) env.CODEX_PATH = own;
-  }
+  for (const key of API_KEYS) delete env[key];
+  const own = ownCli(kind);
+  if (own) env[kind === "claude" ? "CLAUDE_CODE_EXECUTABLE" : "CODEX_PATH"] = own;
   return env;
 }
 
@@ -309,7 +319,8 @@ class AgentSession {
     const entry = overrides.get(this.adapter.kind) ?? this.adapter.entry();
     // The agent runs as the person, in the demo's worktree, with their own
     // environment (login, PATH, API keys).
-    const child = spawn(process.execPath, [entry], {
+    const [command, ...args] = script(entry);
+    const child = spawn(command!, args, {
       cwd: this.root,
       env: agentEnv(this.adapter.kind),
       stdio: ["pipe", "pipe", "pipe"],
@@ -569,12 +580,13 @@ export function terminalCommand(
   purpose: "signin" | "run",
   model?: string,
 ): string[] {
-  const env = agentEnv(kind);
-  const mcp = { command: process.execPath, args: [path.join(here, "cli.ts"), "mcp", root] };
+  const own = ownCli(kind);
+  const [command, ...args] = script(path.join(here, "cli.ts"), "mcp", root);
+  const mcp = { command: command!, args };
   if (kind === "claude") {
-    // The adapter's --cli runs the Claude Code it ships with, so this works
-    // without a separate install; it shares the person's ~/.claude login.
-    const claude = [process.execPath, ADAPTERS[0]!.entry(), "--cli"];
+    // The person's own `claude`; without one, the Claude Code the adapter
+    // ships (its --cli), which shares the same ~/.claude login.
+    const claude = own ? [own] : script(ADAPTERS[0]!.entry(), "--cli");
     if (purpose === "signin") return [...claude, "auth", "login", "--claudeai"];
     return [
       ...claude,
@@ -583,9 +595,9 @@ export function terminalCommand(
       JSON.stringify({ mcpServers: { demohunter: { ...mcp, env: { DEMOHUNTER_AGENT_NAME: "Claude Code" } } } }),
     ];
   }
-  const codex = env.CODEX_PATH
-    ? [env.CODEX_PATH]
-    : [process.execPath, createRequire(ADAPTERS[1]!.entry()).resolve("@openai/codex/bin/codex.js")];
+  const codex = own
+    ? [own]
+    : script(createRequire(ADAPTERS[1]!.entry()).resolve("@openai/codex/bin/codex.js"));
   if (purpose === "signin") return [...codex, "login"];
   return [
     ...codex,
@@ -660,10 +672,8 @@ export class AgentHub {
       if (s.adapter.kind === kind && s.root === root && ["stopped", "error"].includes(s.status)) this.sessions.delete(id);
     const adapter = ADAPTERS.find((a) => a.kind === kind);
     if (!adapter) throw new Error(`Unknown agent: ${kind}`);
-    const session = new AgentSession(adapter, root, {
-      command: process.execPath,
-      args: [path.join(here, "cli.ts"), "mcp", root],
-    });
+    const [command, ...args] = script(path.join(here, "cli.ts"), "mcp", root);
+    const session = new AgentSession(adapter, root, { command: command!, args });
     session.purpose = purpose;
     this.sessions.set(session.id, session);
     const started = session.start(preferred).then(() => session.summary());

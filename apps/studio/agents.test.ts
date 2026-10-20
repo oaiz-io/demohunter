@@ -206,7 +206,8 @@ describe("agents in Studio", () => {
       const run = await post("/api/agents/terminal", { project, kind: "claude", purpose: "run", model: "sonnet" });
       expect(await run.json()).toMatchObject({ opened: true });
       expect(scripts[0]).toContain(`cd '${info.root}'`);
-      expect(scripts[0]).toContain("'--cli' '--model' 'sonnet' '--mcp-config'");
+      // The person's own `claude` when on PATH, else the adapter's (--cli).
+      expect(scripts[0]).toMatch(/(\/claude'|'--cli') '--model' 'sonnet' '--mcp-config'/);
       // The folder twice: where it runs, and the demo Studio's MCP server edits.
       expect(scripts[0].split(info.root).length - 1).toBe(2);
       await post("/api/agents/terminal", { project, kind: "claude", purpose: "signin" });

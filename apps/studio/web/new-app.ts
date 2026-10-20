@@ -2,6 +2,7 @@ import type { AgentEvent, AgentStatus } from "../agents.js";
 import type { TourDraft } from "../create-demo.js";
 import type { LibraryRecording, LibraryWorktree } from "../library.js";
 import { AgentChat } from "./agent-chat.js";
+import { menuSelect } from "./menu-select.js";
 import { resizablePanel } from "./panel-resize.js";
 
 /**
@@ -315,6 +316,7 @@ $<HTMLSelectElement>("#nd-root").onchange = (e) => {
 if ("demohunterDesktop" in window || "__TAURI__" in window || "__TAURI_INTERNALS__" in window)
   document.body.classList.add("desktop");
 resizablePanel($(".nd-chat"));
+menuSelect($<HTMLSelectElement>("#nd-root"));
 void (async () => {
   try {
     await pollLibrary();
