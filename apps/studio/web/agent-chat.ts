@@ -67,6 +67,10 @@ export class AgentChat {
   private stream?: EventSource;
   private starting?: AgentSummary["kind"];
   private warmed = false;
+  /** A message on its way to the agent (before it starts working on it). */
+  private sending = false;
+  /** When the current turn began, for the elapsed time. */
+  private turnStarted?: number;
   /** A restart in progress; anything that needs the agent waits for it. */
   private restarting?: Promise<AgentSummary>;
   private chatting?: boolean;
@@ -122,6 +126,10 @@ export class AgentChat {
       if (!document.hidden) void this.refresh().catch(() => {});
     }, 5000);
     setInterval(() => this.renderContext(), 700);
+    // The elapsed time of a running turn.
+    setInterval(() => {
+      if (this.turnStarted) this.renderActivity();
+    }, 1000);
   }
 
   get settings(): AgentSettings | undefined {
@@ -179,6 +187,7 @@ export class AgentChat {
       return this.session;
     this.starting = kind;
     this.renderRoster();
+    this.renderActivity();
     try {
       const summary = await this.post<AgentSummary>("/api/agents/start", { project: this.hooks.project(), kind });
       if (this.info && this.info.settings.agent !== kind) void this.saveSettings({ agent: kind });
@@ -192,6 +201,7 @@ export class AgentChat {
       throw error;
     } finally {
       this.starting = undefined;
+      this.renderActivity();
       await this.refresh().catch(() => {});
     }
   }
@@ -269,6 +279,9 @@ export class AgentChat {
   private setStatus(status: AgentStatus) {
     if (!this.session) return;
     this.session.status = status;
+    if (status === "working" || status === "waiting") this.turnStarted ??= Date.now();
+    else this.turnStarted = undefined;
+    this.renderActivity();
     this.hooks.status(status);
     this.renderRoster();
     this.renderComposer();
@@ -278,12 +291,17 @@ export class AgentChat {
   private async submit() {
     const input = document.querySelector<HTMLTextAreaElement>("#agent-input")!;
     const text = input.value.trim();
-    if (!text) return;
+    if (!text || this.sending) return;
+    this.sending = true;
+    this.renderActivity();
     try {
       await this.send(text);
       if (input.value.trim() === text) input.value = "";
     } catch (error) {
       this.hooks.error(error);
+    } finally {
+      this.sending = false;
+      this.renderActivity();
     }
   }
   async send(text: string, notes?: string[]): Promise<void> {
@@ -362,6 +380,39 @@ export class AgentChat {
     }
   }
 
+  /** What the agent is doing right now, at the end of the thread: starting,
+   * thinking, writing, running a tool or waiting for an approval. */
+  private renderActivity() {
+    const box = document.querySelector<HTMLElement>("#agent-working")!;
+    const session = this.session;
+    const name =
+      session?.name ?? this.info?.kinds.find((k) => k.kind === (this.starting ?? this.info?.settings.agent))?.name ?? "The agent";
+    let text: string | undefined;
+    let state = "busy";
+    if (this.starting || session?.status === "starting") text = `Starting ${name}…`;
+    else if (session?.status === "waiting") {
+      text = `${name} is waiting for your approval`;
+      state = "waiting";
+    } else if (session?.status === "working") {
+      const last = [...this.events.values()].at(-1);
+      if (last?.type === "tool" && ["pending", "in_progress"].includes(last.status)) text = `Running ${toolTitle(last.title)}…`;
+      else if (last?.type === "agent") text = `${name} is writing…`;
+      else text = `${name} is thinking…`;
+    } else if (this.sending) text = "Sending…";
+    box.hidden = !text;
+    box.dataset.state = state;
+    document.querySelector<HTMLButtonElement>("#agent-send")!.classList.toggle("is-sending", this.sending);
+    if (!text) return;
+    const label = document.querySelector<HTMLElement>("#agent-working-text")!;
+    if (label.textContent !== text) label.textContent = text;
+    const seconds = this.turnStarted ? Math.floor((Date.now() - this.turnStarted) / 1000) : 0;
+    document.querySelector<HTMLElement>("#agent-working-time")!.textContent =
+      seconds >= 2 ? (seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min ${seconds % 60} s`) : "";
+    // Keep it in view while following the thread.
+    const scroller = document.querySelector<HTMLElement>("#agent-scroll")!;
+    if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120) scroller.scrollTop = scroller.scrollHeight;
+  }
+
   /** Where the agent works, and its model and mode. */
   private renderSetup() {
     const setup = document.querySelector<HTMLElement>("#agent-setup")!;
@@ -432,6 +483,7 @@ export class AgentChat {
     document.querySelector<HTMLElement>("#agent-empty")!.hidden = true;
     if (atBottom || event.type === "user" || event.type === "permission")
       scroller.scrollTop = scroller.scrollHeight;
+    this.renderActivity();
   }
 
   private renderEvent(e: AgentEvent): HTMLElement {

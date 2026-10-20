@@ -3297,3 +3297,77 @@ body.no-agent-chat .comment-send {
   white-space: nowrap;
   cursor: default;
 }
+
+/* What the agent is doing now, below the thread. */
+.agent-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 16px 14px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-agent-soft);
+  color: var(--color-agent);
+  font-size: var(--text-micro);
+  font-weight: 500;
+}
+.agent-working[data-state="waiting"] {
+  background: var(--color-highlighter-soft, #fff6c2);
+  color: var(--color-ink);
+}
+.agent-working-time {
+  margin-left: auto;
+  color: var(--color-graphite);
+  font-weight: 400;
+}
+.agent-working-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.agent-working-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: agent-dot 1.2s ease-in-out infinite;
+}
+.agent-working-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.agent-working-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes agent-dot {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+/* The send button while a message goes out. */
+.agent-send.is-sending {
+  color: transparent;
+  position: relative;
+  pointer-events: none;
+}
+.agent-send.is-sending::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #fff;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: agent-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-working-dots i,
+  .agent-send.is-sending::after {
+    animation: none;
+  }
+}

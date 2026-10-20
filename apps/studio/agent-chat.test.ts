@@ -110,6 +110,7 @@ test("chat with the agent: context, replies, plan, tools, approvals and stop", a
     // Approvals show as a card; answering it resumes the turn.
     await ask(page, "needs permission");
     await page.waitForSelector(".agent-permission:not(.answered)");
+    await page.waitForSelector('#agent-working[data-state="waiting"]:has-text("waiting for your approval")');
     expect(await page.isHidden("#agent-dot")).toBe(false);
     await shot(page, "agent-permission");
     await page.click('.agent-permission button:has-text("Allow once")');
@@ -119,8 +120,12 @@ test("chat with the agent: context, replies, plan, tools, approvals and stop", a
     // A long turn can be stopped from the composer.
     await ask(page, "slow job");
     await page.waitForSelector("#agent-stop:not([hidden])");
+    // While it works, the panel says so (it has started writing its reply).
+    await page.waitForSelector('#agent-working:not([hidden]):has-text("Claude Code is writing…")');
+    await shot(page, "agent-working");
     await page.click("#agent-stop");
     await page.waitForSelector('.agent-done:has-text("Stopped")');
+    await page.waitForSelector("#agent-working", { state: "hidden" });
     await page.waitForSelector("#agent-stop[hidden]", { state: "attached" });
     expect(studio.errors).toEqual([]);
   } finally {
@@ -216,6 +221,23 @@ test("Terminal opens the agent in the worktree; a signed-out agent offers Sign i
   } finally {
     delete process.env.FAKE_AGENT_FAIL;
     useTerminalLauncher(undefined);
+    await studio.close();
+  }
+}, 60_000);
+
+test("a slow-starting agent shows that it is starting, then that it is thinking", async () => {
+  process.env.FAKE_AGENT_SLOW_START = "1500";
+  const studio = await openStudio();
+  const { page } = studio;
+  try {
+    await page.waitForSelector('#agent-working:not([hidden]):has-text("Starting Claude Code…")');
+    // A message typed now waits for the agent; the panel shows it on its way.
+    await ask(page, "hello while starting");
+    await page.waitForSelector('.agent-msg.agent:has-text("Got: Demo:")');
+    await page.waitForSelector("#agent-working", { state: "hidden" });
+    expect(studio.errors).toEqual([]);
+  } finally {
+    delete process.env.FAKE_AGENT_SLOW_START;
     await studio.close();
   }
 }, 60_000);
