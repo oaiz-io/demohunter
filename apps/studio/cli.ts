@@ -4,7 +4,6 @@ import { exportReplay } from "./export.js";
 import { contract } from "./contract.js";
 import { packCapture } from "./capture-bundle.js";
 import {
-  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -21,7 +20,7 @@ import { loadAuthoredModule } from "../../packages/cli/src/utils/load-authored-m
 import { captureReplay } from "./capture.js";
 import { createDemo } from "./demo.js";
 import { regenerateNarration } from "./narration.js";
-import { loadBundle } from "./storage.js";
+import { atomicWrite, ensureRealFolders, loadBundle } from "./storage.js";
 import { totalDuration, audioIsCurrent } from "./model.js";
 import type { DemoHunterTour } from "@demohunter/sdk";
 import { runReplayMcp } from "./mcp.js";
@@ -307,15 +306,17 @@ export async function main(args: string[]): Promise<void> {
       throw new Error("Choose --mood calm, bright or cinematic.");
     const seed = Number(flags.get("seed") ?? 1);
     // The whole kit: motion.js (timing) and show.js/show.css (proven moves).
-    await mkdir(path.join(target, "scenes/kit"), { recursive: true });
+    // No symlinked folder on the way, and atomic writes replace a link
+    // committed at a kit name instead of writing through it.
+    const kitTarget = await ensureRealFolders(target, "scenes/kit");
     const kitDir = path.join(
       path.dirname(fileURLToPath(import.meta.url)),
       "scene-kit",
     );
     for (const name of await readdir(kitDir))
-      await copyFile(
-        path.join(kitDir, name),
-        path.join(target, "scenes/kit", name),
+      await atomicWrite(
+        path.join(kitTarget, name),
+        await readFile(path.join(kitDir, name)),
       );
 
     // Music resolves on the tonic at the end of the edited timeline.
@@ -328,7 +329,7 @@ export async function main(args: string[]): Promise<void> {
         mood: mood as "calm",
         seed,
       });
-      await mkdir(path.join(target, "audio/sfx"), { recursive: true });
+      await ensureRealFolders(target, "audio/sfx");
       await rename(
         path.join(work, "music.wav"),
         path.join(target, `audio/score-${mood}.wav`),
