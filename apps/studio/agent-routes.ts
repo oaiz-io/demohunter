@@ -16,7 +16,7 @@ import { ensureElementIndex, type ElementIndex, type ElementRecord } from "./ele
 import { clipDuration, isScene, narrationStart, outputToSource } from "./model.js";
 import { loadBundle, safeFile } from "./storage.js";
 import { scenesTrusted } from "./trust.js";
-import { capturesInProgress, creationBrief, recentTours } from "./create-demo.js";
+import { capturesInProgress, creationBrief, installSkills, recentTours } from "./create-demo.js";
 
 const run = promisify(execFile);
 const branches = new Map<string, { at: number; branch?: string }>();
@@ -112,18 +112,19 @@ export async function handleAgentRoute(
         .parse(await body(req));
       const { root, trusted } = await where(input);
       const settings = await readAgentSettings(root);
-      return (
-        json(
-          await hub.start(
-            input.kind,
-            root,
-            !trusted,
-            { model: settings.models[input.kind], mode: settings.modes[input.kind] },
-            { purpose: input.purpose, fresh: input.fresh },
-          ),
-        ),
-        true
+      // A new demo in a repository: its agents get DemoHunter's skills, in
+      // place before the agent starts so it loads them.
+      const skills = input.purpose === "create" && trusted ? await installSkills(root).catch(() => []) : [];
+      const summary = await hub.start(
+        input.kind,
+        root,
+        !trusted,
+        { model: settings.models[input.kind], mode: settings.modes[input.kind] },
+        { purpose: input.purpose, fresh: input.fresh },
       );
+      if (skills.length)
+        hub.get(summary.id).note(`Added DemoHunter's skills to this repository (${skills.join(", ")}) so your agent knows how to make a good demo. Commit them to keep them.`);
+      return json(summary), true;
     }
     if (req.method === "POST" && url.pathname === "/api/agents/settings") {
       const input = z

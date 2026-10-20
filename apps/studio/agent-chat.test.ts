@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { realpathSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { serveLibrary } from "./library-server.js";
@@ -422,6 +423,8 @@ test("standalone Studio (one demo) shows outside agents' activity, no chat", asy
 test("Create new demo: the agent is briefed, the tour and recording show as they happen, and the editor carries on", async () => {
   const { root, dir } = await projectFixture();
   await writeJson(path.join(dir, "events.json"), recording);
+  // A repository: the agent gets DemoHunter's skills.
+  execFileSync("git", ["init", "-q"], { cwd: root });
   const app = await serveLibrary(root, { port: 0 });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.setDefaultTimeout(15_000);
@@ -440,6 +443,12 @@ test("Create new demo: the agent is briefed, the tour and recording show as they
     await page.press("#agent-input", "Enter");
     await page.waitForSelector("#nd-live:not([hidden])");
     await page.waitForSelector('.agent-msg.agent:has-text("Brief: yes")');
+    await page.waitForSelector('.agent-msg.agent:has-text("Skills: yes")');
+    expect(await page.textContent(".agent-notice")).toContain("Added DemoHunter's skills to this repository");
+    for (const home of [".claude/skills", ".agents/skills"])
+      for (const skill of ["demohunter", "demohunter-commercial", "demohunter-replay"])
+        expect(await readFile(path.join(root, home, skill, "SKILL.md"), "utf8")).toContain("Installed by DemoHunter Studio");
+    expect(existsSync(path.join(root, ".claude/skills/demohunter-commercial/references/storyboard.md"))).toBe(true);
     // The storyboard grows as the file is written.
     await page.waitForSelector('.nd-item.narrate:has-text("This is where a new account begins.")');
     await page.waitForSelector('.nd-item.step:has-text("Fill in the form")');

@@ -190,6 +190,7 @@ new acp.AgentSideConnection(
           client.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "tool_call_update", toolCallId, status } });
         const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
         await say(`\nBrief: ${text.includes('"New demo" page') && text.includes(" capture <tour file> --project ") ? "yes" : "no"}`);
+        await say(`\nSkills: ${text.includes("DemoHunter's skills are in this repository") ? "yes" : "no"}`);
         await tool("w1", "Write demos/sign-up.tour.ts", "edit", "in_progress");
         await mkdir("demos", { recursive: true });
         const head = 'export default {\n  id: "sign-up",\n  title: "Sign up",\n  async run({ chapter, step, narrate, goto }) {\n    await goto("/signup");\n    await chapter("Getting started");\n    await narrate("This is where a new account begins.");\n';

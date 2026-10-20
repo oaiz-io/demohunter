@@ -530,6 +530,11 @@ class AgentSession {
     for (const listener of this.listeners) listener({ type: "yolo", on });
   }
 
+  /** A line from Studio in the thread. */
+  note(text: string) {
+    this.add("notice", { text });
+  }
+
   /** Choose a model or mode for this session. */
   async setOption(id: string, value: string): Promise<AgentOption[]> {
     if (!this.conn || !this.acpSession) throw new Error(`${this.adapter.name} isn't ready yet.`);

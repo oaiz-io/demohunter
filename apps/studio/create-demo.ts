@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { open, readdir, stat } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
+import { mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listFiles } from "./git.js";
@@ -114,6 +114,7 @@ export async function creationBrief(root: string, place: { name: string; branch?
   const guide = path.resolve(here, "../../packages/cli/skills/demohunter/references/authoring.md");
   const template = path.resolve(here, "../../packages/cli/skills/demohunter/assets/tour.template.ts");
   const replaySkill = path.resolve(here, "../../.agents/skills/demohunter-replay/SKILL.md");
+  const skills = installedSkills(root).filter((rel) => rel.startsWith(".claude/"));
   const capture = `${shellQuote(process.execPath)} ${shellQuote(cli)} capture <tour file> --project .demohunter/replays/<tour id>`;
   const lines = [
     "[DemoHunter Studio — context added by Studio]",
@@ -129,7 +130,14 @@ export async function creationBrief(root: string, place: { name: string; branch?
     `5. Record it as an editable Studio demo (a DOM capture in a headless browser: no video, no API key), from the config's folder:\n   ${capture}\n   It plays the tour twice and takes a while. If it fails, fix the tour (selectors, waits, login) and run it again; a --project folder that exists is refused, so remove a failed one you created first.`,
     "6. When it is captured Studio shows it here and the person opens it in the editor. Reply with a one- or two-line summary. Narration stays a draft (no audio) until they generate it in Studio.",
     "",
-    `Don't commit. Keep replies short: the person watches the demo take shape and sees your tool calls.${existsSync(replaySkill) ? ` For editing a captured demo later: ${replaySkill}.` : ""}`,
+    ...(skills.length
+      ? [
+          "",
+          `DemoHunter's skills are in this repository: ${skills.join(", ")}. Use them: demohunter (writing tours), demohunter-commercial (a polished, hook-driven product film: scenes, lifted UI, music) and demohunter-replay (editing the captured demo). Follow demohunter-commercial when they ask for something more than a walkthrough.`,
+        ]
+      : []),
+    "",
+    `Don't commit. Keep replies short: the person watches the demo take shape and sees your tool calls.${!skills.length && existsSync(replaySkill) ? ` For editing a captured demo later: ${replaySkill}.` : ""}`,
   ];
   return lines.join("\n");
 }
@@ -151,4 +159,70 @@ export async function capturesInProgress(root: string, sinceMs: number): Promise
     }
   }
   return found;
+}
+
+/** DemoHunter's agent skills, as shipped with Studio: tours, product films
+ * and editing a captured demo. */
+const SKILLS = [
+  { name: "demohunter", dir: path.resolve(here, "../../packages/cli/skills/demohunter") },
+  { name: "demohunter-commercial", dir: path.resolve(here, "../../.agents/skills/demohunter-commercial") },
+  { name: "demohunter-replay", dir: path.resolve(here, "../../.agents/skills/demohunter-replay") },
+].filter((s) => existsSync(path.join(s.dir, "SKILL.md")));
+/** Where Claude Code and Codex find a repository's skills. */
+const SKILL_HOMES = [".claude/skills", ".agents/skills"];
+const MARK = "<!-- Installed by DemoHunter Studio; it updates this copy. -->";
+
+async function files(dir: string, base = dir): Promise<string[]> {
+  const out: string[] = [];
+  for (const e of await readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...(await files(full, base)));
+    else if (e.isFile()) out.push(path.relative(base, full));
+  }
+  return out;
+}
+
+/** The skills a repository has (installed by Studio or its own). */
+export const installedSkills = (root: string) =>
+  SKILLS.flatMap((s) => SKILL_HOMES.map((h) => `${h}/${s.name}`)).filter((rel) => existsSync(path.join(root, rel, "SKILL.md")));
+
+/**
+ * Add DemoHunter's skills to a repository for its agents (Claude Code reads
+ * .claude/skills, Codex .agents/skills), before the New demo agent starts so
+ * it loads them. A copy Studio installed is kept current; a skill folder of
+ * the repository's own (no mark) is left alone. Repositories only. Returns
+ * the folders written.
+ */
+export async function installSkills(root: string): Promise<string[]> {
+  if (!(await listFiles(root, ["SKILL.md"]))) return [];
+  const cli = `${shellQuote(process.execPath)} ${shellQuote(path.join(here, "cli.ts"))}`;
+  const written: string[] = [];
+  for (const skill of SKILLS) {
+    for (const home of SKILL_HOMES) {
+      const rel = `${home}/${skill.name}`;
+      const target = path.join(root, rel);
+      // DemoHunter's own checkout holds the originals.
+      if (existsSync(target) && realpathSync(target) === realpathSync(skill.dir)) continue;
+      const current = await readFile(path.join(target, "SKILL.md"), "utf8").catch(() => undefined);
+      if (current !== undefined && !current.includes(MARK)) continue;
+      let changed = false;
+      for (const file of await files(skill.dir)) {
+        let body: string | Buffer = await readFile(path.join(skill.dir, file));
+        if (file === "SKILL.md") {
+          // After the frontmatter: how to run Studio's CLI from this repository.
+          const text = body.toString("utf8");
+          const end = text.startsWith("---") ? text.indexOf("\n---", 3) + 4 : 0;
+          body = `${text.slice(0, end)}\n\n${MARK}\n> Studio's CLI on this machine: \`${cli}\`. Use it wherever this skill says \`bun run studio\` (that form works only inside the DemoHunter repository). Studio's New demo page gives the exact capture command.\n${text.slice(end)}`;
+        }
+        const out = path.join(target, file);
+        const old = await readFile(out).catch(() => undefined);
+        if (old && Buffer.from(body).equals(old)) continue;
+        await mkdir(path.dirname(out), { recursive: true });
+        await writeFile(out, body);
+        changed = true;
+      }
+      if (changed) written.push(rel);
+    }
+  }
+  return written;
 }
