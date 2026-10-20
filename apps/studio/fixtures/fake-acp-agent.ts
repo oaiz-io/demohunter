@@ -1,5 +1,5 @@
 // A scripted ACP agent for tests: no model, deterministic replies.
-//  - echoes the first context line Studio sent (so tests can check context)
+//  - names the demo Studio said is open; "show context" echoes all of it
 //  - "plan" → a plan update and a tool call
 //  - "permission" → asks for permission and reports the outcome
 //  - "peek" → asks to use a read-only DemoHunter tool
@@ -85,7 +85,8 @@ new acp.AgentSideConnection(
         });
       await say("Got: ");
       if (text.includes("which model")) await say(`[model ${current.model}, mode ${current.mode}] `);
-      await say(text.split("\n")[1] ?? "");
+      await say(`Demo: "${/this demo open: "([^"]*)"/.exec(text)?.[1] ?? "?"}"`);
+      if (text.includes("show context")) await say(`\n~~~\n${text}\n~~~`);
       if (text.includes("plan")) {
         await client.sessionUpdate({
           sessionId: params.sessionId,

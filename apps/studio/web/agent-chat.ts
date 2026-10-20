@@ -21,6 +21,10 @@ type Hooks = {
   project: () => string;
   time: () => number;
   selection: () => { ref?: string; label?: string } | undefined;
+  /** Playing (not paused) in the editor. */
+  playing?: () => boolean;
+  /** Element refs on screen in the current frame. */
+  visible?: () => string[];
   error: (e: unknown) => void;
   /** The panel's status changed (tab badge). */
   status: (status: AgentStatus | undefined) => void;
@@ -337,6 +341,8 @@ export class AgentChat {
       text,
       project: this.hooks.project(),
       outputMs: Math.round(this.hooks.time()),
+      playing: this.hooks.playing?.() ?? false,
+      visible: this.hooks.visible?.() ?? [],
       ...(selection?.ref ? { selection } : {}),
       ...(notes?.length ? { notes } : {}),
     });

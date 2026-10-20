@@ -20,6 +20,7 @@ import {
   sourceToOutput,
   clipStart,
   sampleAnimation,
+  sceneAt,
   type ReplayBundle,
   type Target,
 } from "../model.js";
@@ -411,6 +412,40 @@ function findTargets(target: Target): Element[] {
   } catch {
     return [];
   }
+}
+/** Recorded elements on screen in the current frame — in view, with a size,
+ * not hidden — in page order, for the agent's context (Studio checks them
+ * against the index and describes them itself). */
+function visibleRefs(limit = 400): string[] {
+  const doc = replayer?.iframe.contentDocument;
+  const view = doc?.defaultView;
+  if (!doc || !view || !replayer || sceneAt(bundle.edits, position)) return [];
+  const mirror = replayer.getMirror();
+  const documentId = currentDocumentId();
+  const refs: string[] = [];
+  const seen = new Set<Element>();
+  const shown = (node: Element) => {
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= view.innerHeight || rect.left >= view.innerWidth)
+      return false;
+    const style = view.getComputedStyle(node);
+    return style.visibility !== "hidden" && Number(style.opacity) !== 0;
+  };
+  const walk = (root: Element) => {
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let node = walker.currentNode as Element | null; node && refs.length < limit; node = walker.nextNode() as Element | null) {
+      if (seen.has(node)) continue;
+      seen.add(node);
+      if (!shown(node)) continue;
+      const record = recordAt(mirror.getId(node), documentId);
+      if (record) refs.push(record.ref);
+    }
+  };
+  // An open dialog is what the person is looking at: its contents first.
+  for (const dialog of doc.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]'))
+    if (shown(dialog)) walk(dialog);
+  walk(doc.body ?? doc.documentElement);
+  return refs;
 }
 function currentDocumentId(): number {
   if (!events || !bundle) return 1;
@@ -966,6 +1001,8 @@ async function runReload(): Promise<void> {
       agentChat = new AgentChat({
         project: () => libraryDemo,
         time: () => position,
+        playing: () => playing,
+        visible: () => visibleRefs(),
         selection: () =>
           selection?.elementRef
             ? {

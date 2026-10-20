@@ -36,7 +36,14 @@ const recording = [
       node: {
         type: 0,
         id: 1,
-        childNodes: [el(2, "html", [el(3, "head"), el(4, "body", [el(5, "button", [{ type: 3, id: 6, textContent: "Approve" }])])])],
+        childNodes: [el(2, "html", [el(3, "head"), el(4, "body", [
+          el(5, "button", [{ type: 3, id: 6, textContent: "Approve" }]),
+          // An open dialog (Studio lists what's in it first).
+          { type: 2, id: 7, tagName: "div", attributes: { role: "dialog", "aria-label": "Confirm" }, childNodes: [
+            el(8, "h2", [{ type: 3, id: 9, textContent: "Are you sure?" }]),
+            el(10, "button", [{ type: 3, id: 11, textContent: "Yes" }]),
+          ] },
+        ])])],
       },
     },
   },
@@ -271,6 +278,34 @@ test("replies render Markdown safely; a turn that changed the demo ends with a r
     await shot(page, "agent-changes");
     await page.click('[data-agent-view="chat"]');
     await page.waitForSelector("#agent-thread:not([hidden])");
+    expect(studio.errors).toEqual([]);
+  } finally {
+    await studio.close();
+  }
+}, 60_000);
+
+test("each message tells the agent what is on screen: demo, frame, scene, page, visible elements and selection", async () => {
+  const studio = await openStudio();
+  const { page } = studio;
+  try {
+    await page.waitForSelector('.roster-pill[data-kind="claude"][data-status="idle"]');
+    await page.evaluate(() => (window as any).__replayLab.seek(500));
+    await page.evaluate(() => (window as any).__replayLab.select("d1-button-n5"));
+    await ask(page, "show context");
+    const reply = page.locator(".agent-msg.agent pre code").last();
+    await reply.waitFor();
+    const sent = (await reply.textContent())!;
+    expect(sent).toContain('this demo open: "Test replay"');
+    expect(sent).toContain("They are looking at the frame at 00:00.5 of 00:02.5 (paused)");
+    expect(sent).toContain("scene 1 of 2: the recorded page at 00:00.5 of the capture");
+    expect(sent).toContain('page "http://example.test"');
+    expect(sent).toContain('A dialog is open on top of the page: "Confirm" (d1-div-n7)');
+    expect(sent).toContain('- h2 "Are you sure?" (d1-h2-n8)\n- button "Yes" (d1-button-n10)\nBehind it on the page:\n- button "Approve" (d1-button-n5)');
+    expect(sent).toContain("call get_screenshot with outputMs 500");
+    expect(sent).toContain('Selected element: "d1-button-n5"');
+    expect(sent).toMatch(/Its captured HTML[^\n]*\n```html\n[^]*<button data-demohunter-ref="d1-button-n5">[^]*Approve[^]*\n```/);
+    // The person's own words come after Studio's context.
+    expect(sent.trim().endsWith("show context")).toBe(true);
     expect(studio.errors).toEqual([]);
   } finally {
     await studio.close();
