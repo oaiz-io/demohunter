@@ -24,7 +24,7 @@ bun run test:desktop     # Electron end-to-end tests (Playwright)
 - Opens the last project, or a welcome window with recent projects. ⌘O opens a repository or folder; drop a folder on the window or the Dock icon.
 - A repository shows the demos of all its worktrees; any other folder is scanned for demos beneath it.
 - Remembers the window, runs as a single instance, and shows startup errors with **Try again**.
-- **Folder trust.** Scene pages are code. A folder you haven't trusted opens restricted: scene scripts don't run (static scenes still render) and Studio does not start inside the folder, so its `bunfig.toml` and `.env` are ignored. **File → Trust This Folder…** (or the editor notice) enables them for that folder.
+- **Folder trust.** Scene pages are code. A folder you haven't trusted opens restricted: scene scripts don't run (static scenes still render) and Studio does not start inside the folder, so its `bunfig.toml` is ignored (a folder's `.env` is never loaded, trusted or not). **File → Trust This Folder…** (or the editor notice) enables them for that folder.
 - The bridge to the window (choose/open a folder, open or reveal export files inside the project) answers only Studio's own top frame; other permissions are denied and links open in your browser.
 
 ## Known limits (alpha)

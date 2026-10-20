@@ -82,8 +82,13 @@ export function menuSelect(select: HTMLSelectElement): void {
         button.focus();
       } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
-      } else if (e.key === "Tab") done();
+        const next = at < 0 ? (e.key === "ArrowDown" ? 0 : items.length - 1) : (at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+        items[next]?.focus();
+      } else if (e.key === "Tab") {
+        // Back to the button first, so focus doesn't fall to the page.
+        button.focus();
+        done();
+      }
     };
     const done = () => {
       menu.remove();
@@ -92,12 +97,18 @@ export function menuSelect(select: HTMLSelectElement): void {
       document.removeEventListener("keydown", keys, true);
       window.removeEventListener("blur", done);
       window.removeEventListener("resize", done);
+      document.removeEventListener("scroll", onScroll, true);
       if (close === done) close = undefined;
     };
     document.addEventListener("pointerdown", outside, true);
     document.addEventListener("keydown", keys, true);
+    // Scrolling the panel underneath would leave the fixed menu behind.
+    const onScroll = (e: Event) => {
+      if (!menu.contains(e.target as Node)) done();
+    };
     window.addEventListener("blur", done);
     window.addEventListener("resize", done);
+    document.addEventListener("scroll", onScroll, true);
     close = done;
   };
   button.onclick = () => (button.getAttribute("aria-expanded") === "true" ? close?.() : open());

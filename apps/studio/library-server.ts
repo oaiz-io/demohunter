@@ -197,7 +197,7 @@ export async function serveLibrary(
           "application/json",
         );
       }
-      if (await handleAgentRoute(req, res, url, library, agents)) return;
+      if (await handleAgentRoute(req, res, url, library, agents, options.restricted)) return;
       if (req.method === "POST" && url.pathname === "/api/seen") {
         // The library and the editor mark a demo as looked at.
         let body = "";

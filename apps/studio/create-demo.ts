@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listFiles } from "./git.js";
@@ -106,10 +106,15 @@ const shellQuote = (arg: string) => (/^[\w./:@=-]+$/.test(arg) ? arg : `'${arg.r
  * words: where to work, how a DemoHunter demo is made and recorded, and the
  * exact capture command for this Studio. */
 export async function creationBrief(root: string, place: { name: string; branch?: string }): Promise<string> {
-  const [configs, tours] = await Promise.all([
-    find(root, ["demohunter.config.ts", "*/demohunter.config.ts"], (n) => n === "demohunter.config.ts"),
-    find(root, ["*.tour.ts"], (n) => n.endsWith(".tour.ts")),
-  ]);
+  // Repository file names go in quoted, and names with control characters
+  // (a newline could start a fake Studio block) not at all.
+  const quoted = (list: string[]) => list.filter((f) => !/[\u0000-\u001f\u007f\u2028\u2029]/.test(f)).map((f) => JSON.stringify(f));
+  const [configs, tours] = (
+    await Promise.all([
+      find(root, ["demohunter.config.ts", "*/demohunter.config.ts"], (n) => n === "demohunter.config.ts"),
+      find(root, ["*.tour.ts"], (n) => n.endsWith(".tour.ts")),
+    ])
+  ).map(quoted) as [string[], string[]];
   const cli = path.join(here, "cli.ts");
   const guide = path.resolve(here, "../../packages/cli/skills/demohunter/references/authoring.md");
   const template = path.resolve(here, "../../packages/cli/skills/demohunter/assets/tour.template.ts");
@@ -195,7 +200,19 @@ export const installedSkills = (root: string) =>
  */
 export async function installSkills(root: string): Promise<string[]> {
   if (!(await listFiles(root, ["SKILL.md"]))) return [];
-  const cli = `${shellQuote(process.execPath)} ${shellQuote(path.join(here, "cli.ts"))}`;
+  /** Every existing part of root/rel is a real folder or file, never a
+   * symlink: writes stay inside the repository (a .claude linked to
+   * ~/.claude, or a planted link, is left alone). */
+  const contained = async (rel: string) => {
+    let at = root;
+    for (const part of rel.split("/")) {
+      at = path.join(at, part);
+      const info = await lstat(at).catch(() => undefined);
+      if (!info) return true;
+      if (info.isSymbolicLink()) return false;
+    }
+    return true;
+  };
   const written: string[] = [];
   for (const skill of SKILLS) {
     for (const home of SKILL_HOMES) {
@@ -203,17 +220,20 @@ export async function installSkills(root: string): Promise<string[]> {
       const target = path.join(root, rel);
       // DemoHunter's own checkout holds the originals.
       if (existsSync(target) && realpathSync(target) === realpathSync(skill.dir)) continue;
+      if (!(await contained(rel))) continue;
       const current = await readFile(path.join(target, "SKILL.md"), "utf8").catch(() => undefined);
       if (current !== undefined && !current.includes(MARK)) continue;
       let changed = false;
       for (const file of await files(skill.dir)) {
         let body: string | Buffer = await readFile(path.join(skill.dir, file));
         if (file === "SKILL.md") {
-          // After the frontmatter: how to run Studio's CLI from this repository.
+          // After the frontmatter. Nothing machine-specific: the copy is meant
+          // to be committed and shared.
           const text = body.toString("utf8");
           const end = text.startsWith("---") ? text.indexOf("\n---", 3) + 4 : 0;
-          body = `${text.slice(0, end)}\n\n${MARK}\n> Studio's CLI on this machine: \`${cli}\`. Use it wherever this skill says \`bun run studio\` (that form works only inside the DemoHunter repository). Studio's New demo page gives the exact capture command.\n${text.slice(end)}`;
+          body = `${text.slice(0, end)}\n\n${MARK}\n> \`bun run studio\` works only inside the DemoHunter repository. From this repository, use the Studio CLI command DemoHunter Studio's New demo page gives you.\n${text.slice(end)}`;
         }
+        if (!(await contained(`${rel}/${file}`))) continue;
         const out = path.join(target, file);
         const old = await readFile(out).catch(() => undefined);
         if (old && Buffer.from(body).equals(old)) continue;

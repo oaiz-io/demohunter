@@ -226,7 +226,11 @@ $("#nd-result-art").onclick = (e) => {
   e.preventDefault();
   void openCreated();
 };
-$("#nd-again").onclick = () => {
+$("#nd-again").onclick = async () => {
+  // This demo's agent is done (unless the editor took it over).
+  const done = chat?.current;
+  if (done?.purpose === "create")
+    await fetch(`/api/agents/${done.id}/stop`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
   sessionStorage.removeItem(runKey());
   sessionStorage.removeItem(`demohunter-new-agent:${root}`);
   location.reload();

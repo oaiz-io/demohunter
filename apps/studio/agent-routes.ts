@@ -15,7 +15,7 @@ import { open, readFile, stat } from "node:fs/promises";
 import { ensureElementIndex, type ElementIndex, type ElementRecord } from "./elements.js";
 import { clipDuration, isScene, narrationStart, outputToSource } from "./model.js";
 import { loadBundle, safeFile } from "./storage.js";
-import { scenesTrusted } from "./trust.js";
+import { restrictFolder, scenesTrusted } from "./trust.js";
 import { capturesInProgress, creationBrief, installSkills, recentTours } from "./create-demo.js";
 
 const run = promisify(execFile);
@@ -40,6 +40,8 @@ export async function handleAgentRoute(
   url: URL,
   library: LocalLibrary,
   hub: AgentHub,
+  /** The library opened restricted: every worktree is, found later too. */
+  restricted = false,
 ): Promise<boolean> {
   if (!url.pathname.startsWith("/api/agents")) return false;
   const json = (value: unknown, status = 200) => {
@@ -64,6 +66,8 @@ export async function handleAgentRoute(
       if (!library.roots.includes(input.root)) await library.scan();
       if (!library.roots.includes(input.root))
         throw Object.assign(new Error("That folder isn't part of this library."), { status: 404 });
+      // A worktree the scan just found is as restricted as the library.
+      if (restricted) restrictFolder(input.root);
       return { dir: undefined, root: input.root, trusted: scenesTrusted(input.root) };
     };
     const query = () => ({

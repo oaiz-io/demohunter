@@ -60,7 +60,7 @@ function remember(dir) {
   app.addRecentDocument(dir);
 }
 /** Folders the person chose to trust: their scene pages run scripts and Studio
- * starts inside them (so their Bun config and .env apply). Everything else
+ * starts inside them (so their Bun config applies; never their .env). Everything else
  * opens restricted. */
 const isTrusted = (dir) => (settings().trusted ?? []).includes(dir);
 async function trustFolder() {
@@ -73,7 +73,7 @@ async function trustFolder() {
     defaultId: 1,
     cancelId: 1,
     message: `Trust “${path.basename(target)}”?`,
-    detail: `${target}\n\nScene pages in this folder's demos are code: trusting it lets their scripts run, lets Claude Code or Codex work in it from the Agents panel, and starts Studio inside the folder with its Bun settings and .env file. Only trust folders whose authors you trust.`,
+    detail: `${target}\n\nScene pages in this folder's demos are code: trusting it lets their scripts run, lets Claude Code or Codex work in it from the Agents panel, and starts Studio inside the folder with its Bun settings (never its .env file). Only trust folders whose authors you trust.`,
   });
   if (response !== 0) return false;
   save({ trusted: [...new Set([...(settings().trusted ?? []), target])] });
@@ -188,10 +188,11 @@ function startStudio(dir) {
   stopStudio();
   return new Promise((resolve, reject) => {
     const trusted = isTrusted(dir);
-    // --no-env-file: Bun never loads the repository's .env into Studio (or
-    // the agents it starts) — a repo's CLAUDE_CODE_OAUTH_TOKEN would sign
-    // Claude Code into that account instead of the person's own.
-    const child = spawn(bun(), ["--no-env-file", cli, dir, "--port", "0", ...(trusted ? [] : ["--restricted"])], {
+    // An empty env file: Bun never loads the repository's .env into Studio
+    // (or the agents it starts) — a repo's CLAUDE_CODE_OAUTH_TOKEN would sign
+    // Claude Code into that account instead of the person's own. (Bun 1.2
+    // accepts --no-env-file but still loads .env.)
+    const child = spawn(bun(), ["--env-file=/dev/null", cli, dir, "--port", "0", ...(trusted ? [] : ["--restricted"])], {
       // Untrusted folders never become Bun's working directory, so a
       // repository's bunfig.toml preload can't run.
       cwd: trusted ? dir : app.getPath("userData"),

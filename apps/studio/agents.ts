@@ -50,10 +50,11 @@ function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
   }
 }
 /** Bun loads a `.env` from the folder it starts in. Agents start in the
- * person's repository, whose `.env` may hold an ANTHROPIC_API_KEY or
- * OPENAI_API_KEY for the app: the agent would then bill that key instead of
- * the person's own login. Studio's Bun processes never load it. */
-const bunArgs = process.versions.bun ? ["--no-env-file"] : [];
+ * person's repository, whose `.env` may hold a CLAUDE_CODE_OAUTH_TOKEN or API
+ * key for the app: the agent would then sign in as that instead of the
+ * person's own login. Studio's Bun processes never load it. (An empty env
+ * file, not --no-env-file: Bun 1.2 accepts that flag and loads .env anyway.) */
+const bunArgs = process.versions.bun ? ["--env-file=/dev/null"] : [];
 /** A Studio script run with Studio's Bun (or Node), without `.env` files. */
 const script = (file: string, ...args: string[]) => [process.execPath, ...bunArgs, file, ...args];
 /** Keys and tokens never reach an agent: it runs on the login the person
@@ -67,8 +68,9 @@ const ownCli = (kind: AgentKind) => onPath(kind === "claude" ? "claude" : "codex
 function agentEnv(kind: AgentKind): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of API_KEYS) delete env[key];
+  const key = kind === "claude" ? "CLAUDE_CODE_EXECUTABLE" : "CODEX_PATH";
   const own = ownCli(kind);
-  if (own) env[kind === "claude" ? "CLAUDE_CODE_EXECUTABLE" : "CODEX_PATH"] = own;
+  if (own) env[key] ??= own;
   return env;
 }
 
@@ -670,9 +672,11 @@ export class AgentHub {
       .reverse()
       .find((s) => same(s) && !["stopped", "error"].includes(s.status));
     if (live && !fresh) return live.summary();
-    // A new demo: earlier New demo agents that sit idle go (one still working
-    // on another demo keeps going).
-    if (fresh) for (const s of this.sessions.values()) if (same(s) && s.status === "idle") s.stop();
+    // A new demo: earlier New demo agents that were started but never used go
+    // (another tab's conversation, idle or not, keeps going).
+    if (fresh)
+      for (const s of this.sessions.values())
+        if (same(s) && s.status === "idle" && !s.events.some((e) => e.type === "user")) s.stop();
     // Ended sessions of this agent and worktree go; the new one replaces them.
     for (const [id, s] of this.sessions)
       if (s.adapter.kind === kind && s.root === root && ["stopped", "error"].includes(s.status)) this.sessions.delete(id);
