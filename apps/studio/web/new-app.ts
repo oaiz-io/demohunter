@@ -312,7 +312,8 @@ $<HTMLSelectElement>("#nd-root").onchange = (e) => {
 
 // ------------------------------------------------------------ start
 
-if ("demohunterDesktop" in window) document.body.classList.add("desktop");
+if ("demohunterDesktop" in window || "__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+  document.body.classList.add("desktop");
 resizablePanel($(".nd-chat"));
 void (async () => {
   try {
