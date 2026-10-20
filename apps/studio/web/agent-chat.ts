@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentOption, AgentStatus, AgentSummary, AgentSettings } from "../agents.js";
+import { renderMarkdown } from "./markdown.js";
 
 /**
  * The Agents panel: start the person's own coding agent inside Studio, chat
@@ -25,7 +26,20 @@ type Hooks = {
   status: (status: AgentStatus | undefined) => void;
   /** A short confirmation. */
   toast: (text: string) => void;
+  /** What an agent changed in the demo between two times, as a receipt for
+   * the end of its turn (none when it changed nothing). */
+  receipt?: (actor: string, fromMs: number, toMs: number) => HTMLElement | undefined;
 };
+
+export type AgentView = "chat" | "changes";
+/** Show the chat or the changes (what agents changed, by turn). */
+export function setAgentView(view: AgentView) {
+  const changes = view === "changes";
+  for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-agent-view]"))
+    tab.setAttribute("aria-selected", String(tab.dataset.agentView === view));
+  document.querySelector<HTMLElement>("#panel-agent")!.dataset.view = view;
+  document.querySelector<HTMLElement>("#agent-changes")!.hidden = !changes;
+}
 
 const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => {
   const n = document.createElement(tag);
@@ -56,7 +70,7 @@ const STATUS_TEXT: Record<AgentStatus, string> = {
  * of agents connected over MCP. */
 export function standaloneAgents() {
   document.body.classList.add("no-agent-chat");
-  document.querySelector<HTMLDetailsElement>("#agent-activity-details")!.open = true;
+  setAgentView("changes");
 }
 
 export class AgentChat {
@@ -73,7 +87,6 @@ export class AgentChat {
   private turnStarted?: number;
   /** A restart in progress; anything that needs the agent waits for it. */
   private restarting?: Promise<AgentSummary>;
-  private chatting?: boolean;
   readonly available: Promise<boolean>;
 
   constructor(private hooks: Hooks) {
@@ -103,6 +116,9 @@ export class AgentChat {
     trustButton.hidden = typeof trust !== "function";
     document.querySelector<HTMLElement>(".agent-trust-hint")!.hidden = typeof trust === "function";
     trustButton.onclick = () => void Promise.resolve(trust?.()).catch(hooks.error);
+    for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-agent-view]"))
+      tab.onclick = () => this.showView(tab.dataset.agentView as AgentView);
+    setAgentView("chat");
     document.querySelector<HTMLButtonElement>("#agent-terminal")!.onclick = () =>
       void this.terminal(this.session?.kind ?? this.info?.settings.agent ?? "claude", "run");
     // Start the preferred agent when the Agents panel opens, so it is ready
@@ -130,6 +146,15 @@ export class AgentChat {
     setInterval(() => {
       if (this.turnStarted) this.renderActivity();
     }, 1000);
+  }
+
+  showView(view: AgentView) {
+    setAgentView(view);
+    if (view === "chat") document.querySelector<HTMLTextAreaElement>("#agent-input")!.focus({ preventScroll: true });
+  }
+  /** Re-draw the change receipts (the demo's history changed). */
+  refreshReceipts() {
+    for (const e of this.events.values()) if (e.type === "done") this.upsert(e);
   }
 
   get settings(): AgentSettings | undefined {
@@ -355,6 +380,8 @@ export class AgentChat {
       } else {
         button.dataset.status = "off";
         button.append(make("span", "roster-status", this.starting === kind.kind ? "starting…" : "start"));
+        button.title = `Start ${kind.name} in this worktree`;
+        if (this.starting === kind.kind) button.dataset.status = "starting";
         button.disabled = !!this.starting || !info.trusted;
         button.onclick = () => void this.start(kind.kind).catch(this.hooks.error);
       }
@@ -366,18 +393,6 @@ export class AgentChat {
     empty.hidden = !!this.session && this.events.size > 0;
     empty.querySelector(".agent-empty-trust")!.toggleAttribute("hidden", info.trusted);
     thread.hidden = !this.session;
-    // Outside agents' activity (MCP) folds away once an in-app agent is
-    // chatting; it is only decided when that changes, so a toggle sticks.
-    const chatting = [...this.events.values()].some((e) => e.type === "user");
-    if (chatting !== this.chatting) {
-      this.chatting = chatting;
-      document.body.classList.toggle("agent-chatting", chatting);
-      const details = document.querySelector<HTMLDetailsElement>("#agent-activity-details")!;
-      if (chatting) {
-        details.open = false;
-        details.dataset.decided = "1";
-      }
-    }
   }
 
   /** What the agent is doing right now, at the end of the thread: starting,
@@ -470,7 +485,7 @@ export class AgentChat {
     chips.replaceChildren(...text.map((t) => make("span", "agent-chip", t)));
   }
 
-  private upsert(event: AgentEvent) {
+  private upsert(event: AgentEvent, follow = true) {
     this.events.set(event.seq, event);
     const thread = document.querySelector<HTMLElement>("#agent-thread")!;
     const scroller = document.querySelector<HTMLElement>("#agent-scroll")!;
@@ -478,12 +493,42 @@ export class AgentChat {
     const next = this.renderEvent(event);
     const old = this.nodes.get(event.seq);
     if (old) old.replaceWith(next);
+    else if (event.type === "tool") this.toolGroup(thread).append(next);
     else thread.append(next);
     this.nodes.set(event.seq, next);
+    if (event.type === "tool") this.renderToolGroup(next.parentElement!.parentElement as HTMLDetailsElement);
     document.querySelector<HTMLElement>("#agent-empty")!.hidden = true;
-    if (atBottom || event.type === "user" || event.type === "permission")
+    if (follow && (atBottom || event.type === "user" || event.type === "permission"))
       scroller.scrollTop = scroller.scrollHeight;
     this.renderActivity();
+  }
+
+  /** Consecutive tool calls share one folded line: "Used 4 tools". */
+  private toolGroup(thread: HTMLElement): HTMLElement {
+    const last = thread.lastElementChild;
+    if (last?.classList.contains("agent-tools")) return last.querySelector(".agent-tools-list")!;
+    const group = make("details", "agent-tools");
+    group.append(make("summary"), make("div", "agent-tools-list"));
+    thread.append(group);
+    return group.querySelector(".agent-tools-list")!;
+  }
+  private renderToolGroup(group: HTMLDetailsElement) {
+    const rows = [...group.querySelectorAll<HTMLElement>(".agent-tool")];
+    const running = rows.find((r) => r.classList.contains("in_progress") || r.classList.contains("pending"));
+    const failed = rows.filter((r) => r.classList.contains("failed")).length;
+    const names = [...new Set(rows.map((r) => r.querySelector(".agent-tool-title")!.textContent!.replace(/^DemoHunter · /, "")))];
+    const summary = group.querySelector("summary")!;
+    summary.replaceChildren(
+      make("span", `agent-tool-mark${running ? " spinning" : failed ? " failed" : ""}`, running ? "" : failed ? "✕" : "✓"),
+      make(
+        "span",
+        "agent-tools-title",
+        running
+          ? `Running ${running.querySelector(".agent-tool-title")!.textContent}…`
+          : `Used ${rows.length} tool${rows.length === 1 ? "" : "s"}${failed ? ` · ${failed} failed` : ""}`,
+      ),
+      make("span", "agent-tools-names", names.slice(0, 4).join(" · ")),
+    );
   }
 
   private renderEvent(e: AgentEvent): HTMLElement {
@@ -501,12 +546,17 @@ export class AgentChat {
       }
       case "agent": {
         const box = make("div", "agent-msg agent");
-        box.append(make("div", "agent-meta", name), make("div", "agent-text", e.text));
+        // Markdown, built as DOM (never HTML): see markdown.ts.
+        const text = make("div", "agent-text md");
+        text.append(renderMarkdown(e.text));
+        box.append(make("div", "agent-meta", name), text);
         return box;
       }
       case "thought": {
         const box = make("details", "agent-thought");
-        box.append(make("summary", undefined, "Thinking"), make("div", "agent-text", e.text));
+        const text = make("div", "agent-text md");
+        text.append(renderMarkdown(e.text));
+        box.append(make("summary", undefined, "Thinking"), text);
         return box;
       }
       case "tool": {
@@ -578,8 +628,19 @@ export class AgentChat {
         }
         return box;
       }
-      case "done":
-        return make("div", "agent-done", e.stopReason === "cancelled" ? "Stopped" : e.stopReason === "end_turn" ? "" : `Ended: ${e.stopReason}`);
+      case "done": {
+        const box = make("div", "agent-done-wrap");
+        box.append(make("div", "agent-done", e.stopReason === "cancelled" ? "Stopped" : e.stopReason === "end_turn" ? "" : `Ended: ${e.stopReason}`));
+        // What this turn changed in the demo, from Studio's history.
+        // The turn runs from its message to its end, and never into the next message.
+        const all = [...this.events.values()];
+        const asked = all.filter((x) => x.type === "user" && x.seq < e.seq).at(-1);
+        const next = all.find((x) => x.type === "user" && x.seq > e.seq);
+        const until = Math.min(Date.parse(e.at) + 1500, next ? Date.parse(next.at) : Infinity);
+        const receipt = asked && this.hooks.receipt?.(name, Date.parse(asked.at), until);
+        if (receipt) box.append(receipt);
+        return box;
+      }
     }
   }
 }

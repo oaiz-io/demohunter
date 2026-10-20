@@ -101,7 +101,9 @@ test("chat with the agent: context, replies, plan, tools, approvals and stop", a
     await ask(page, "Make a plan");
     await page.waitForSelector('.agent-msg.agent:has-text("Got: Demo:")');
     await page.waitForSelector(".agent-plan li.completed");
-    await page.waitForSelector('.agent-tool.completed:has-text("DemoHunter · get basic info")');
+    // Tool calls fold into one line; the rows are inside.
+    await page.waitForSelector('.agent-tools summary:has-text("Used 1 tool")');
+    await page.waitForSelector('.agent-tool.completed:has-text("DemoHunter · get basic info")', { state: "attached" });
     expect(await page.inputValue("#agent-input")).toBe("");
     expect(await page.locator(".agent-msg.user").last().textContent()).toContain("Make a plan");
     expect(await page.locator(".agent-msg.user .agent-chips").last().textContent()).toMatch(/^00:00\.\d$/);
@@ -225,6 +227,84 @@ test("Terminal opens the agent in the worktree; a signed-out agent offers Sign i
   }
 }, 60_000);
 
+test("replies render Markdown safely; a turn that changed the demo ends with a receipt", async () => {
+  const studio = await openStudio();
+  const { page } = studio;
+  try {
+    await page.waitForSelector('.roster-pill[data-kind="claude"][data-status="idle"]');
+    await ask(page, "markdown please");
+    const reply = page.locator(".agent-msg.agent .agent-text.md").last();
+    await reply.locator("table").waitFor();
+    expect(await reply.locator("strong").first().textContent()).toBe("Bold");
+    expect(await reply.locator("em").first().textContent()).toBe("italic");
+    expect(await reply.locator("ol > li").count()).toBe(2);
+    expect(await reply.locator("ol li ul li").textContent()).toBe("nested");
+    expect(await reply.locator("pre code").textContent()).toBe("const x = 1;");
+    expect(await reply.locator("a").evaluateAll((a) => a.map((x) => [x.textContent, x.getAttribute("href"), x.getAttribute("rel")]))).toEqual([
+      ["a link", "https://example.com", "noopener noreferrer"],
+    ]);
+    // Raw HTML and unsafe links stay text.
+    expect(await reply.locator("img").count()).toBe(0);
+    expect(await reply.textContent()).toContain('<img src=x onerror="window.__pwned=1">');
+    expect(await reply.textContent()).toContain("[bad](javascript:alert(1))");
+    expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
+    // The agent changes the demo through Studio's MCP server: the turn ends
+    // with what changed, and Review opens the Changes view.
+    await ask(page, "make a change");
+    await page.waitForSelector('.agent-msg.agent:has-text("Changed: 1")');
+    const receipt = page.locator("#agent-thread .turn.receipt").last();
+    await receipt.waitFor({ timeout: 15_000 });
+    expect(await receipt.locator(".turn-head strong").textContent()).toBe("1 change in this turn");
+    // Under the turn that made the change, and only there.
+    expect(await page.locator("#agent-thread .turn.receipt").count()).toBe(1);
+    expect(
+      await page.evaluate(() => {
+        const asked = [...document.querySelectorAll(".agent-msg.user")].find((n) => n.textContent?.includes("make a change"))!;
+        return !!(asked.compareDocumentPosition(document.querySelector("#agent-thread .turn.receipt")!) & Node.DOCUMENT_POSITION_FOLLOWING);
+      }),
+    ).toBe(true);
+    await shot(page, "agent-receipt");
+    await receipt.locator('button:has-text("Review")').click();
+    await page.waitForSelector("#agent-changes:not([hidden]) #review-list .turn");
+    expect(await page.isVisible("#agent-thread")).toBe(false);
+    expect(await page.textContent("#agent-changes-count")).toBe("1");
+    await shot(page, "agent-changes");
+    await page.click('[data-agent-view="chat"]');
+    await page.waitForSelector("#agent-thread:not([hidden])");
+    expect(studio.errors).toEqual([]);
+  } finally {
+    await studio.close();
+  }
+}, 60_000);
+
+test("the side panel can be dragged wider, keeps its width, and resets on double-click", async () => {
+  const studio = await openStudio();
+  const { page } = studio;
+  try {
+    const width = () => page.$eval(".inspector", (e) => Math.round(e.getBoundingClientRect().width));
+    const before = await width();
+    const handle = await page.$eval(".panel-resize", (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + 200 }; });
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    await page.mouse.move(handle.x - 200, handle.y, { steps: 5 });
+    await page.mouse.up();
+    const wider = await width();
+    expect(Math.abs(wider - (before + 200))).toBeLessThanOrEqual(2);
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__replayLab?.state().ready);
+    expect(await width()).toBe(wider);
+    await page.dblclick(".panel-resize");
+    expect(await width()).toBe(before);
+    // Arrow keys, too.
+    await page.focus(".panel-resize");
+    await page.keyboard.press("ArrowLeft");
+    expect(await width()).toBe(before + 16);
+    expect(studio.errors).toEqual([]);
+  } finally {
+    await studio.close();
+  }
+}, 60_000);
+
 test("a slow-starting agent shows that it is starting, then that it is thinking", async () => {
   process.env.FAKE_AGENT_SLOW_START = "1500";
   const studio = await openStudio();
@@ -268,7 +348,9 @@ test("standalone Studio (one demo) shows outside agents' activity, no chat", asy
     await page.click('[data-tab="agent"]');
     await page.waitForFunction(() => document.body.classList.contains("no-agent-chat"));
     expect(await page.isVisible("#agent-composer")).toBe(false);
-    expect(await page.getAttribute("#agent-activity-details", "open")).toBe("");
+    // Only the Changes view: no chat, no switch.
+    expect(await page.isVisible("#agent-changes")).toBe(true);
+    expect(await page.isVisible(".agent-views")).toBe(false);
     expect(await page.isVisible("#review-list")).toBe(true);
   } finally {
     await page.close();

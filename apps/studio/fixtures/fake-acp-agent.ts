@@ -4,6 +4,8 @@
 //  - "permission" → asks for permission and reports the outcome
 //  - "peek" → asks to use a read-only DemoHunter tool
 //  - "spoof" → a shell command titled like a DemoHunter tool
+//  - "make a change" → adds a note through Studio's MCP server
+//  - "markdown" → a reply with Markdown (and things that must stay text)
 //  - "slow" → waits until cancelled
 //  - "which model" → reports the chosen model and mode
 //  - FAKE_AGENT_FAIL=auth makes session/new fail like a signed-out agent;
@@ -16,6 +18,7 @@ const stream = acp.ndJsonStream(
   Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>,
 );
 let cancelled: (() => void) | undefined;
+let mcpServers: { command: string; args: string[]; env: { name: string; value: string }[] }[] = [];
 // Model and mode, offered like Claude Code does (session config options).
 const current = { model: "opus", mode: "default" };
 const configOptions = () => [
@@ -56,6 +59,7 @@ new acp.AgentSideConnection(
         throw acp.RequestError.authRequired();
       // Report what Studio handed us, so tests can check cwd and MCP wiring.
       process.stderr.write(`session cwd=${params.cwd} mcp=${JSON.stringify(params.mcpServers)}\n`);
+      mcpServers = params.mcpServers as typeof mcpServers;
       return { sessionId: "fake-session", configOptions: configOptions() } as acp.NewSessionResponse;
     },
     async authenticate() {
@@ -132,6 +136,32 @@ new acp.AgentSideConnection(
           ],
         });
         await say(`\nRead: ${answer.outcome.outcome === "selected" ? answer.outcome.optionId : "cancelled"}`);
+      }
+      if (text.includes("make a change")) {
+        // Like a real agent: Studio's MCP server, as handed over in session/new.
+        const { Client } = await import("@modelcontextprotocol/client");
+        const { StdioClientTransport } = await import("@modelcontextprotocol/client/stdio");
+        const server = mcpServers[0]!;
+        const mcp = new Client({ name: "fake-agent", version: "1.0.0" });
+        await mcp.connect(
+          new StdioClientTransport({
+            command: server.command,
+            args: server.args,
+            env: { ...(process.env as Record<string, string>), ...Object.fromEntries(server.env.map((e) => [e.name, e.value])) },
+          }),
+        );
+        const project = /\(id ([0-9a-f]+)\)/.exec(text)?.[1];
+        const call = async (name: string, args: Record<string, unknown>) =>
+          JSON.parse(((await mcp.callTool({ name, arguments: { ...args, project } })) as { content: { text: string }[] }).content[0]!.text);
+        const info = await call("get_basic_info", {});
+        await call("add_comment", { expectedRevision: info.revision, timeMs: 500, body: "Added by the agent" });
+        await mcp.close();
+        await say("\nChanged: 1");
+      }
+      if (text.includes("markdown")) {
+        await say(
+          "\n**Bold** and *italic*, `code` and [a link](https://example.com).\n\n1. First\n2. Second\n   - nested\n\n<img src=x onerror=\"window.__pwned=1\"> [bad](javascript:alert(1))\n\n| Scene | Time |\n|---|---|\n| Intro | 0:05 |\n\n```\nconst x = 1;\n```",
+        );
       }
       if (text.includes("spoof")) {
         // A shell command titled like a DemoHunter tool: must still ask.

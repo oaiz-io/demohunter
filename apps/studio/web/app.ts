@@ -29,6 +29,7 @@ import { AgentWorkbench, toast, type WorkspaceData } from "./workbench.js";
 import { AgentChat, standaloneAgents } from "./agent-chat.js";
 import { parseReference } from "../links.js";
 import { Timeline, clockMs } from "./timeline.js";
+import { resizablePanel } from "./panel-resize.js";
 import type { HistoryItem } from "./agent.js";
 import type { AgentActivity } from "../contract.js";
 
@@ -974,6 +975,8 @@ async function runReload(): Promise<void> {
             : undefined,
         error: report,
         toast,
+        receipt: (actor, from, to) =>
+          workbench.receipt(actor, from, to, () => agentChat?.showView("changes")),
         status: (status) => {
           const dot = $("#agent-dot");
           dot.hidden = status !== "working" && status !== "waiting";
@@ -981,7 +984,10 @@ async function runReload(): Promise<void> {
         },
       });
     else if (!agentChat && !document.body.classList.contains("no-agent-chat")) standaloneAgents();
-    workbench.onReview = () => timeline?.render(workbench.agentMarks());
+    workbench.onReview = () => {
+      timeline?.render(workbench.agentMarks());
+      agentChat?.refreshReceipts();
+    };
     timeline ??= new Timeline({
       bundle: () => bundle,
       seek: (ms) => {
@@ -1588,6 +1594,8 @@ document.addEventListener("keydown", (event) => {
     clearSelection();
 });
 new ResizeObserver(resize).observe($("#stage"));
+// The side panel's width is the person's (headless renders keep the default).
+if (!renderMode) resizablePanel($(".inspector"));
 function tick(now: number): void {
   if (playing && bundle && !reloading && !narrationPlayback.buffering) {
     position += Math.min(now - lastTick, MAX_FRAME_MS);

@@ -528,6 +528,7 @@ test("captures editable DOM replay and exports saved narration and video without
         );
         // The Agent panel groups the session's changes into an undoable turn.
         await scoped.locator('[data-tab="agent"]').click();
+        await scoped.locator('[data-agent-view="changes"]').click();
         await scoped
           .locator("#review-list .turn .change-row")
           .first()

@@ -43,7 +43,7 @@ If an agent isn't signed in, the panel says so where it happens and offers **Sig
 
 Each message carries Studio's view: the time on screen, the selected element and any notes you send, shown as chips under your message. Replies, plans and tool calls stream into the panel. The agent asks before running its own tools or changing the demo: approve or deny from the card in the thread (the tab shows a yellow dot while it waits). DemoHunter tools that only read the demo don't ask. **Stop** cancels the current turn. One agent session runs per worktree and agent kind; it stops when Studio closes.
 
-Notes have **Send to agent**. Turn on **Send new notes to … automatically** under the composer to hand every new note to the agent as you add it. These preferences live in `.demohunter/studio/agents.json`, which is git-ignored. Activity from agents you connect yourself (below) appears under **Activity & changes**.
+Notes have **Send to agent**. Turn on **Send new notes to … automatically** under the composer to hand every new note to the agent as you add it. These preferences live in `.demohunter/studio/agents.json`, which is git-ignored. Replies render Markdown (built as page elements, never as HTML, so nothing an agent writes can run). Tool calls fold into one line per turn, and a turn that changed the demo ends with a receipt: what changed, **Review** and **Undo**. Drag the panel's left edge to make it wider (double-click resets it). **Changes**, next to the agents, lists what every agent changed by turn, including agents you connect yourself (below).
 
 ### Connect an outside agent
 
@@ -53,7 +53,7 @@ Each note shows its stable comment ID. Click the ID to copy it, use **Copy link*
 
 While an agent works, Studio shows it from real activity records only: the title bar pill, a target outline on the canvas (a light scan while it reads, a marching outline while it edits, a short settle when it is done, red when a call fails), stripes on the scene it changes and a checklist of tool calls in the related note. Your playhead and selection never move unless you press **Show on canvas**. Notes show their state: open, agent working, agent replied, resolved.
 
-**Activity & changes** in the Agents panel groups tracked agent changes into turns (one MCP session without a long pause) with a readable change list. **Undo turn** undoes the newest turn in one locked step and refuses to overwrite later direct-file edits.
+**Changes** in the Agents panel groups tracked agent changes into turns (one MCP session without a long pause) with a readable change list. **Undo turn** undoes the newest turn in one locked step and refuses to overwrite later direct-file edits.
 
 ```sh
 bun run studio mcp            # the workspace; follows the demo open in Studio

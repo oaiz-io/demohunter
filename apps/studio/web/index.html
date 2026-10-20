@@ -383,7 +383,15 @@
           </div>
         </section>
         <section id="panel-agent" class="panel agent-panel" hidden>
-          <div id="agent-roster" class="agent-roster" aria-label="Agents"></div>
+          <div class="agent-bar">
+            <div id="agent-roster" class="agent-roster" aria-label="Agents"></div>
+            <div class="agent-views" role="tablist" aria-label="Agents view">
+              <button type="button" role="tab" data-agent-view="chat" aria-selected="true">Chat</button>
+              <button type="button" role="tab" data-agent-view="changes" aria-selected="false">
+                Changes <span id="agent-changes-count" class="agent-count" hidden></span>
+              </button>
+            </div>
+          </div>
           <div id="agent-setup" class="agent-setup" hidden>
             <span id="agent-place" class="agent-place mono" title="Where the agent works"></span>
             <label class="agent-choice"
@@ -422,18 +430,15 @@
               <span id="agent-working-text"></span>
               <span id="agent-working-time" class="agent-working-time mono"></span>
             </div>
-            <details id="agent-activity-details" class="agent-activity">
-              <summary class="micro-label">Activity &amp; changes</summary>
+            <!-- Changes view: what agents (in Studio or connected over MCP) changed, by turn. -->
+            <div id="agent-changes" class="agent-changes" hidden>
               <div id="agent-connection" class="agent-connection"></div>
-              <div class="agent-now">
-                <span class="micro-label">Now</span>
-                <div id="agent-now"></div>
-              </div>
+              <div id="agent-now" class="agent-now"></div>
               <div class="agent-review">
                 <span id="review-title" class="micro-label">Changes</span>
                 <div id="review-list"></div>
               </div>
-            </details>
+            </div>
           </div>
           <form id="agent-composer" class="agent-composer">
             <div class="agent-input-box">

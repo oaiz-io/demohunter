@@ -979,13 +979,42 @@ export class AgentWorkbench {
         make("p", "review-empty", "Agent changes appear here, by turn."),
       );
     replaceKeepingFocus($("#review-list"), cards);
-    // Outside agents' activity opens this section once, unless an agent is
-    // chatting in Studio (then it stays folded under the thread).
-    const details = document.querySelector<HTMLDetailsElement>("#agent-activity-details");
-    if (details && !details.dataset.decided && (last || turns.length)) {
-      details.dataset.decided = "1";
-      if (!document.body.classList.contains("agent-chatting")) details.open = true;
+    // The Changes view's count: turns that can still be undone in one step.
+    const count = document.querySelector<HTMLElement>("#agent-changes-count");
+    if (count) {
+      const open = turns.filter((t) => t.undoSteps).length;
+      count.textContent = String(open);
+      count.hidden = !open;
     }
+  }
+  /** What `actor` changed between two times, as a small receipt for the end
+   * of its chat turn: the changes, Review (the Changes view) and, when it is
+   * the newest turn, Undo. Undefined when it changed nothing. */
+  receipt(actor: string, fromMs: number, toMs: number, review: () => void): HTMLElement | undefined {
+    const inTurn = (e: HistoryItem) => {
+      const at = Date.parse(e.createdAt);
+      return e.author?.actor === actor && at >= fromMs - 250 && at < toMs;
+    };
+    const entries = this.history.filter(inTurn);
+    if (!entries.length) return;
+    const card = make("div", "turn receipt");
+    const head = make("div", "turn-head");
+    const rows = this.changeRows(entries.slice(-8));
+    head.append(make("strong", undefined, `${rows.length} change${rows.length === 1 ? "" : "s"} in this turn`));
+    const actions = make("span", "receipt-actions");
+    const show = make("button", "quiet small-text", "Review");
+    show.onclick = review;
+    actions.append(show);
+    // Undo only when this turn is exactly the newest undoable one.
+    const newest = this.turns()[0];
+    if (newest?.undoSteps && newest.entries.every(inTurn) && newest.entries.length === entries.length) {
+      const undo = make("button", "quiet small-text", "Undo");
+      undo.onclick = () => void this.undoTurn(newest).catch(this.hooks.error);
+      actions.append(undo);
+    }
+    head.append(actions);
+    card.append(head, ...rows);
+    return card;
   }
   private turnCard(
     turn: Turn,
@@ -1019,8 +1048,23 @@ export class AgentWorkbench {
       make("span", "when", live ? "In progress" : ago(turn.endedAt)),
     );
     card.append(head);
+    card.append(...this.changeRows(turn.entries.slice(0, 8)));
+    // Undo is linear: only the newest turn can be undone in one step.
+    if (turn.undoSteps) {
+      const foot = make("div", "turn-foot");
+      const undo = make("button", "button secondary small", "Undo turn");
+      undo.onclick = () => void this.undoTurn(turn).catch(this.hooks.error);
+      foot.append(undo);
+      card.append(foot);
+    }
+    return card;
+  }
+  /** One row per change (up to four per history entry), as in turn cards. */
+  private changeRows(entries: HistoryItem[]): HTMLElement[] {
+    const bundle = this.hooks.bundle();
     const index = this.hooks.data().index;
-    for (const entry of turn.entries.slice(0, 8)) {
+    const rows: HTMLElement[] = [];
+    for (const entry of entries) {
       const changes: HistoryChange[] = entry.changes?.length
         ? entry.changes
         : [{ kind: "project", label: entry.description, file: "" }];
@@ -1070,18 +1114,10 @@ export class AgentWorkbench {
         row.onclick = () => {
           if (element) this.hooks.select(element.ref, time);
         };
-        card.append(row);
+        rows.push(row);
       }
     }
-    // Undo is linear: only the newest turn can be undone in one step.
-    if (turn.undoSteps) {
-      const foot = make("div", "turn-foot");
-      const undo = make("button", "button secondary small", "Undo turn");
-      undo.onclick = () => void this.undoTurn(turn).catch(this.hooks.error);
-      foot.append(undo);
-      card.append(foot);
-    }
-    return card;
+    return rows;
   }
   // Connect dialog --------------------------------------------------------
   private serverName() {

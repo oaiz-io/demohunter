@@ -63,7 +63,7 @@
   --radius-lg: 16px;
   --radius-full: 999px;
   --header: 52px;
-  --panel: 360px;
+  --panel: 400px;
   --shadow-pop: 0 0 0 1px var(--color-line), 0 8px 24px rgba(17, 17, 17, 0.08);
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   color-scheme: light;
@@ -2865,17 +2865,84 @@ body.inline-text-editing #stage iframe.inline-text-frame {
 }
 
 /* Agents panel: the person's own coding agent, inside Studio */
-.agent-roster {
+/* Agents, and the Chat / Changes switch. */
+.agent-bar {
   flex-shrink: 0;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--color-line);
 }
-.agent-roster:has(+ .agent-setup:not([hidden])) {
+.agent-bar:has(+ .agent-setup:not([hidden])) {
   border-bottom: 0;
   padding-bottom: 6px;
+}
+.agent-roster {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.agent-views {
+  flex-shrink: 0;
+  display: flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--color-desk);
+}
+.agent-views button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-graphite);
+  font: 500 var(--text-micro) var(--font-sans);
+  cursor: pointer;
+}
+.agent-views button[aria-selected="true"] {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.agent-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--color-agent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+/* The Changes view replaces the thread and the composer. */
+#panel-agent[data-view="changes"] #agent-empty,
+#panel-agent[data-view="changes"] #agent-thread,
+#panel-agent[data-view="changes"] #agent-working,
+#panel-agent[data-view="changes"] .agent-composer {
+  display: none;
+}
+.agent-changes {
+  display: flex;
+  flex-direction: column;
+}
+.agent-changes .agent-connection {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-line);
+}
+.agent-changes .agent-now:empty {
+  display: none;
+}
+.agent-changes .agent-review {
+  padding: 16px 20px;
 }
 /* Where the agent works, and its model and mode. */
 .agent-setup {
@@ -3196,14 +3263,6 @@ body.inline-text-editing #stage iframe.inline-text-frame {
   font-size: var(--text-micro);
   color: var(--color-pencil);
 }
-.agent-activity {
-  padding: 4px 0 16px;
-  border-top: 1px solid var(--color-line);
-}
-.agent-activity > summary {
-  padding: 12px 20px 4px;
-  cursor: pointer;
-}
 .agent-composer {
   flex-shrink: 0;
   display: flex;
@@ -3268,7 +3327,8 @@ body.inline-text-editing #stage iframe.inline-text-frame {
   font-weight: 600;
   color: var(--color-ink);
 }
-body.no-agent-chat .agent-roster,
+body.no-agent-chat .agent-bar,
+body.no-agent-chat .agent-setup,
 body.no-agent-chat .agent-composer,
 body.no-agent-chat .agent-empty,
 body.no-agent-chat .comment-send {
@@ -3370,4 +3430,196 @@ body.no-agent-chat .comment-send {
   .agent-send.is-sending::after {
     animation: none;
   }
+}
+
+/* Agent replies: Markdown rendered as DOM (web/markdown.ts). */
+.agent-text.md {
+  white-space: normal;
+  line-height: 1.55;
+}
+.agent-text.md > * + * {
+  margin-top: 8px;
+}
+.agent-text.md p,
+.agent-text.md ul,
+.agent-text.md ol {
+  margin: 0;
+}
+.agent-text.md ul,
+.agent-text.md ol {
+  padding-left: 20px;
+}
+.agent-text.md li + li {
+  margin-top: 3px;
+}
+.agent-text.md li > ul,
+.agent-text.md li > ol {
+  margin-top: 3px;
+}
+.agent-text.md h3,
+.agent-text.md h4 {
+  margin: 12px 0 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.agent-text.md h3:first-child,
+.agent-text.md h4:first-child {
+  margin-top: 0;
+}
+.agent-text.md strong {
+  font-weight: 600;
+}
+.agent-text.md code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-desk);
+  font: 0.9em var(--font-mono);
+}
+.agent-text.md pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-desk);
+  overflow-x: auto;
+}
+.agent-text.md pre code {
+  padding: 0;
+  background: none;
+  white-space: pre;
+}
+.agent-text.md blockquote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-line-strong);
+  color: var(--color-ink-2);
+}
+.agent-text.md a {
+  color: var(--color-agent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.agent-text.md hr {
+  border: 0;
+  border-top: 1px solid var(--color-line);
+}
+.agent-text.md .md-table {
+  overflow-x: auto;
+}
+.agent-text.md table {
+  border-collapse: collapse;
+  font-size: var(--text-micro);
+}
+.agent-text.md th,
+.agent-text.md td {
+  padding: 4px 8px;
+  border: 1px solid var(--color-line);
+  text-align: left;
+  vertical-align: top;
+}
+.agent-text.md th {
+  background: var(--color-desk);
+  font-weight: 600;
+}
+
+/* Consecutive tool calls fold into one line. */
+.agent-tools > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+  font: var(--text-micro) var(--font-mono);
+  color: var(--color-graphite);
+}
+.agent-tools > summary::-webkit-details-marker {
+  display: none;
+}
+.agent-tools-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-pencil);
+}
+.agent-tools[open] .agent-tools-names {
+  display: none;
+}
+.agent-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 0 22px;
+}
+.agent-tools .agent-tool-mark.spinning {
+  width: 9px;
+  height: 9px;
+  margin: 0 2.5px;
+  border: 2px solid var(--color-agent);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: agent-spin 0.9s linear infinite;
+}
+.agent-tools .agent-tool-mark.failed {
+  color: var(--color-correction);
+}
+
+/* What a chat turn changed, under the reply. */
+.agent-done-wrap:has(.agent-done:empty):not(:has(.receipt)) {
+  display: none;
+}
+.turn.receipt {
+  margin: 4px 0 0 14px;
+}
+.turn.receipt .turn-head strong {
+  font-size: var(--text-micro);
+}
+.receipt-actions {
+  display: inline-flex;
+  gap: 12px;
+}
+
+/* The side panel's resize handle (web/panel-resize.ts). */
+.inspector {
+  position: relative;
+}
+.panel-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 10px;
+  z-index: 20;
+  cursor: col-resize;
+  touch-action: none;
+}
+.panel-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  background: transparent;
+  transition: background 120ms;
+}
+.panel-resize:hover::after,
+.panel-resize:focus-visible::after,
+body.resizing-panel .panel-resize::after {
+  background: var(--color-agent);
+}
+.panel-resize:focus-visible {
+  outline: none;
+}
+body.resizing-panel {
+  cursor: col-resize;
+  user-select: none;
+}
+/* Frames would swallow the drag. */
+body.resizing-panel iframe {
+  pointer-events: none;
+}
+
+/* Agents not started show just their name (hover says Start). */
+.roster-pill[data-status="off"] .roster-status {
+  display: none;
 }
