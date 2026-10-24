@@ -25,6 +25,18 @@ describe("defineConfig", () => {
   });
 });
 
+describe("session config", () => {
+  test("is opt-in: defineConfig accepts it and the defaults never add one", () => {
+    const config = defineConfig({
+      baseURL: "https://www.notion.so",
+      session: { storageState: "../.demohunter-sessions/notion-demo.json" },
+    });
+
+    expect(config.session).toEqual({ storageState: "../.demohunter-sessions/notion-demo.json" });
+    expect("session" in DEFAULT_DEMOHUNTER_CONFIG).toBe(false);
+  });
+});
+
 describe("sdk entrypoint", () => {
   test("re-exports config helpers and defaults", () => {
     expect(sdk.defineConfig).toBe(defineConfig);

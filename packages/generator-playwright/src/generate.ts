@@ -5,6 +5,7 @@ import type { DemoHunterRunContext, HighlightStyle, ResolvedDemoHunterConfig } f
 import * as playwright from "playwright";
 import type { BrowserType, Page } from "playwright";
 
+import { browserContextOptions, browserLaunchOptions } from "./browser-options.js";
 import { collectTimeline } from "./execute/collect-timeline.js";
 import type {
   CollectedTimeline,
@@ -110,7 +111,7 @@ export async function generateTour(
     phase: "launching-browser",
     message: `Launching ${config.browser}`,
   });
-  const browser = await browserType.launch();
+  const browser = await browserType.launch(browserLaunchOptions(config));
   let passOneContext: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   let passTwoContext: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   let primaryError: unknown;
@@ -132,10 +133,7 @@ export async function generateTour(
       await resolvedDependencies.mkdir(artifactOutputDir, { recursive: true });
     }
 
-    passOneContext = await browser.newContext({
-      baseURL: config.baseURL,
-      viewport: config.viewport,
-    });
+    passOneContext = await browser.newContext(browserContextOptions(config));
 
     const passOnePage = await passOneContext.newPage();
     report(onProgress, {
@@ -153,6 +151,7 @@ export async function generateTour(
             passOneDebug = resolvedDependencies.attachDebugCapture({
               outputDir,
               page: passOnePage,
+              redact: config.session !== undefined,
             });
           },
           onProgress,
@@ -171,10 +170,7 @@ export async function generateTour(
     await passOneContext.close();
     passOneContext = undefined;
 
-    passTwoContext = await browser.newContext({
-      baseURL: config.baseURL,
-      viewport: config.viewport,
-    });
+    passTwoContext = await browser.newContext(browserContextOptions(config));
 
     const showCursor = config.record.cursor === false
       ? false
@@ -193,7 +189,7 @@ export async function generateTour(
 
     const passTwoPage = await passTwoContext.newPage();
     let recordingStartedAt: number | undefined;
-    let screencastStarted = false;
+    let screencastRunning = false;
 
     try {
       report(onProgress, {
@@ -210,15 +206,22 @@ export async function generateTour(
             actionCursor: showCursor ? "none" : "pointer",
             viewport: config.viewport,
           });
-          screencastStarted = true;
+          screencastRunning = true;
           passTwoDebug = resolvedDependencies.attachDebugCapture({
             outputDir,
             page: passTwoPage,
+            redact: config.session !== undefined,
           });
           recordingStartedAt = resolvedDependencies.now();
         },
+        // Authored teardown often cleans up visibly (deleting what the tour
+        // created, signing out), so the recording ends with `run`.
+        onAfterRun: async () => {
+          screencastRunning = false;
+          await resolvedDependencies.stopScreencast({ page: passTwoPage });
+        },
         onMatchedEvent: (event, index) => {
-          if (recordingStartedAt === undefined) {
+          if (recordingStartedAt === undefined || !screencastRunning) {
             return;
           }
 
@@ -273,7 +276,7 @@ export async function generateTour(
       });
     }
 
-    if (screencastStarted) {
+    if (screencastRunning) {
       await resolvedDependencies.stopScreencast({
         page: passTwoPage,
         primaryError,

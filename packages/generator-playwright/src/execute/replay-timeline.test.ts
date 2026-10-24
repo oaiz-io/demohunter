@@ -87,6 +87,66 @@ describe("replayTimeline", () => {
     expect(contexts[2]).toBe(contexts[3]);
   });
 
+  test("calls onAfterRun after run succeeds and before teardown", async () => {
+    const calls: string[] = [];
+
+    await replayTimeline({
+      loadedConfig: createLoadedConfig("/tmp/workspace"),
+      onAfterRun: () => {
+        calls.push("after-run");
+      },
+      onBeforeRun: () => {
+        calls.push("before-run");
+      },
+      page: { goto: mock(async () => {}), waitForTimeout: mock(async () => {}) } as never,
+      timeline: { entries: [], narrations: [] },
+      tourFile: {
+        path: "/tmp/workspace/demos/billing.tour.ts",
+        tour: {
+          id: "billing-overview",
+          title: "Billing overview",
+          run: async () => {
+            calls.push("run");
+          },
+          teardown: async () => {
+            calls.push("teardown");
+          },
+        },
+      },
+    });
+
+    expect(calls).toEqual(["before-run", "run", "after-run", "teardown"]);
+  });
+
+  test("skips onAfterRun when run fails but still tears down and rethrows the run error", async () => {
+    const runError = new Error("run failed");
+    const onAfterRun = mock(() => {});
+    const teardown = mock(async () => {});
+
+    await expect(
+      replayTimeline({
+        loadedConfig: createLoadedConfig("/tmp/workspace"),
+        onAfterRun,
+        page: { goto: mock(async () => {}), waitForTimeout: mock(async () => {}) } as never,
+        timeline: { entries: [], narrations: [] },
+        tourFile: {
+          path: "/tmp/workspace/demos/billing.tour.ts",
+          tour: {
+            id: "billing-overview",
+            title: "Billing overview",
+            run: async () => {
+              throw runError;
+            },
+            teardown,
+          },
+        },
+      }),
+    ).rejects.toBe(runError);
+
+    expect(onAfterRun).not.toHaveBeenCalled();
+    expect(teardown).toHaveBeenCalledTimes(1);
+  });
+
   test("waits for narration duration plus hold padding exactly once per narration event", async () => {
     const waitForTimeout = mock(async () => {});
     const page = {
@@ -501,6 +561,124 @@ describe("replayTimeline", () => {
     );
   });
 
+  // Default cursor timing: 1.4 px/ms, clamped to 400-1200 ms (the 560-1680 px band).
+  test.each([
+    ["inside the distance band", 700, 900, 643],
+    ["across the lower clamp", 400, 700, 500],
+    ["clamped at the maximum", 1200, 2000, 1200],
+  ])("matches a click whose layout shifted %s and animates with the replay's own duration", async (
+    _label,
+    collectedDurationMs,
+    replayDistancePx,
+    replayDurationMs,
+  ) => {
+    const page = createClickPage();
+    const first = createLocator({ x: 0, y: 0 });
+    const second = createLocator({ x: replayDistancePx, y: 0 });
+
+    await replayTimeline({
+      loadedConfig: createLoadedConfig("/tmp/workspace"),
+      page: page as never,
+      timeline: {
+        entries: [
+          { event: { chapterTitle: undefined, durationMs: 0, kind: "click" }, kind: "event", order: 1 },
+          { event: { chapterTitle: undefined, durationMs: collectedDurationMs, kind: "click" }, kind: "event", order: 2 },
+        ],
+        narrations: [],
+      },
+      tourFile: {
+        path: "/tmp/workspace/demos/billing.tour.ts",
+        tour: {
+          id: "billing-overview",
+          title: "Billing overview",
+          run: async ({ click }) => {
+            await click(first as never);
+            await click(second as never);
+          },
+        },
+      },
+    });
+
+    expect(page.evaluate.mock.calls.map(([, args]) => args.motionDurationMs)).toEqual([0, replayDurationMs]);
+    expect(second.click).toHaveBeenCalledTimes(1);
+  });
+
+  test("still fails when a click differs in anything other than its duration", async () => {
+    const page = createClickPage();
+
+    await expect(
+      replayTimeline({
+        loadedConfig: createLoadedConfig("/tmp/workspace"),
+        page: page as never,
+        timeline: {
+          entries: [
+            {
+              event: { chapterTitle: undefined, durationMs: 400, kind: "click", position: { x: 4, y: 4 } },
+              kind: "event",
+              order: 1,
+            },
+          ],
+          narrations: [],
+        },
+        tourFile: {
+          path: "/tmp/workspace/demos/billing.tour.ts",
+          tour: {
+            id: "billing-overview",
+            title: "Billing overview",
+            run: async ({ click }) => {
+              await click(createLocator({ x: 0, y: 0 }) as never);
+            },
+          },
+        },
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        cause: expect.objectContaining({ index: 1, reason: "mismatch" }),
+        message: 'Recorded pass diverged at entry 1: expected click {"position":{"x":4,"y":4}} in chapter "unscoped" but received click in chapter "unscoped".',
+        name: ReplayTimelineError.name,
+      }),
+    );
+  });
+
+  test("keeps durations strict for events other than clicks", async () => {
+    await expect(
+      replayTimeline({
+        loadedConfig: createLoadedConfig("/tmp/workspace"),
+        page: { goto: mock(async () => {}), waitForTimeout: mock(async () => {}) } as never,
+        timeline: {
+          entries: [
+            {
+              event: { chapterTitle: undefined, kind: "narrate", text: "Wait for it" },
+              kind: "narration",
+              order: 1,
+              segment: {
+                audioPath: "/tmp/workspace/.demohunter/cache/wait.mp3",
+                cacheKey: "wait",
+                chapterTitle: undefined,
+                durationMs: 1000,
+                text: "Wait for it",
+              },
+            },
+            { event: { chapterTitle: undefined, durationMs: 500, kind: "narration-sleep" }, kind: "event", order: 2 },
+          ],
+          narrations: [],
+        },
+        tourFile: {
+          path: "/tmp/workspace/demos/billing.tour.ts",
+          tour: {
+            id: "billing-overview",
+            title: "Billing overview",
+            run: async ({ narrateWhile }) => {
+              await narrateWhile("Wait for it", async ({ sleep }) => {
+                await sleep(600);
+              });
+            },
+          },
+        },
+      }),
+    ).rejects.toEqual(expect.objectContaining({ cause: expect.objectContaining({ index: 2, reason: "mismatch" }) }));
+  });
+
   test("matches teardown-emitted runtime events before declaring replay complete", async () => {
     const page = {
       goto: mock(async () => {}),
@@ -569,6 +747,25 @@ describe("replayTimeline", () => {
     expect(page.waitForTimeout).toHaveBeenCalledWith(500);
   });
 });
+
+function createClickPage() {
+  return {
+    evaluate: mock(async (_fn: unknown, _args: { motionDurationMs: number }) => {}),
+    frames: () => [],
+    goto: mock(async () => {}),
+    mainFrame: () => ({}),
+    waitForTimeout: mock(async () => {}),
+  };
+}
+
+function createLocator(box: { x: number; y: number }) {
+  return {
+    boundingBox: mock(async () => ({ ...box, width: 100, height: 40 })),
+    click: mock(async () => {}),
+    scrollIntoViewIfNeeded: mock(async () => {}),
+    waitFor: mock(async () => {}),
+  };
+}
 
 function createLoadedConfig(projectRoot: string) {
   return {

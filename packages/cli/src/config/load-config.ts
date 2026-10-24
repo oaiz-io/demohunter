@@ -25,7 +25,9 @@ export type LoadedConfig = {
   config: ResolvedDemoHunterConfig;
 };
 
-export async function loadConfig(cwd: string): Promise<LoadedConfig> {
+export const STORAGE_STATE_ENV = "DEMOHUNTER_STORAGE_STATE";
+
+export async function loadConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<LoadedConfig> {
   const projectRoot = path.resolve(cwd);
   const configPath = path.join(projectRoot, "demohunter.config.ts");
 
@@ -35,11 +37,17 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
   const authoredConfig = readDefaultExport(configModule.default);
   validateAuthoredRecordConfig(authoredConfig.record);
   validateAuthoredOutputConfig(authoredConfig.output);
+  validateAuthoredSessionConfig(authoredConfig.session);
+  validateAuthoredLaunchConfig(authoredConfig.launch, authoredConfig.browser ?? DEFAULT_DEMOHUNTER_CONFIG.browser);
+
+  const outputDir = resolveProjectPath(projectRoot, authoredConfig.outputDir ?? DEFAULT_DEMOHUNTER_CONFIG.outputDir);
+  const cacheDir = resolveProjectPath(projectRoot, authoredConfig.cacheDir ?? DEFAULT_DEMOHUNTER_CONFIG.cacheDir);
+  const session = resolveSessionConfig(projectRoot, authoredConfig.session, env, { outputDir, cacheDir });
 
   const config: ResolvedDemoHunterConfig = {
     baseURL: authoredConfig.baseURL,
-    outputDir: resolveProjectPath(projectRoot, authoredConfig.outputDir ?? DEFAULT_DEMOHUNTER_CONFIG.outputDir),
-    cacheDir: resolveProjectPath(projectRoot, authoredConfig.cacheDir ?? DEFAULT_DEMOHUNTER_CONFIG.cacheDir),
+    outputDir,
+    cacheDir,
     browser: authoredConfig.browser ?? DEFAULT_DEMOHUNTER_CONFIG.browser,
     viewport: authoredConfig.viewport ?? DEFAULT_DEMOHUNTER_CONFIG.viewport,
     holdPaddingMs: authoredConfig.holdPaddingMs ?? DEFAULT_DEMOHUNTER_CONFIG.holdPaddingMs,
@@ -59,6 +67,8 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
       formats: resolveOutputFormatRequests(authoredConfig.output?.formats ?? DEFAULT_OUTPUT_CONFIG.formats),
     },
     tts: resolveTTSConfig(authoredConfig.tts),
+    ...(session === undefined ? {} : { session }),
+    ...(authoredConfig.launch === undefined ? {} : { launch: { ...authoredConfig.launch } }),
   };
 
   return {
@@ -66,6 +76,100 @@ export async function loadConfig(cwd: string): Promise<LoadedConfig> {
     configPath,
     config,
   };
+}
+
+function validateAuthoredSessionConfig(session: DemoHunterUserConfig["session"]): void {
+  if (session === undefined) {
+    return;
+  }
+  if (!isRecordObject(session)) {
+    throw new Error("session must be an object with a storageState path");
+  }
+  if (typeof session.storageState !== "string" || session.storageState.trim().length === 0) {
+    throw new Error("session.storageState must be a non-empty path to a Playwright storage-state file");
+  }
+  assertNoHomeShorthand(session.storageState, "session.storageState");
+}
+
+// Node does not expand "~", so "~/sessions/app.json" would resolve to a
+// directory literally named "~" inside the project.
+export function assertNoHomeShorthand(authoredPath: string, name: string): void {
+  if (authoredPath.startsWith("~")) {
+    throw new Error(
+      `${name} starts with "~", which DemoHunter does not expand. Use an absolute path or a path relative to the project root.`,
+    );
+  }
+}
+
+const LAUNCH_OPTIONS = ["channel", "headless", "locale", "timezoneId"] as const;
+
+function validateAuthoredLaunchConfig(
+  launch: DemoHunterUserConfig["launch"],
+  browser: ResolvedDemoHunterConfig["browser"],
+): void {
+  if (launch === undefined) {
+    return;
+  }
+  if (!isRecordObject(launch)) {
+    throw new Error("launch must be an object");
+  }
+
+  // Arbitrary browser arguments are intentionally unsupported.
+  for (const key of Object.keys(launch)) {
+    if (!(LAUNCH_OPTIONS as readonly string[]).includes(key)) {
+      throw new Error(`Unsupported launch option: ${key}. Expected one of ${LAUNCH_OPTIONS.join(", ")}.`);
+    }
+  }
+  for (const field of ["channel", "locale", "timezoneId"] as const) {
+    const value = launch[field];
+    if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) {
+      throw new Error(`launch.${field} must be a non-empty string`);
+    }
+  }
+  if (launch.headless !== undefined && typeof launch.headless !== "boolean") {
+    throw new Error("launch.headless must be a boolean");
+  }
+  if (launch.channel !== undefined && browser !== "chromium") {
+    throw new Error(`launch.channel requires browser "chromium"; the configured browser is "${browser}"`);
+  }
+}
+
+function resolveSessionConfig(
+  projectRoot: string,
+  authoredSession: DemoHunterUserConfig["session"],
+  env: NodeJS.ProcessEnv,
+  portableDirs: { outputDir: string; cacheDir: string },
+): ResolvedDemoHunterConfig["session"] {
+  const envPath = env[STORAGE_STATE_ENV]?.trim();
+  if (envPath) {
+    assertNoHomeShorthand(envPath, STORAGE_STATE_ENV);
+  }
+  const session: ResolvedDemoHunterConfig["session"] = envPath
+    ? { storageState: resolveProjectPath(projectRoot, envPath), source: "env" }
+    : authoredSession === undefined
+      ? undefined
+      : { storageState: resolveProjectPath(projectRoot, authoredSession.storageState), source: "config" };
+
+  if (session === undefined) {
+    return undefined;
+  }
+
+  // Generated output is meant to be shared; a storage-state file is a bearer credential.
+  for (const [name, directory] of Object.entries(portableDirs)) {
+    if (isPathInside(session.storageState, directory)) {
+      throw new Error(
+        `${session.source === "env" ? STORAGE_STATE_ENV : "session.storageState"} must not point inside ${name} (${directory}). Keep the session file outside generated output, for example in ../.demohunter-sessions/.`,
+      );
+    }
+  }
+
+  return session;
+}
+
+export function isPathInside(candidate: string, directory: string): boolean {
+  const relative = path.relative(directory, candidate);
+
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function validateAuthoredRecordConfig(record: DemoHunterUserConfig["record"]): void {

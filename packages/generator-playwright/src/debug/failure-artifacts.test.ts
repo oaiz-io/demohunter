@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -72,5 +72,66 @@ describe("attachDebugCapture", () => {
 
     capture.dispose();
     expect(page.off).toHaveBeenCalledTimes(3);
+  });
+
+  test("skips page text and strips URL queries when a session is loaded", async () => {
+    const outputDir = await mkdtemp(path.join(os.tmpdir(), "demohunter-debug-"));
+    tempRoots.push(outputDir);
+    const handlers = new Map<string, Function>();
+    const innerText = mock(async () => "Inbox of someone@example.com");
+    const page = {
+      locator: mock(() => ({ innerText })),
+      off: mock(() => {}),
+      on: mock((event: string, handler: Function) => {
+        handlers.set(event, handler);
+      }),
+      screenshot: mock(async ({ path: screenshotPath }: { path: string }) => {
+        await writeFile(screenshotPath, "png", "utf8");
+      }),
+      title: mock(async () => "Inbox"),
+      url: mock(() => "https://mail.example.com/mail/u/0/?account=42#inbox/thread-9"),
+    };
+    const capture = attachDebugCapture({
+      outputDir,
+      page: page as never,
+      redact: true,
+      timestamp: () => new Date("2026-05-19T08:00:00.000Z"),
+    });
+
+    handlers.get("console")?.({
+      text: () => "fetch failed for https://api.example.com/v1/sync?token=abc123",
+      type: () => "error",
+    });
+    handlers.get("requestfailed")?.({
+      failure: () => ({ errorText: "net::ERR_FAILED" }),
+      method: () => "GET",
+      resourceType: () => "fetch",
+      url: () => "https://api.example.com/v1/sync?token=abc123",
+    });
+    const result = await capture.captureFailure({
+      error: new Error('page.goto: Timeout exceeded while navigating to "https://mail.example.com/?account=42"'),
+      phase: "record-replay",
+    });
+
+    const failureJson = await readFile(result.failureJsonPath, "utf8");
+    const failure = JSON.parse(failureJson) as {
+      artifacts: { bodyTextPath?: string; screenshotPath?: string };
+      console: Array<{ text: string }>;
+      error: { message: string };
+      failedRequests: Array<{ url: string }>;
+      page: { url: string };
+    };
+
+    expect(innerText).not.toHaveBeenCalled();
+    expect(result.bodyTextPath).toBeUndefined();
+    expect((await readdir(result.directory)).sort()).toEqual(["failure.json", "screenshot.png"]);
+    expect(failure.artifacts).toEqual({ screenshotPath: "screenshot.png" });
+    expect(failure.page.url).toBe("https://mail.example.com/mail/u/0/");
+    expect(failure.failedRequests[0]?.url).toBe("https://api.example.com/v1/sync");
+    expect(failure.console[0]?.text).toBe("fetch failed for https://api.example.com/v1/sync");
+    expect(failure.error.message).toBe('page.goto: Timeout exceeded while navigating to "https://mail.example.com/"');
+    expect(failureJson).not.toContain("account=42");
+    expect(failureJson).not.toContain("abc123");
+    expect(failureJson).not.toContain("thread-9");
   });
 });

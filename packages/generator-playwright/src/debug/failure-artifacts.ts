@@ -41,28 +41,34 @@ type BufferedFailedRequest = {
 export function attachDebugCapture(input: {
   outputDir: string;
   page: Page;
+  /**
+   * Set when a user session is loaded: skip body.txt and strip URL queries and
+   * fragments, which can carry account data. The screenshot is kept.
+   */
+  redact?: boolean;
   timestamp?: () => Date;
 }): DebugCapture {
   const consoleEvents: BufferedConsoleEvent[] = [];
   const failedRequests: BufferedFailedRequest[] = [];
   const pageErrors: string[] = [];
   const timestamp = input.timestamp ?? (() => new Date());
+  const clean = input.redact ? stripUrlQueries : (text: string) => text;
 
   const onConsole = (message: ConsoleMessage) => {
     append(consoleEvents, {
-      text: readConsoleText(message),
+      text: clean(readConsoleText(message)),
       type: readConsoleType(message),
     });
   };
   const onPageError = (error: Error) => {
-    append(pageErrors, error.stack || error.message);
+    append(pageErrors, clean(error.stack || error.message));
   };
   const onRequestFailed = (request: Request) => {
     append(failedRequests, {
       failureText: request.failure()?.errorText,
       method: request.method(),
       resourceType: request.resourceType(),
-      url: request.url(),
+      url: clean(request.url()),
     });
   };
 
@@ -87,7 +93,7 @@ export function attachDebugCapture(input: {
       const captureErrors: string[] = [];
 
       try {
-        url = input.page.url();
+        url = clean(input.page.url());
       } catch (captureError) {
         captureErrors.push(`url: ${describeError(captureError)}`);
       }
@@ -98,12 +104,14 @@ export function attachDebugCapture(input: {
         captureErrors.push(`title: ${describeError(captureError)}`);
       }
 
-      try {
-        const bodyText = await input.page.locator("body").innerText({ timeout: 1_000 });
-        bodyTextPath = path.join(directory, "body.txt");
-        await writeFile(bodyTextPath, truncate(bodyText, MAX_BODY_TEXT_LENGTH), "utf8");
-      } catch (captureError) {
-        captureErrors.push(`body: ${describeError(captureError)}`);
+      if (!input.redact) {
+        try {
+          const bodyText = await input.page.locator("body").innerText({ timeout: 1_000 });
+          bodyTextPath = path.join(directory, "body.txt");
+          await writeFile(bodyTextPath, truncate(bodyText, MAX_BODY_TEXT_LENGTH), "utf8");
+        } catch (captureError) {
+          captureErrors.push(`body: ${describeError(captureError)}`);
+        }
       }
 
       try {
@@ -119,7 +127,7 @@ export function attachDebugCapture(input: {
         `${JSON.stringify(
           {
             phase,
-            error: serializeError(error),
+            error: serializeError(error, clean),
             page: {
               title,
               url,
@@ -193,18 +201,27 @@ function readConsoleType(message: unknown): string {
   return "unknown";
 }
 
-function serializeError(error: unknown): { message: string; name?: string; stack?: string } {
+function serializeError(
+  error: unknown,
+  clean: (text: string) => string,
+): { message: string; name?: string; stack?: string } {
   if (error instanceof Error) {
     return {
-      message: error.message,
+      message: clean(error.message),
       name: error.name,
-      stack: error.stack,
+      stack: error.stack === undefined ? undefined : clean(error.stack),
     };
   }
 
   return {
-    message: String(error),
+    message: clean(String(error)),
   };
+}
+
+// Playwright call logs embed navigation URLs in error text, so redaction
+// applies to every URL in a string, not only to the url fields.
+function stripUrlQueries(text: string): string {
+  return text.replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s?#"'<>]*)[?#][^\s"'<>]*/gi, "$1");
 }
 
 function toFilesystemTimestamp(date: Date): string {

@@ -12,6 +12,7 @@ DemoHunter is an OAIZ Labs open-source TypeScript CLI and SDK maintained by OAIZ
 - **Tech stack**: Bun workspace, TypeScript 5+, ESM-first, Playwright `>=1.61`, and ffmpeg-backed media generation.
 - **Product boundary**: OSS must stand on its own and work entirely locally - cloud features cannot leak into the default flow.
 - **Provider boundary**: TTS reads `OPENAI_API_KEY` or `ELEVENLABS_API_KEY` from the environment only. DemoHunter does not store credentials.
+- **Session boundary**: Signed-in demos load a user-owned Playwright storage-state file (`session.storageState` or `DEMOHUNTER_STORAGE_STATE`). DemoHunter never signs in, types or stores credentials, or evades bot detection; `session capture` only saves a session the user signed into by hand.
 - **Output contract**: `.demohunter/` must be portable and versioned so Cloud can ingest it later without source-repo access.
 - **Reliability**: Narration caching is mandatory, including offline regeneration behavior and corrupt-cache recovery.
 <!-- GSD:project-end -->

@@ -14,12 +14,15 @@ The current CLI surface is:
 - `demohunter generate <tour-file> --format standard|square|mobile|gif` (repeatable)
 - `demohunter generate <tour-file> --format gif --duration <seconds>`
 - `demohunter doctor`
+- `demohunter session capture <start-url> [--out <path>]`
 - `demohunter cache list`
 - `demohunter cache prune`
 - `demohunter cache clear`
 - `demohunter add-skill [--target claude|codex|both]`
 
 Do not reference unimplemented commands or hosted workflows.
+
+`session capture` opens a visible browser at the start URL. The user signs in by hand and presses Enter in the terminal, and the command saves a Playwright storage-state file (to `--out`, or to the configured `session.storageState`). Never automate this step or type credentials for the user.
 
 ## Verification Flow
 

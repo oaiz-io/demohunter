@@ -9,6 +9,7 @@ function buildStubs(overrides: Partial<Parameters<typeof runCli>[2]> = {}): Para
     initCommand: mock(async () => {}),
     generateCommand: mock(async () => {}),
     addSkillCommand: mock(async () => {}),
+    sessionCaptureCommand: mock(async () => {}),
     ...overrides,
   };
 }
@@ -207,6 +208,46 @@ describe("runCli", () => {
     await expect(runCli(["cache"], "/tmp/demo", buildStubs())).rejects.toThrow(
       "Usage: demohunter cache <list|prune|clear>",
     );
+  });
+
+  test("dispatches session capture with the start URL and optional output path", async () => {
+    const stubs = buildStubs();
+
+    await runCli(["session", "capture", "https://www.notion.so/login"], "/tmp/demo", stubs);
+    await runCli(
+      ["session", "capture", "--out", "../.demohunter-sessions/slack.json", "https://app.slack.com"],
+      "/tmp/demo",
+      stubs,
+    );
+    await runCli(["session", "capture", "https://mail.google.com", "--out=gmail.json"], "/tmp/demo", stubs);
+
+    expect(stubs.sessionCaptureCommand).toHaveBeenNthCalledWith(1, "/tmp/demo", {
+      startUrl: "https://www.notion.so/login",
+    });
+    expect(stubs.sessionCaptureCommand).toHaveBeenNthCalledWith(2, "/tmp/demo", {
+      startUrl: "https://app.slack.com",
+      out: "../.demohunter-sessions/slack.json",
+    });
+    expect(stubs.sessionCaptureCommand).toHaveBeenNthCalledWith(3, "/tmp/demo", {
+      startUrl: "https://mail.google.com",
+      out: "gmail.json",
+    });
+  });
+
+  test.each([
+    [["session"]],
+    [["session", "login", "https://www.notion.so"]],
+    [["session", "capture"]],
+    [["session", "capture", "https://a.example", "https://b.example"]],
+    [["session", "capture", "https://a.example", "--out"]],
+    [["session", "capture", "https://a.example", "--password", "hunter2"]],
+  ])("rejects malformed session commands: %p", async (argv) => {
+    const stubs = buildStubs();
+
+    await expect(runCli(argv, "/tmp/demo", stubs)).rejects.toThrow(
+      "Usage: demohunter session capture <start-url> [--out <path>]",
+    );
+    expect(stubs.sessionCaptureCommand).not.toHaveBeenCalled();
   });
 
   test("throws on unknown commands with a hint to --help", async () => {

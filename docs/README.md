@@ -4,6 +4,7 @@ DemoHunter is an OAIZ Labs open-source project. These documents describe the cur
 
 - [Getting started](getting-started.md): install DemoHunter and generate a first demo.
 - [Troubleshooting](troubleshooting.md): solve common setup and generation problems.
+- [Signed-in apps](saas-apps.md): record Notion, Slack, Gmail, or your own app behind a sign-in page.
 - [Agent skill](../packages/cli/skills/demohunter/): teach Claude or Codex to author tours.
 - [Contributing](../CONTRIBUTING.md): set up the repository and submit changes.
 - [Security policy](../SECURITY.md): report a vulnerability privately.
