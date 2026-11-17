@@ -5,7 +5,7 @@ import {
   patchElement,
   type ElementPatch,
   type ElementEdit,
-} from "../element-edit.js";
+} from "../element-edit-core.js";
 import { isTextField } from "./element-overrides.js";
 export type Editable = { target: Target; label: string };
 type Draft = {

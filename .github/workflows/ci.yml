@@ -62,5 +62,15 @@ jobs:
         run: bun run verify
 
       - name: Dry-run npm publish
-        run: npm publish --dry-run --access public
+        # npm refuses a dry run for a version that is already on the
+        # registry, which is the normal state between releases. Then
+        # validate the package contents with npm pack.
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm view "demohunter@${version}" version >/dev/null 2>&1; then
+            echo "demohunter@${version} is already published; checking the package with npm pack."
+            npm pack --dry-run
+          else
+            npm publish --dry-run --access public
+          fi
         working-directory: packages/cli

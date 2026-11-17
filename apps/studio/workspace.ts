@@ -24,6 +24,7 @@ import {
   type ElementRecord,
 } from "./elements.js";
 import { elementUri, parseReference, previewLink } from "./links.js";
+import { hasRecording, NO_RECORDING } from "./film.js";
 import {
   atomicWrite,
   ensureIgnoredFolder,
@@ -70,7 +71,12 @@ export class ReplayWorkspace {
     await ensureFormat(resolved, index);
     return new ReplayWorkspace(resolved, index);
   }
+  /** False for a film made with `studio new` (a blank capture). */
+  get recording(): boolean {
+    return hasRecording(this.index);
+  }
   element(ref: string): ElementRecord {
+    if (!this.recording) throw new Error(NO_RECORDING);
     const record = this.index.elements.find((e) => e.ref === ref);
     if (!record) throw new Error(`Unknown element reference: ${ref}`);
     return record;
@@ -116,6 +122,8 @@ export class ReplayWorkspace {
       revision: bundle.revision,
       durationMs: totalDuration(bundle.edits),
       viewport: bundle.project.viewport,
+      // A film made with `studio new` has scene clips and no recording.
+      recording: this.recording,
       elementCount: this.index.elements.length,
       comments: {
         open: bundle.comments.threads.filter((t) => t.status === "open").length,
@@ -156,6 +164,7 @@ export class ReplayWorkspace {
     };
   }
   async nodeInfo(ref: string) {
+    if (!this.recording) return { ref, recording: false, note: NO_RECORDING };
     const element = this.element(ref);
     const bundle = await loadBundle(this.dir);
     const current = await this.previewState();
@@ -179,6 +188,8 @@ export class ReplayWorkspace {
     };
   }
   async html(ref: string, limit?: number) {
+    if (!this.recording)
+      return { ref, recording: false, html: "", note: NO_RECORDING };
     return {
       ref,
       source: this.element(ref).source,

@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: none — milestone archived
 Plan: none
 Status: v1.0 complete
-Last activity: 2026-10-17 -- Quick tasks 261017-wtl (worktree libraries), 261016-txt (inline text editing) and 261017-rdy (alpha readiness review)
+Last activity: 2026-11-17 -- Quick tasks 261117-m45 (product assessment research), 261117-spd (Studio speed fixes) and 261117-flm (film tools and the film skill)
 Progress: [██████████] 100%
 
 ## Performance Metrics
@@ -43,6 +43,9 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
+| 2026-11-17 | 261117-flm | General film tools for agents | `studio new` (scene-only film on a blank v2 capture, kit, starter scene, PLAN.md), `studio sheet` and MCP `get_film_sheet` (labelled contact sheets; default sheet of a 2-minute film about 2.5 s), kit `fitText`, `readTime`, `kenBurns`. New → edit → sheet → export of a 116.5 s film: 1920x1080 export 30 s, 1080x1920 19 s. Tests: studio 190 pass, desktop 7 pass; typecheck clean. |
+| 2026-11-17 | 261117-spd | Studio speed fixes | Eight measured fixes: incremental library scan (cold 2,341 -> 271 ms), warm renderer and visual-key thumbnails, lazy capture reads, HTTP caching and smaller bundles, one seek per action, lighter frame loop, 304 polls, parallel desktop start. `useVirtualDom` and `checkoutEveryNms` not adopted (replay correctness). Tests: studio 178 pass, desktop 7 pass. |
+| 2026-11-17 | 261117-m45 | Product assessment research | Measured causes of Studio slowness, comparison with open-source video tools, four Rust spikes with prototypes, and a work plan in `thoughts/research/2026-11-17-product-assessment/`. Verdict: TypeScript fixes first, no Rust now. Documents only. |
 | 2026-10-20 | 261020-l51 | Capture bundles and BYOK Git LFS migration | Studio v2 ZIP captures; v1 pack migration; frozen refs and edits preserved. Full verify: 467 passed, 1 skipped; final focused checks pass. BYOK film: 6,900 to 77 files; PR 99 files. Fresh LFS clone and full 1080p30 export verified. |
 | 2026-10-16 | 261016-moj | Restore direct element editing | Research/plan/implement loops: drag, resize, text/colors, hide/remove/reset, scene targets, disk autosave, revision-safe conflicts and undo. Full verify: 369 passed, 1 skipped; final browser regression and typecheck passed. |
 | 2026-10-20 | 261020-jl7 | Restricted library never runs git status | Security fix: untrusted desktop folders ran `git status` (a repository clean filter) in the main or sibling worktrees before they were restricted. LocalLibrary now restricts all listed worktrees and skips git status; regression test. |

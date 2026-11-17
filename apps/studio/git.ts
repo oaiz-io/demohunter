@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
-import { readFile, realpath } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 
 export type GitStatus = {
   /** Repository folder name, e.g. "demohunter". */
@@ -237,28 +237,58 @@ function limiter(max: number) {
 /** `git status` is slow in large repositories; listings are cheap. */
 const statusLimit = limiter(2),
   listLimit = limiter(8);
+/** Run a (cheap) listing under the shared limit of parallel git listings. */
+export const limitedListing = <T>(work: () => Promise<T>) => listLimit(work);
+/** Worktree walks (seconds each in large repositories) get their own small
+ * limit, so they never hold up the cheap listings. */
+const walkLimit = limiter(3);
+export const limitedWalk = <T>(work: () => Promise<T>) => walkLimit(work);
 type State = NonNullable<Awaited<ReturnType<typeof worktreeState>>>;
 const states = new Map<
   string,
-  { at: number; value?: State; refreshing?: Promise<void> }
+  {
+    at: number;
+    /** When the last refresh started (changes after it need another). */
+    started: number;
+    /** The last refresh failed: retry from this time, changes or not. */
+    retryAt?: number;
+    value?: State;
+    refreshing?: Promise<void>;
+  }
 >();
 /** Last known worktree state right away (undefined at first); refreshes in
- * the background when older than `maxAgeMs`. */
+ * the background when older than `maxAgeMs`. With `changedAt` (the last
+ * time a file watcher saw a change in the worktree), a state older than
+ * `maxAgeMs` is refreshed only after a change, or when older than
+ * `idleMaxAgeMs`. */
 export function cachedWorktreeState(
   dir: string,
   maxAgeMs = 15_000,
+  options: { changedAt?: number; idleMaxAgeMs?: number } = {},
 ): State | undefined {
   let entry = states.get(dir);
-  if (!entry) states.set(dir, (entry = { at: 0 }));
-  const e = entry;
-  if (!e.refreshing && Date.now() - e.at > maxAgeMs)
+  if (!entry) states.set(dir, (entry = { at: 0, started: -1 }));
+  const e = entry,
+    now = Date.now(),
+    age = now - e.at;
+  const stale =
+    e.retryAt !== undefined
+      ? now >= e.retryAt
+      : age > maxAgeMs &&
+        (options.changedAt === undefined ||
+          options.changedAt >= e.started ||
+          age > (options.idleMaxAgeMs ?? Infinity));
+  if (!e.refreshing && stale) {
+    e.started = now;
     e.refreshing = statusLimit(() => worktreeState(dir))
       .then((value) => {
         e.value = value;
+        e.at = Date.now();
         // A failure is retried soon instead of being trusted for a full period.
-        e.at = value ? Date.now() : Date.now() - maxAgeMs + 5000;
+        e.retryAt = value ? undefined : Date.now() + 5000;
       })
       .finally(() => (e.refreshing = undefined));
+  }
   return e.value;
 }
 /** Wait for pending background state (tests and first paint). */
@@ -268,6 +298,10 @@ export async function settledWorktreeStates(): Promise<void> {
 
 /** Repository name and branch without `git status` (the library header). */
 const summaries = new Map<string, { at: number; value: Promise<GitStatus> }>();
+/** The branch of `dir` changed (a watcher saw HEAD move). */
+export function forgetGitSummary(dir: string) {
+  summaries.delete(dir);
+}
 export function gitSummary(dir: string, maxAgeMs = 10_000): Promise<GitStatus> {
   const hit = summaries.get(dir);
   if (hit && Date.now() - hit.at < maxAgeMs) return hit.value;
@@ -293,6 +327,137 @@ export function gitSummary(dir: string, maxAgeMs = 10_000): Promise<GitStatus> {
   return value;
 }
 
+/** Raw demo sources of a worktree, relative to it. `projects` and `events`
+ * are folders holding a `project.json` or an `events.json` /
+ * `capture.dhcapture` outside `.demohunter`. */
+export type DemoSourceParts = {
+  tours: Set<string>;
+  folders: Set<string>;
+  projects: Set<string>;
+  events: Set<string>;
+};
+const DEMO_PATTERNS = [
+  "*.tour.ts",
+  "*/.demohunter/*",
+  ".demohunter/*",
+  "*/project.json",
+  "project.json",
+  "*/events.json",
+  "events.json",
+  "*/capture.dhcapture",
+  "capture.dhcapture",
+];
+const emptyParts = (): DemoSourceParts => ({
+  tours: new Set(),
+  folders: new Set(),
+  projects: new Set(),
+  events: new Set(),
+});
+/** The `.demohunter` folder that holds `entry`, if any. */
+function demoFolderOf(entry: string): string | undefined {
+  const i = entry.lastIndexOf(".demohunter/");
+  if (i >= 0 && (i === 0 || entry[i - 1] === "/"))
+    return entry.slice(0, i + ".demohunter".length);
+  if (/(^|\/)\.demohunter\/?$/.test(entry)) return entry.replace(/\/$/, "");
+}
+function addListed(parts: DemoSourceParts, listed: string) {
+  for (const entry of listed.split("\0").filter(Boolean))
+    if (entry.endsWith(".tour.ts")) parts.tours.add(entry);
+    else if (
+      /(^|\/)((project|events)\.json|capture\.dhcapture)$/.test(entry) &&
+      !/(^|\/)\.demohunter\//.test(entry)
+    )
+      (entry.endsWith("project.json") ? parts.projects : parts.events).add(
+        path.posix.dirname(entry),
+      );
+    else {
+      const f = demoFolderOf(entry);
+      if (f) parts.folders.add(f);
+    }
+}
+
+/** Tracked demo sources: one `git ls-files --cached`, which reads the index
+ * and never walks the worktree, and an `lstat` probe for (usually ignored)
+ * `.demohunter` folders at the root and next to every tracked tour. Fast in
+ * large repositories. */
+export async function listTrackedDemoSources(
+  dir: string,
+): Promise<DemoSourceParts | undefined> {
+  const parts = emptyParts();
+  try {
+    addListed(
+      parts,
+      await git(dir, ["ls-files", "-z", "--cached", "--", ...DEMO_PATTERNS]),
+    );
+  } catch {
+    return undefined;
+  }
+  const probe = new Set([""]);
+  for (const tour of parts.tours) {
+    let d = tour;
+    while (d.includes("/")) {
+      d = d.slice(0, d.lastIndexOf("/"));
+      if (probe.has(d)) break;
+      probe.add(d);
+    }
+  }
+  await Promise.all(
+    [...probe].map(async (d) => {
+      const rel = d ? `${d}/.demohunter` : ".demohunter";
+      // lstat: a symlinked .demohunter is not followed.
+      if ((await lstat(path.join(dir, rel)).catch(() => undefined))?.isDirectory())
+        parts.folders.add(rel);
+    }),
+  );
+  return parts;
+}
+
+/** What only a walk of the worktree finds: untracked tours and saved
+ * folders, and ignored `.demohunter` folders anywhere. Slow in large
+ * repositories (seconds), so the Studio service runs it in the background. */
+export async function listUntrackedDemoSources(
+  dir: string,
+): Promise<DemoSourceParts | undefined> {
+  const parts = emptyParts();
+  try {
+    const [listed, ignored] = await Promise.all([
+      git(dir, ["ls-files", "-z", "--others", "--exclude-standard", "--", ...DEMO_PATTERNS]),
+      git(dir, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"]).catch(() => ""),
+    ]);
+    addListed(parts, listed);
+    for (const entry of ignored.split("\0").filter(Boolean)) {
+      const f = demoFolderOf(entry);
+      if (f) parts.folders.add(f);
+    }
+    return parts;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Tours and folders to look in, from any number of source parts. */
+export function mergeDemoSources(
+  ...all: (DemoSourceParts | undefined)[]
+): { tours: string[]; folders: string[] } {
+  const merged = emptyParts();
+  merged.folders.add(".demohunter");
+  for (const parts of all)
+    if (parts)
+      for (const k of ["tours", "folders", "projects", "events"] as const)
+        for (const v of parts[k]) merged[k].add(v);
+  // Recordings saved outside .demohunter: both files must be there (Nx and
+  // others also use project.json). Nested ones are found from their parent.
+  const saved = [...merged.projects]
+    .filter((p) => merged.events.has(p))
+    .sort()
+    .filter(
+      (p, i, all) =>
+        !all.slice(0, i).some((q) => q === "." || p.startsWith(`${q}/`)),
+    );
+  for (const p of saved) merged.folders.add(p);
+  return { tours: [...merged.tours].sort(), folders: [...merged.folders].sort() };
+}
+
 /** Where demos can be in a worktree, from git instead of walking the tree:
  * tour files (tracked or new), every `.demohunter` folder (captures live
  * there and are usually git-ignored), and folders saved elsewhere (a
@@ -301,91 +466,12 @@ export function gitSummary(dir: string, maxAgeMs = 10_000): Promise<GitStatus> {
 export async function listDemoSources(
   dir: string,
 ): Promise<{ tours: string[]; folders: string[] } | undefined> {
-  const folders = new Set([".demohunter"]),
-    tours = new Set<string>(),
-    projects = new Set<string>(),
-    events = new Set<string>();
-  const folder = (entry: string) => {
-    const i = entry.lastIndexOf(".demohunter/");
-    if (i >= 0 && (i === 0 || entry[i - 1] === "/"))
-      folders.add(entry.slice(0, i + ".demohunter".length));
-    else if (/(^|\/)\.demohunter\/?$/.test(entry))
-      folders.add(entry.replace(/\/$/, ""));
-  };
-  try {
-    const [listed, ignored] = await Promise.all([
-      git(dir, [
-        "ls-files",
-        "-z",
-        "--cached",
-        "--others",
-        "--exclude-standard",
-        "--",
-        "*.tour.ts",
-        "*/.demohunter/*",
-        ".demohunter/*",
-        "*/project.json",
-        "project.json",
-        "*/events.json",
-        "events.json",
-        "*/capture.dhcapture",
-        "capture.dhcapture",
-      ]),
-      git(dir, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"]).catch(() => ""),
-    ]);
-    for (const entry of listed.split("\0").filter(Boolean))
-      if (entry.endsWith(".tour.ts")) tours.add(entry);
-      else if (
-        /(^|\/)((project|events)\.json|capture\.dhcapture)$/.test(entry) &&
-        !/(^|\/)\.demohunter\//.test(entry)
-      )
-        (entry.endsWith("project.json") ? projects : events).add(
-          path.posix.dirname(entry),
-        );
-      else folder(entry);
-    for (const entry of ignored.split("\0").filter(Boolean)) folder(entry);
-    // Recordings saved outside .demohunter: both files must be there (Nx and
-    // others also use project.json). Nested ones are found from their parent.
-    const saved = [...projects]
-      .filter((p) => events.has(p))
-      .sort()
-      .filter(
-        (p, i, all) =>
-          !all.slice(0, i).some((q) => q === "." || p.startsWith(`${q}/`)),
-      );
-    for (const p of saved) folders.add(p);
-    return { tours: [...tours].sort(), folders: [...folders].sort() };
-  } catch {
-    return undefined;
-  }
-}
-
-/** Stale-while-revalidate: the first call waits; later calls get the last
- * value at once and refresh it in the background when older than `maxAgeMs`. */
-const lists = new Map<string, { at: number; value: Promise<unknown>; refreshing?: boolean }>();
-export function cachedList<T>(
-  key: string,
-  load: () => Promise<T>,
-  maxAgeMs = 10_000,
-): Promise<T> {
-  const hit = lists.get(key);
-  if (!hit) {
-    const entry = { at: Date.now(), value: listLimit(load) as Promise<unknown> };
-    lists.set(key, entry);
-    entry.value.catch(() => lists.delete(key));
-    return entry.value as Promise<T>;
-  }
-  if (!hit.refreshing && Date.now() - hit.at > maxAgeMs) {
-    hit.refreshing = true;
-    void listLimit(load)
-      .then((value) => {
-        hit.value = Promise.resolve(value);
-        hit.at = Date.now();
-      })
-      .catch(() => {})
-      .finally(() => (hit.refreshing = false));
-  }
-  return hit.value as Promise<T>;
+  const [tracked, untracked] = await Promise.all([
+    listTrackedDemoSources(dir),
+    listUntrackedDemoSources(dir),
+  ]);
+  if (!tracked || !untracked) return undefined;
+  return mergeDemoSources(tracked, untracked);
 }
 
 /** Files matching git pathspecs (tracked and untracked, not ignored),

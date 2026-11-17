@@ -17,6 +17,7 @@ type Library = {
 };
 let data: Library = { workspace: "", recordings: [], warnings: [] },
   scanned = "",
+  etag: string | undefined,
   loading = false;
 const node = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -356,7 +357,8 @@ function card(r: LibraryRecording, showBranch: boolean) {
   }
   const path = node(
     "code",
-    r.tourPath ?? `${r.path}${r.sourceTour ? "" : " · built-in sample"}`,
+    r.tourPath ??
+      `${r.path}${r.sourceTour ? "" : r.film ? " · film" : " · built-in sample"}`,
     "card-path",
   );
   path.title = r.worktree ? `${r.worktree}/${r.path}` : r.path;
@@ -483,16 +485,22 @@ async function refresh() {
   if (loading) return;
   loading = true;
   try {
-    const res = await fetch("/api/library");
-    if (!res.ok)
+    // An unchanged library answers 304 without a body.
+    const res = await fetch("/api/library", {
+      headers: etag ? { "If-None-Match": etag } : {},
+    });
+    if (!res.ok && res.status !== 304)
       throw new Error("Unable to read the workspace. Retry refresh.");
-    const text = await res.text();
-    $("#loading").hidden = true;
-    if (text !== scanned) {
-      scanned = text;
-      data = JSON.parse(text);
-      render();
+    if (res.status !== 304) {
+      const text = await res.text();
+      etag = res.headers.get("ETag") ?? undefined;
+      if (text !== scanned) {
+        scanned = text;
+        data = JSON.parse(text);
+        render();
+      }
     }
+    $("#loading").hidden = true;
     $("#error").hidden = true;
     const hash = new URLSearchParams(location.hash.slice(1));
     if (hash.has("capture")) {

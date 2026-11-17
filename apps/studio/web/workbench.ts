@@ -1,9 +1,5 @@
-import {
-  clipDuration,
-  sourceToOutput,
-  totalDuration,
-  type ReplayBundle,
-} from "../model.js";
+import { clipDuration, sourceToOutput, totalDuration } from "../timeline-math.js";
+import type { ReplayBundle } from "../model.js";
 import { commentUri, elementUri, previewLink } from "../links.js";
 import type { ElementIndex, ElementRecord } from "../elements.js";
 import type { AgentActivity } from "../contract.js";

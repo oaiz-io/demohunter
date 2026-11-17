@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { projectPoster } from "./poster.js";
+import { closeWarmRenderers, projectPoster } from "./poster.js";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -9,10 +9,10 @@ import { SeenDemos } from "./seen.js";
 import { AgentHub } from "./agents.js";
 import { handleAgentRoute } from "./agent-routes.js";
 import { hostAllowed, restrictFolder } from "./trust.js";
-import { createReplayHandler } from "./server.js";
+import { createReplayHandler, sendTagged } from "./server.js";
 import { contract } from "./contract.js";
 import { fontFile } from "./fonts.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { loadBundle } from "./storage.js";
 import {
   clearStudioSession,
@@ -32,7 +32,7 @@ export async function serveLibrary(
     restricted?: boolean;
   } = {},
 ) {
-  const library = await LocalLibrary.open(root, { restricted: options.restricted });
+  const library = await LocalLibrary.open(root, { restricted: options.restricted, live: true });
   // Start scanning, but serve right away: the page shows and fills in.
   void library.scan().catch(() => {});
   const seen = new SeenDemos(library.root);
@@ -50,6 +50,7 @@ export async function serveLibrary(
         format: "iife",
         platform: "browser",
         target: "es2022",
+        minify: true,
       })
     ).outputFiles[0]!.contents;
   const js = await bundle("web/library-app.ts");
@@ -177,24 +178,31 @@ export async function serveLibrary(
       if (req.method === "GET" && url.pathname === "/")
         return send(html, "text/html");
       if (req.method === "GET" && url.pathname === "/library.js")
-        return send(js, "text/javascript");
+        return sendTagged(req, res, js, "text/javascript");
       if (req.method === "GET" && url.pathname === "/library.css")
-        return send(css, "text/css");
+        return sendTagged(req, res, css, "text/css");
       if (req.method === "GET" && url.pathname === "/new")
         return send(newDemo.html, "text/html");
       if (req.method === "GET" && url.pathname === "/new.js")
-        return send(newDemo.js, "text/javascript");
+        return sendTagged(req, res, newDemo.js, "text/javascript");
       if (req.method === "GET" && url.pathname === "/new.css")
-        return send(newDemo.css, "text/css");
+        return sendTagged(req, res, newDemo.css, "text/css");
       if (req.method === "GET" && url.pathname === "/api/library") {
         const scan = await library.scan();
-        return send(
-          JSON.stringify({
-            ...scan,
-            recordings: await seen.annotate(scan.recordings),
-          }),
-          "application/json",
-        );
+        const body = JSON.stringify({
+          ...scan,
+          recordings: await seen.annotate(scan.recordings),
+        });
+        // Polled every few seconds: an unchanged library is a bodiless 304.
+        // The tag is the body's hash, so any change gives a new tag.
+        const etag = `"${createHash("sha1").update(body).digest("base64url")}"`;
+        res.setHeader("ETag", etag);
+        if (req.headers["if-none-match"] === etag) {
+          res.writeHead(304);
+          res.end();
+          return;
+        }
+        return send(body, "application/json");
       }
       if (await handleAgentRoute(req, res, url, library, agents, options.restricted)) return;
       if (req.method === "POST" && url.pathname === "/api/seen") {
@@ -230,7 +238,14 @@ export async function serveLibrary(
           return;
         }
         if (match[2] === "/poster.png" && req.method === "GET") {
-          return send(await projectPoster(dir), "image/png");
+          // The page asks for poster.png?revision=<revision>: kept for good
+          // only when that revision held from before until after the render.
+          const revision = () => loadBundle(dir).then((b) => b.revision, () => undefined);
+          const before = await revision();
+          const png = await projectPoster(dir);
+          if (before && url.searchParams.get("revision") === before && (await revision()) === before)
+            res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+          return send(png, "image/png");
         }
         const sub = match[2],
           host = req.headers.host ?? "";
@@ -281,6 +296,7 @@ export async function serveLibrary(
     url: `http://${options.host && options.host !== "0.0.0.0" ? options.host : "127.0.0.1"}:${port}`,
     close: async () => {
       agents.stopAll();
+      library.close();
       await Promise.all(
         [...handlers.values()].map(async (h) => (await h).close()),
       );
@@ -288,6 +304,7 @@ export async function serveLibrary(
       await Promise.all(
         [...sessionRoots].map((root) => clearStudioSession(root, serverId)),
       );
+      await closeWarmRenderers();
       // Idle keep-alive sockets would otherwise hold close() open.
       server.closeAllConnections();
       await new Promise<void>((r) => server.close(() => r()));

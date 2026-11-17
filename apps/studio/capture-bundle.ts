@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, rm } from "node:fs/promises";
+import { inflateRawSync } from "node:zlib";
 import path from "node:path";
 import { unzipSync, zipSync } from "fflate";
 import type { StudioFormat } from "./contract.js";
@@ -77,14 +78,139 @@ function decode(bytes: Buffer): Record<string, Buffer> {
   );
 }
 
-// Share immutable bytes across preview, inspection and library requests.
-const cache = new Map<string, Record<string, Buffer>>();
-let cachedBytes = 0;
-export async function readCaptureEntry(
-  dir: string,
+const LFS_POINTER = "version https://git-lfs.github.com/spec/v1";
+const lfsPointer = (bytes: Buffer) =>
+  bytes.subarray(0, 80).toString().startsWith(LFS_POINTER);
+
+type Entry = { method: number; compressed: number; size: number; offset: number };
+/** The ZIP central directory, with every entry name and size checked before
+ * anything is decompressed. */
+function centralDirectory(bytes: Buffer): Map<string, Entry> {
+  const corrupt = () => new Error("Capture bundle is not a valid archive.");
+  let end = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 65535); i--)
+    if (bytes.readUInt32LE(i) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  if (end < 0) throw corrupt();
+  const count = bytes.readUInt16LE(end + 10);
+  let p = bytes.readUInt32LE(end + 16);
+  if (count > MAX_FILES)
+    throw new Error("Capture bundle expands beyond its size or file limit.");
+  const entries = new Map<string, Entry>();
+  let total = 0;
+  for (let i = 0; i < count; i++) {
+    if (p + 46 > bytes.length || bytes.readUInt32LE(p) !== 0x02014b50) throw corrupt();
+    const nameLength = bytes.readUInt16LE(p + 28),
+      extra = bytes.readUInt16LE(p + 30),
+      comment = bytes.readUInt16LE(p + 32);
+    const name = bytes.toString("utf8", p + 46, p + 46 + nameLength);
+    if (!capturePath(name) || entries.has(name))
+      throw new Error(`Invalid or duplicate capture entry: ${name}`);
+    const size = bytes.readUInt32LE(p + 24);
+    total += size;
+    if (total > MAX_BYTES)
+      throw new Error("Capture bundle expands beyond its size or file limit.");
+    entries.set(name, {
+      method: bytes.readUInt16LE(p + 10),
+      compressed: bytes.readUInt32LE(p + 20),
+      size,
+      offset: bytes.readUInt32LE(p + 42),
+    });
+    p += 46 + nameLength + extra + comment;
+  }
+  for (const name of ["capture.json", "events.json", "elements.json"])
+    if (!entries.has(name)) throw new Error(`Capture bundle is missing ${name}.`);
+  return entries;
+}
+/** One entry, decompressed with the native zlib (not the JS inflate). */
+function inflateEntry(bytes: Buffer, entry: Entry): Buffer {
+  const corrupt = () => new Error("Capture bundle is not a valid archive.");
+  const at = entry.offset;
+  if (at + 30 > bytes.length || bytes.readUInt32LE(at) !== 0x04034b50) throw corrupt();
+  const start = at + 30 + bytes.readUInt16LE(at + 26) + bytes.readUInt16LE(at + 28);
+  const raw = bytes.subarray(start, start + entry.compressed);
+  if (raw.length !== entry.compressed) throw corrupt();
+  const data =
+    entry.method === 0
+      ? Buffer.from(raw)
+      : entry.method === 8
+        ? inflateRawSync(raw, { maxOutputLength: entry.size + 1 })
+        : (() => {
+            throw corrupt();
+          })();
+  if (data.length !== entry.size) throw corrupt();
+  return data;
+}
+type Archive = {
+  bytes: Buffer;
+  entries: Map<string, Entry>;
+  files: Map<string, Buffer>;
+  size: number;
+  /** elements.json was checked against the recording. */
+  indexChecked?: boolean;
+};
+/** Open, check and remember one archive: the whole-file checksum, every
+ * entry name and size, and the recording identity (events.json against
+ * capture.json and studio.json). Other entries are decompressed when read. */
+function openArchive(
+  bytes: Buffer,
   format: Extract<StudioFormat, { formatVersion: 2 }>,
-  name: string,
-): Promise<Buffer> {
+): Archive {
+  if (lfsPointer(bytes))
+    throw new Error(
+      "Capture is a Git LFS pointer. Run git lfs pull in this repository.",
+    );
+  if (hash(bytes) !== format.capture.sha256)
+    throw new Error("Capture bundle checksum does not match studio.json.");
+  const entries = centralDirectory(bytes);
+  const archive: Archive = { bytes, entries, files: new Map(), size: bytes.length };
+  const metadata = JSON.parse(entryOf(archive, "capture.json").toString());
+  const captureHash = hash(entryOf(archive, "events.json"));
+  if (
+    metadata.format !== "demohunter.capture" ||
+    metadata.formatVersion !== 1 ||
+    metadata.captureHash !== captureHash
+  )
+    throw new Error("Capture identity does not match its recording.");
+  if (captureHash.slice(0, 16) !== format.captureId)
+    throw new Error("Studio manifest does not match this capture.");
+  return archive;
+}
+function entryOf(archive: Archive, name: string): Buffer {
+  let data = archive.files.get(name);
+  if (data) return data;
+  const entry = archive.entries.get(name);
+  if (!entry)
+    throw Object.assign(new Error(`Capture file not found: ${name}`), {
+      code: "ENOENT",
+    });
+  data = inflateEntry(archive.bytes, entry);
+  if (name === "elements.json" && !archive.indexChecked) {
+    const index = JSON.parse(data.toString());
+    const captureHash = hash(entryOf(archive, "events.json"));
+    if (
+      index.schemaVersion !== 1 ||
+      index.captureHash !== captureHash ||
+      index.captureId !== captureHash.slice(0, 16) ||
+      !Array.isArray(index.elements)
+    )
+      throw new Error("Capture identity does not match its recording.");
+    archive.indexChecked = true;
+  }
+  archive.files.set(name, data);
+  archive.size += data.length;
+  return data;
+}
+
+// Share immutable bytes across preview, inspection and library requests.
+// Keyed by the file's identity (size, times, inode) and the manifest, so the
+// checksum runs once per archive, not on every read.
+const cache = new Map<string, Archive>();
+const cachedSize = () => [...cache.values()].reduce((n, a) => n + a.size, 0);
+/** The archive is a regular file within the size limit (no read). */
+export async function captureFileInfo(dir: string) {
   const info = await lstat(path.join(dir, CAPTURE_FILE)).catch((error) => {
     if (error.code === "ENOENT")
       throw new Error(
@@ -97,46 +223,26 @@ export async function readCaptureEntry(
       "Capture bundle must be a regular file, not a symbolic link.",
     );
   if (info.size > MAX_BYTES) throw new Error("Capture bundle exceeds 256 MiB.");
+  return info;
+}
+export async function readCaptureEntry(
+  dir: string,
+  format: Extract<StudioFormat, { formatVersion: 2 }>,
+  name: string,
+): Promise<Buffer> {
+  const info = await captureFileInfo(dir);
   const key = `${path.resolve(dir)}:${format.captureId}:${format.capture.sha256}:${info.size}:${info.mtimeMs}:${info.ctimeMs}:${info.ino}`;
-  let files = cache.get(key);
-  if (files) {
+  let archive = cache.get(key);
+  if (archive) {
     cache.delete(key);
-    cache.set(key, files);
+    cache.set(key, archive);
   } else {
-    const bytes = await readProjectFile(dir, CAPTURE_FILE, null);
-    if (
-      bytes
-        .subarray(0, 80)
-        .toString()
-        .startsWith("version https://git-lfs.github.com/spec/v1")
-    )
-      throw new Error(
-        "Capture is a Git LFS pointer. Run git lfs pull in this repository.",
-      );
-    if (hash(bytes) !== format.capture.sha256)
-      throw new Error("Capture bundle checksum does not match studio.json.");
-    files = decode(bytes);
-    if (
-      JSON.parse(files["elements.json"]!.toString()).captureId !==
-      format.captureId
-    )
-      throw new Error("Studio manifest does not match this capture.");
-    cache.set(key, files);
-    cachedBytes += Object.values(files).reduce((n, data) => n + data.length, 0);
-    while (cache.size > 1 && cachedBytes > 128 * 1024 * 1024) {
-      const oldest = cache.keys().next().value!;
-      cachedBytes -= Object.values(cache.get(oldest)!).reduce(
-        (n, data) => n + data.length,
-        0,
-      );
-      cache.delete(oldest);
-    }
+    archive = openArchive(await readProjectFile(dir, CAPTURE_FILE, null), format);
+    cache.set(key, archive);
   }
-  const data = files[name];
-  if (!data)
-    throw Object.assign(new Error(`Capture file not found: ${name}`), {
-      code: "ENOENT",
-    });
+  const data = entryOf(archive, name);
+  while (cache.size > 1 && cachedSize() > 128 * 1024 * 1024)
+    cache.delete(cache.keys().next().value!);
   return data;
 }
 

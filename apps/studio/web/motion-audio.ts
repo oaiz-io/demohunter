@@ -1,9 +1,5 @@
-import {
-  musicGain,
-  totalDuration,
-  voiceSpans,
-  type ReplayBundle,
-} from "../model.js";
+import { musicGain, totalDuration, voiceSpans } from "../timeline-math.js";
+import type { ReplayBundle } from "../model.js";
 import type { SceneCue } from "./scenes.js";
 import { projectUrl } from "./transport.js";
 

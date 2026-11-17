@@ -21,6 +21,7 @@ const labels: Record<string, string> = {
   reply_to_comment: "Replying to comment",
   set_comment_status: "Updating comment",
   get_screenshot: "Rendering a frame",
+  get_film_sheet: "Rendering contact sheets",
   find_elements: "Exploring elements",
   undo_last_edit: "Undoing an edit",
 };

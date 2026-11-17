@@ -219,12 +219,25 @@ test("saving does not rebuild the replay; paused frames are skipped; scenes surv
       await Bun.sleep(1000);
       const idle = ((await lab(page)).updates as number) - before;
       expect(idle).toBeLessThan(10);
+      // Hover moves only the hover box: no full frame updates.
+      const layer = (await page.locator("#select-layer").boundingBox())!;
+      const hoverFrom = (await lab(page)).updates as number;
+      for (let i = 0; i < 20; i++)
+        await page.mouse.move(
+          layer.x + layer.width * (0.2 + i * 0.03),
+          layer.y + layer.height / 2,
+        );
+      expect(((await lab(page)).updates as number) - hoverFrom).toBeLessThan(3);
       await page.locator("#play").click();
       const playingFrom = (await lab(page)).updates as number;
-      await Bun.sleep(400);
-      expect(
-        ((await lab(page)).updates as number) - playingFrom,
-      ).toBeGreaterThan(8);
+      // Frames keep coming while playing. Wait for them, not for a fixed
+      // time: a loaded machine draws fewer frames each second.
+      let played = 0;
+      for (let waited = 0; played <= 8 && waited < 5000; waited += 100) {
+        await Bun.sleep(100);
+        played = ((await lab(page)).updates as number) - playingFrom;
+      }
+      expect(played).toBeGreaterThan(8);
       await page.locator("#play").click();
 
       // A comment changes the revision but nothing visual: no new thumbnail

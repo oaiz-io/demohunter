@@ -861,7 +861,7 @@ const withCacheHome = async <T>(root: string, work: () => Promise<T>) => {
 };
 
 test("thumbnail and poster caches live outside the project and ignore a linked .studio", async () => {
-  const { projectFrame, projectPoster, projectCacheFolder } = await import(
+  const { projectFrame, projectPoster, projectCacheFolder, pruneFrames, closeWarmRenderers } = await import(
     "./poster.js"
   );
   const { root, dir } = await setup();
@@ -890,7 +890,9 @@ test("thumbnail and poster caches live outside the project and ignore a linked .
       const outsideBefore = (await readdir(outside)).sort();
 
       const frame = await projectFrame(dir, 0);
-      expect(frame.subarray(1, 4).toString()).toBe("PNG");
+      // A small JPEG thumbnail (JPEG start of image marker).
+      expect([...frame.bytes.subarray(0, 2)]).toEqual([0xff, 0xd8]);
+      expect(frame.revision).toBe(revision);
       const poster = await projectPoster(dir);
       // Not the linked file's bytes.
       expect(poster.subarray(1, 4).toString()).toBe("PNG");
@@ -899,34 +901,46 @@ test("thumbnail and poster caches live outside the project and ignore a linked .
       expect(cache.startsWith(root)).toBe(true); // under XDG_CACHE_HOME here
       expect(cache.startsWith(dir)).toBe(false);
       expect(((await stat(cache)).mode & 0o777).toString(8)).toBe("700");
-      expect((await readdir(cache)).sort()).toEqual(
-        [`${revision}-0.png`, "poster.json", "poster.png"].sort(),
-      );
+      const names0 = (await readdir(cache)).sort();
+      const thumb = names0.find((n) => n.endsWith(".jpg"))!;
+      expect(thumb).toMatch(/^[0-9a-f]{24}\.jpg$/);
+      expect(names0).toEqual([thumb, "poster.json", "poster.png"].sort());
       // Nothing behind the links changed.
       expect((await readdir(outside)).sort()).toEqual(outsideBefore);
       expect(await readFile(path.join(outside, "victim.png"), "utf8")).toBe("keep");
 
-      // Revision-keyed reuse: the cached file is served, not re-rendered.
-      await writeFile(path.join(cache, `${revision}-0.png`), "CACHED");
-      expect((await projectFrame(dir, 0)).toString()).toBe("CACHED");
+      // Key reuse: the cached file is served, not re-rendered, also after
+      // an edit that cannot change the frame (a comment).
+      await writeFile(path.join(cache, thumb), "CACHED");
+      expect((await projectFrame(dir, 0)).bytes.toString()).toBe("CACHED");
+      const bundle = await loadBundle(dir);
+      await writeJson(path.join(dir, "comments.json"), {
+        threads: [
+          { id: "t1", timeMs: 0, body: "Note", author: "A", status: "open", createdAt: "x", updatedAt: "x", replies: [] },
+        ],
+      });
+      expect((await loadBundle(dir)).revision).not.toBe(bundle.revision);
+      expect((await projectFrame(dir, 0)).bytes.toString()).toBe("CACHED");
 
-      // A new frame prunes other revisions' thumbnails, and only those: other
-      // names and links are left alone.
+      // Pruning removes old-style thumbnails and keeps the newest within
+      // the bound, and only plain files that look like ours: other names
+      // and links are left alone.
       await writeFile(path.join(cache, "0123456789abcdef-5.png"), "old");
       await writeFile(path.join(cache, "notes.txt"), "mine");
       await symlink(
         path.join(outside, "victim.png"),
-        path.join(cache, "fedcba9876543210-1.png"),
+        path.join(cache, "fedcba9876543210fedcba98.jpg"),
       );
-      await projectFrame(dir, 100);
+      await pruneFrames(cache);
       const names = (await readdir(cache)).sort();
       expect(names).toContain("notes.txt");
-      expect(names).toContain("fedcba9876543210-1.png");
-      expect(names).toContain(`${revision}-100.png`);
+      expect(names).toContain("fedcba9876543210fedcba98.jpg");
+      expect(names).toContain(thumb);
       expect(names).not.toContain("0123456789abcdef-5.png");
       expect(await readFile(path.join(outside, "victim.png"), "utf8")).toBe("keep");
     });
   } finally {
+    await closeWarmRenderers();
     await rm(root, { recursive: true, force: true });
   }
 }, 120000);

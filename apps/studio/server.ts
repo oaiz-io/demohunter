@@ -3,6 +3,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { createHash } from "node:crypto";
 import { lstat, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +18,8 @@ import { readActivity } from "./activity.js";
 import { contract } from "./contract.js";
 import { historySummary } from "./storage.js";
 import { fontFile } from "./fonts.js";
-import { projectFrame } from "./poster.js";
+import { projectFrame, projectScreenshot } from "./poster.js";
+import { elementSpans, type ElementSpans } from "./frame-key.js";
 import { createRequire } from "node:module";
 import { hostAllowed, scenesTrusted } from "./trust.js";
 import { readFormat } from "./format.js";
@@ -88,6 +90,7 @@ function browserAssets() {
       platform: "browser",
       target: "es2022",
       logLevel: "silent",
+      minify: true,
     });
     return {
       js: compiled.outputFiles[0]!.contents,
@@ -125,6 +128,8 @@ export async function createReplayHandler(
     narrationMessage = "",
     narrationError = "";
   const jobs = new Set<Promise<unknown>>();
+  /** When each recorded element is on the page (for thumbnail keys). */
+  let spans: ElementSpans | undefined;
   let exportState: {
     running: boolean;
     message: string;
@@ -170,9 +175,9 @@ export async function createReplayHandler(
           "text/html",
         );
       if (req.method === "GET" && url.pathname === "/app.js")
-        return send(res, appJs, "text/javascript");
+        return sendTagged(req, res, appJs, "text/javascript");
       if (req.method === "GET" && url.pathname === "/style.css")
-        return send(res, css, "text/css");
+        return sendTagged(req, res, css, "text/css");
       if (req.method === "GET" && url.pathname.startsWith("/fonts/")) {
         const font = fontFile(url.pathname.slice("/fonts/".length));
         if (!font) return json(res, { error: "Not found" }, 404);
@@ -183,8 +188,35 @@ export async function createReplayHandler(
         const t = Number(url.searchParams.get("t") ?? 0);
         if (!Number.isFinite(t) || t < 0)
           return json(res, { error: "Invalid frame time" }, 400);
-        res.setHeader("Cache-Control", "private, max-age=3600");
-        return send(res, await projectFrame(dir, t), "image/png");
+        // A thumbnail the page no longer waits for is not rendered.
+        const gone = new AbortController();
+        res.once("close", () => {
+          if (!res.writableFinished) gone.abort();
+        });
+        spans ??= elementSpans(workspace.index);
+        const frame = await projectFrame(dir, t, { spans, signal: gone.signal });
+        // The URL names the revision (`r`): the image may be kept for good
+        // only when it shows exactly that revision.
+        res.setHeader(
+          "Cache-Control",
+          url.searchParams.get("r") === frame.revision
+            ? "private, max-age=31536000, immutable"
+            : "no-store",
+        );
+        return send(res, frame.bytes, "image/jpeg");
+      }
+      if (req.method === "GET" && url.pathname === "/api/screenshot") {
+        // Full-size PNG from the warm renderer, for MCP get_screenshot.
+        const t = Number(url.searchParams.get("t") ?? 0);
+        if (!Number.isFinite(t) || t < 0)
+          return json(res, { error: "Invalid frame time" }, 400);
+        const shot = await projectScreenshot(
+          dir,
+          t,
+          url.searchParams.get("expectedRevision") ?? undefined,
+        );
+        res.setHeader("X-DemoHunter-Revision", shot.revision);
+        return send(res, shot.bytes, "image/png");
       }
       if (req.method === "GET" && url.pathname === "/api/contract")
         return json(res, contract);
@@ -193,7 +225,9 @@ export async function createReplayHandler(
       if (req.method === "GET" && url.pathname === "/api/project")
         return json(res, await loadBundle(dir));
       if (req.method === "GET" && url.pathname === "/api/workspace")
-        return json(res, {
+        // Large (the element index) and mostly the same: revalidated, 304
+        // when the body is unchanged.
+        return jsonTagged(req, res, {
           index: workspace.index,
           projectDir: dir,
           captureBundle: (await readFormat(dir))?.formatVersion === 2 ? "capture.dhcapture" : undefined,
@@ -237,7 +271,8 @@ export async function createReplayHandler(
       if (req.method === "GET" && url.pathname === "/api/history")
         return json(res, await workspace.history());
       if (req.method === "GET" && url.pathname === "/api/events")
-        return send(
+        return sendTagged(
+          req,
           res,
           (await readProjectFile(dir, "events.json")).replace(
             assetUrl,
@@ -248,7 +283,7 @@ export async function createReplayHandler(
       if (req.method === "GET" && url.pathname === "/api/status") {
         try {
           const history = await historySummary(dir);
-          return json(res, {
+          return jsonRevalidated(req, res, {
             revision: (await loadBundle(dir)).revision,
             narrating,
             narrationMessage,
@@ -260,7 +295,7 @@ export async function createReplayHandler(
             export: exportState,
           });
         } catch (error) {
-          return json(res, {
+          return jsonRevalidated(req, res, {
             error: message(error),
             narrating,
             narrationMessage,
@@ -573,6 +608,10 @@ export async function createReplayHandler(
         // (a.json pointing at b.js must not be served as a script).
         const type = mime[extension] ?? "application/octet-stream";
         res.setHeader("Accept-Ranges", "bytes");
+        // Captured assets are named by their content hash: the same URL is
+        // always the same bytes. Audio and scenes change in place (no-store).
+        if (/^assets\/[0-9a-f]{20}\.[\w]+$/.test(relative))
+          res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
         if (req.headers.range) {
           const match = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range);
           const start = Number(match?.[1]);
@@ -587,6 +626,8 @@ export async function createReplayHandler(
           );
           return send(res, data.subarray(start, end + 1), type, 206);
         }
+        // Audio and scene files change in place: revalidated by body hash.
+        if (!relative.startsWith("assets/")) return sendTagged(req, res, data, type);
         return send(res, data, type);
       }
       return json(res, { error: "Not found." }, 404);
@@ -647,6 +688,54 @@ function send(
 ): void {
   res.writeHead(status, { "Content-Type": contentType });
   res.end(data);
+}
+const tags = new WeakMap<object, string>();
+/** Fixed bytes for the life of the process (bundles, CSS): an ETag, and the
+ * browser asks again each time (`no-cache`), so a restart with new code is
+ * never hidden; an unchanged file is a bodiless 304. */
+export function sendTagged(
+  req: IncomingMessage,
+  res: ServerResponse,
+  data: Uint8Array | string,
+  type: string,
+): void {
+  // The tag is the hash of the body sent now, so it can never vouch for
+  // older content.
+  let tag = typeof data === "string" ? undefined : tags.get(data);
+  if (!tag) {
+    tag = `"${createHash("sha1").update(data).digest("base64url")}"`;
+    if (typeof data !== "string") tags.set(data, tag);
+  }
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("ETag", tag);
+  if (req.headers["if-none-match"] === tag) {
+    res.writeHead(304);
+    res.end();
+    return;
+  }
+  send(res, data, type);
+}
+function jsonTagged(req: IncomingMessage, res: ServerResponse, value: unknown): void {
+  sendTagged(req, res, JSON.stringify(value), "application/json");
+}
+/** Polled state: never stored (no-store), but the poller sends back the
+ * last ETag and an unchanged body costs a 304. The tag hashes the body
+ * computed now, so it never vouches for an older state. */
+function jsonRevalidated(
+  req: IncomingMessage,
+  res: ServerResponse,
+  value: unknown,
+): void {
+  const text = JSON.stringify(value);
+  const tag = `"${createHash("sha1").update(text).digest("base64url")}"`;
+  res.setHeader("ETag", tag);
+  if (req.headers["if-none-match"] === tag) {
+    res.setHeader("Cache-Control", "no-store");
+    res.writeHead(304);
+    res.end();
+    return;
+  }
+  send(res, text, "application/json");
 }
 function json(res: ServerResponse, value: unknown, status = 200): void {
   send(res, JSON.stringify(value), "application/json", status);

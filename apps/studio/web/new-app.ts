@@ -266,9 +266,16 @@ async function pollTours() {
   capturing = value.capturing;
   renderStage();
 }
+let libraryTag: string | undefined;
 async function pollLibrary() {
   if (document.hidden && library.workspace) return;
-  library = await getJson<Library>("/api/library");
+  // An unchanged library answers 304 without a body: nothing to do.
+  const r = await fetch("/api/library", { headers: libraryTag ? { "If-None-Match": libraryTag } : {} });
+  if (r.status === 304) return;
+  const value = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((value as { error?: string }).error ?? `Request failed (${r.status})`);
+  libraryTag = r.headers.get("ETag") ?? undefined;
+  library = value as Library;
   if (!root) {
     root = library.workspace;
     history.replaceState(null, "", `/new?${new URLSearchParams({ root })}`);

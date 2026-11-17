@@ -1,4 +1,5 @@
-import { clipStart, isScene, type ReplayBundle } from "../model.js";
+import { clipStart, isScene } from "../timeline-math.js";
+import type { ReplayBundle } from "../model.js";
 import { projectUrl } from "./transport.js";
 
 /** A sound a scene page declares with `<audio data-start="1.2">`. */

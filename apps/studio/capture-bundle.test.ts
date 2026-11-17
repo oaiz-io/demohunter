@@ -244,3 +244,31 @@ test("invalid archive entries fail before use, even with a matching archive hash
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("loading a project only stats the archive; reading an entry verifies it", async () => {
+  const { root, dir } = await setup();
+  try {
+    await packCapture(dir);
+    const file = path.join(dir, "capture.dhcapture");
+    const good = await readFile(file);
+    const revision = (await loadBundle(dir)).revision;
+    // Same size, other bytes: the load does not read it, the entry read
+    // still refuses it.
+    const bad = Buffer.from(good);
+    bad[bad.length >> 1] ^= 0xff;
+    await writeFile(file, bad);
+    expect((await loadBundle(dir)).revision).toBe(revision);
+    await expect(readProjectFile(dir, "events.json")).rejects.toThrow("checksum");
+    // A good archive serves single entries, and elements.json is checked
+    // against the recording when it is first read.
+    await writeFile(file, good);
+    expect(JSON.parse(await readProjectFile(dir, "events.json"))).toBeArray();
+    expect(JSON.parse(await readProjectFile(dir, "elements.json")).captureId).toBe(
+      (await readFormat(dir))!.captureId,
+    );
+    await rm(file);
+    await expect(loadBundle(dir)).rejects.toThrow("missing");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

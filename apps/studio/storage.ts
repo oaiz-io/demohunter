@@ -13,7 +13,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { readFormat } from "./format.js";
-import { readCaptureEntry } from "./capture-bundle.js";
+import { captureFileInfo, readCaptureEntry } from "./capture-bundle.js";
 import { validateBundle, type ReplayBundle } from "./model.js";
 
 export async function atomicWrite(
@@ -129,7 +129,9 @@ export async function writeJson(file: string, value: unknown): Promise<void> {
 }
 export async function loadBundle(dir: string): Promise<ReplayBundle> {
   const format = await readFormat(dir);
-  if (format?.formatVersion === 2) await readCaptureEntry(dir, format, "events.json");
+  // The archive is verified when its entries are read (events, assets,
+  // elements), not on every load: here a stat is enough.
+  if (format?.formatVersion === 2) await captureFileInfo(dir);
   const files = await Promise.all(
     ["project.json", "edits.json", "narration.json", "overrides.css"].map(
       (name) => readProjectFile(dir, name),
@@ -187,6 +189,26 @@ const MAX_WALK_ENTRIES = 2000;
 const MAX_WALK_DEPTH = 10;
 const MAX_HASHED_BYTES = 5 * 1024 * 1024;
 /** Scene/overlay files by content, audio by size and time (they can be big). */
+/** Content hashes of scene files, reused while the file's size, times and
+ * inode are unchanged (any write changes ctime), so a load does not read
+ * every scene file again. The value is the same content hash. */
+const hashes = new Map<string, { key: string; hash: Promise<string | undefined> }>();
+function cachedHash(
+  file: string,
+  info: { size: number; mtimeMs: number; ctimeMs: number; ino: number },
+) {
+  const key = `${info.size}:${info.mtimeMs}:${info.ctimeMs}:${info.ino}`;
+  const hit = hashes.get(file);
+  if (hit?.key === key) return hit.hash;
+  const hash = hashFile(file).then((h) => {
+    // A failed read is tried again next time.
+    if (h === undefined && hashes.get(file)?.hash === hash) hashes.delete(file);
+    return h;
+  });
+  if (hashes.size > 5000) hashes.clear();
+  hashes.set(file, { key, hash });
+  return hash;
+}
 async function motionFingerprint(
   dir: string,
 ): Promise<{ text: string; stamps: Record<string, string> }> {
@@ -206,7 +228,7 @@ async function motionFingerprint(
       if (!info?.isFile()) continue;
       const stamp =
         byContent && info.size <= MAX_HASHED_BYTES
-          ? await hashFile(file)
+          ? await cachedHash(file, info)
           : `${info.size}:${Math.round(info.mtimeMs)}`;
       if (stamp === undefined) continue;
       stamps[`${folder}/${name}`] = stamp.slice(0, 16);
@@ -729,10 +751,33 @@ async function readHistory(
     return [];
   }
 }
-export async function historySummary(dir: string) {
-  return (await readHistory(dir))
-    .map(({ before: _before, ...entry }) => entry)
-    .reverse();
+type HistorySummary = Omit<HistoryEntry, "before">[];
+/** Summaries by history file identity: the file holds every earlier
+ * bundle, and the editor asks for its summary on every status poll. Any
+ * write changes the size, mtime or ctime; a replaced file or folder
+ * changes the inode. A miss reads through the checked reader. */
+const summaries = new Map<string, { key: string; value: Promise<HistorySummary> }>();
+export async function historySummary(dir: string): Promise<HistorySummary> {
+  const info = await lstat(path.join(dir, ".history/edits.json"), {
+    bigint: true,
+  }).catch(() => undefined);
+  const read = async () =>
+    (await readHistory(dir))
+      .map(({ before: _before, ...entry }) => entry)
+      .reverse();
+  if (!info?.isFile()) return read();
+  const key = `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+  const hit = summaries.get(dir);
+  if (hit?.key !== key) {
+    const value = read();
+    value.catch(() => {
+      if (summaries.get(dir)?.value === value) summaries.delete(dir);
+    });
+    if (summaries.size > 200) summaries.clear();
+    summaries.set(dir, { key, value });
+    return (await value).slice();
+  }
+  return (await hit.value).slice();
 }
 async function persistBundle(
   dir: string,

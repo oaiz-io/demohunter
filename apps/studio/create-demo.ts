@@ -138,7 +138,7 @@ export async function creationBrief(root: string, place: { name: string; branch?
     ...(skills.length
       ? [
           "",
-          `DemoHunter's skills are in this repository: ${skills.join(", ")}. Use them: demohunter (writing tours), demohunter-commercial (a polished, hook-driven product film: scenes, lifted UI, music) and demohunter-replay (editing the captured demo). Follow demohunter-commercial when they ask for something more than a walkthrough.`,
+          `DemoHunter's skills are in this repository: ${skills.join(", ")}. Use them: demohunter (writing tours), demohunter-film (any film: the plan and the story first, then the look, motion, sound and words; product films, explainers, essays, data stories and shorts) and demohunter-replay (editing the captured demo). Follow demohunter-film when they ask for something more than a walkthrough.`,
         ]
       : []),
     "",
@@ -170,7 +170,7 @@ export async function capturesInProgress(root: string, sinceMs: number): Promise
  * and editing a captured demo. */
 const SKILLS = [
   { name: "demohunter", dir: path.resolve(here, "../../packages/cli/skills/demohunter") },
-  { name: "demohunter-commercial", dir: path.resolve(here, "../../.agents/skills/demohunter-commercial") },
+  { name: "demohunter-film", dir: path.resolve(here, "../../.agents/skills/demohunter-film") },
   { name: "demohunter-replay", dir: path.resolve(here, "../../.agents/skills/demohunter-replay") },
 ].filter((s) => existsSync(path.join(s.dir, "SKILL.md")));
 /** Where Claude Code and Codex find a repository's skills. */

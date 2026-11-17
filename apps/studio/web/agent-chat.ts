@@ -154,9 +154,11 @@ export class AgentChat {
       },
     );
     setInterval(() => {
-      if (!document.hidden) void this.refresh().catch(() => {});
+      if (!document.hidden) void this.refresh({ poll: true }).catch(() => {});
     }, 5000);
-    setInterval(() => this.renderContext(), 700);
+    setInterval(() => {
+      if (!document.hidden) this.renderContext();
+    }, 700);
     // The elapsed time of a running turn.
     setInterval(() => {
       if (this.turnStarted) this.renderActivity();
@@ -208,10 +210,18 @@ export class AgentChat {
     return value as T;
   }
 
-  async refresh(): Promise<void> {
+  /** The ETag of the list the panel shows, for the periodic poll. */
+  private infoTag = "";
+  /** `poll`: an unchanged list (304) leaves the panel as it is. */
+  async refresh(options: { poll?: boolean } = {}): Promise<void> {
     const query = new URLSearchParams(this.hooks.root ? { root: this.hooks.root(), purpose: "create" } : { project: this.hooks.project() });
-    const r = await fetch(`/api/agents?${query}`);
+    const r = await fetch(
+      `/api/agents?${query}`,
+      options.poll && this.infoTag ? { headers: { "If-None-Match": this.infoTag } } : undefined,
+    );
+    if (r.status === 304) return;
     if (!r.ok) throw new Error("Agents are unavailable.");
+    const tag = r.headers.get("ETag") ?? "";
     this.info = (await r.json()) as Info;
     const preferred = this.info.settings.agent;
     // The New demo page follows only its own agent (after a reload).
@@ -228,6 +238,7 @@ export class AgentChat {
     this.renderRoster();
     this.renderComposer();
     this.renderSetup();
+    this.infoTag = tag;
   }
 
   /** Start the preferred agent as soon as the panel opens, so the first
