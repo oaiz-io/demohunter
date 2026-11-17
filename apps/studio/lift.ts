@@ -1,6 +1,8 @@
 import { openReplayRenderer } from "./render.js";
 import { totalDuration } from "./model.js";
 import { writeUnderScenes } from "./workspace.js";
+import { ensureElementIndex } from "./elements.js";
+import { hasRecording } from "./film.js";
 
 /**
  * Lift a recorded element at an output time into `scenes/lifts/<name>.html`
@@ -31,6 +33,10 @@ export async function liftElement(
     throw new Error("Give exactly one of ref or selector.");
   if (!Number.isFinite(input.atMs))
     throw new Error("Lift time must be a number of output milliseconds.");
+  if (!hasRecording(await ensureElementIndex(dir, false)))
+    throw new Error(
+      "This film has no recording. Lift copies an element from a recording; build the element in a scene instead.",
+    );
   const renderer = await openReplayRenderer(dir, input.expectedRevision);
   try {
     if (input.atMs < 0 || input.atMs > totalDuration(renderer.bundle.edits))

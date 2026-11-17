@@ -1,4 +1,4 @@
-# Sound design for commercials
+# Sound procedure: score, effects, beat-locks and measurement
 
 Portions adapted from Hyperframes (Apache-2.0, HeyGen) and brag (MIT).
 
@@ -119,7 +119,7 @@ The duck ramps down over **180 ms before** each narration segment and back up ov
 3. Move each hero move to land within **±150 ms** of its cue. Prefer, in order: the move's local `at` inside its page; an overlay's `startMs`; a preceding recording clip's `holdMs`. Changing a scene clip's `durationMs` shifts everything after it, so re-check the rest.
 4. Snap small sequential entrances to consecutive `beats[]` within **±100 ms**. For text the viewer must read, never reveal a new line on every beat above 110 bpm (beats under 545 ms apart): use every other beat, or reveal quickly and hold the set.
 5. If a cue is more than about 150 ms from where the story wants the move, don't force it. Keep the natural timing, or try another `--seed`.
-6. Record each lock in the storyboard, for example `beat-locked: 10.90 s (drop)`. Re-verify after every kit re-run.
+6. Record each lock in `PLAN.md`, for example `beat-locked: 10.90 s (drop)`. Re-verify after every kit re-run.
 
 **Drop-out before the climax.** Split the bed into two entries that share the music's clock. Put an `impact` or `drop` on the downbeat where bed B re-enters:
 
@@ -133,7 +133,7 @@ Setting `offsetMs` equal to `startMs` keeps bed B on the score's clock. Confirm 
 ## 7. Voice-over
 
 - The provider and voice live in `project.json tts` (`openai` or `elevenlabs`). Credentials come from the environment only.
-- Put the delivery in `tts.instructions` (examples in `storyboard.md` §5). One segment per beat. Start each segment 150–300 ms after the beat's first visible motion.
+- Put the delivery in `tts.instructions` (examples in `words.md`). One segment per beat. Start each segment 150–300 ms after the beat's first visible motion.
 - Spell out numbers, acronyms and URLs the way they should be spoken.
 - Generate with `bun run studio narrate <project> --fit`. Regenerate only changed segments. Report whether audio is draft, stale or current.
 
@@ -152,3 +152,32 @@ Export mixes narration, the ducked music and the SFX, then runs a two-pass `loud
 - Music-only passages sit about 4–8 LU (short-term) under the VO passages (practitioner default). They shouldn't jump up when the voice stops.
 - No SFX peak louder than the VO around it, except the 1–3 hero hits.
 - The final lockup lands on `resolveMs`, and the last hit rings out under the short fade.
+
+## Measure the mix
+
+You cannot hear the film. Measure it, and report the numbers in the delivery note. `$V` is the exported `video.mp4`.
+
+```sh
+# Integrated loudness, loudness range, true peak (look at I:, LRA:, Peak:)
+ffmpeg -hide_banner -i "$V" -af ebur128=peak=true -f null - 2>&1 | tail -14
+# Short-term loudness in 3 s windows (compare VO windows with music-only windows)
+for s in 0 3 6 9 12 15 18 21 24 27 30; do printf "%s s  " $s; ffmpeg -hide_banner -ss $s -t 3 -i "$V" -af ebur128 -f null - 2>&1 | grep -m1 " I:"; done
+# Unintended dropouts (anything silent > 0.6 s that is not a designed drop-out)
+ffmpeg -hide_banner -i "$V" -af silencedetect=n=-45dB:d=0.6 -f null - 2>&1 | grep silence_
+# Transient timing around a cut at C s: per-audio-frame (~21 ms) peaks; the hit should sit on the cut
+ffmpeg -hide_banner -ss $(awk "BEGIN{print C-0.25}") -t 0.5 -i "$V" -af "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.Peak_level" -f null - 2>&1 | grep -E "pts_time|Peak_level"
+# Waveform overview to compare against the beat sheet
+ffmpeg -v error -y -i "$V" -filter_complex "showwavespic=s=3840x360:split_channels=0" -frames:v 1 /tmp/<name>-wave.png
+```
+
+| Measure | Target |
+|---|---|
+| Integrated | −14 LUFS ± 1 for YouTube (−16 ± 1 for speech-first) |
+| True peak | ≤ −1.0 dBTP |
+| Loudness range | 4–11 LU (ads usually 4–8) |
+| VO windows | Even (within about 3 LU of each other); voice intelligible over the bed |
+| Music-only windows | About 4–8 LU under the VO windows, no jump when the voice stops |
+| SFX timing | Hero hits within ±1 frame (±33 ms) of their cut or landing. Whoosh peaks on the cut. |
+| Ducking | The bed swells only in gaps of 1 s or more; short gaps stay ducked |
+| Ending | The tonic resolve is audible under the lockup; no abrupt cut |
+| Dropouts | Only designed drop-outs (for example 0.3–0.75 s before the climax) |

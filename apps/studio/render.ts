@@ -2,57 +2,88 @@ import { chromium } from "playwright";
 import { serveReplay } from "./server.js";
 import { loadBundle, RevisionConflict } from "./storage.js";
 import { totalDuration } from "./model.js";
+export type RenderBrowser = Awaited<ReturnType<typeof chromium.launch>>;
+/** Full Chromium in new headless mode renders frames ~4–6× faster than the
+ * stripped headless shell; fall back where it is not installed. */
+export function launchRenderBrowser(): Promise<RenderBrowser> {
+  return chromium
+    .launch({ channel: "chromium" })
+    .catch(() => chromium.launch());
+}
 /** Shared deterministic player for screenshots and exports. It publishes no
- * selection/activity/playhead and never visits the original application. */
+ * selection/activity/playhead and never visits the original application.
+ *
+ * With `browser`, the player opens in a new context of that (long-lived)
+ * browser and closing it leaves the browser running. `deviceScaleFactor`
+ * below 1 renders small images (thumbnails) at the full layout size. */
 export async function openReplayRenderer(
   dir: string,
   expectedRevision?: string,
+  options: { browser?: RenderBrowser; deviceScaleFactor?: number } = {},
 ) {
-  const bundle = await loadBundle(dir);
+  let bundle = await loadBundle(dir);
   if (expectedRevision && bundle.revision !== expectedRevision)
     throw new RevisionConflict("The project changed before rendering.");
   const preview = await serveReplay(dir, { port: 0 });
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let browser: RenderBrowser | undefined;
+  let context: Awaited<ReturnType<RenderBrowser["newContext"]>> | undefined;
+  const closeAll = async () => {
+    if (options.browser) await context?.close().catch(() => {});
+    else await browser?.close();
+    await preview.close();
+  };
   try {
-    // Full Chromium in new headless mode renders frames ~4–6× faster than
-    // the stripped headless shell; fall back where it is not installed.
-    browser = await chromium
-      .launch({ channel: "chromium" })
-      .catch(() => chromium.launch());
-    const page = await browser.newPage({
+    browser = options.browser ?? (await launchRenderBrowser());
+    context = await browser.newContext({
       viewport: {
         width: bundle.project.viewport.width,
         height: bundle.project.viewport.height,
       },
-      deviceScaleFactor: 1,
+      deviceScaleFactor: options.deviceScaleFactor ?? 1,
     });
-    await page.goto(`${preview.url}/?render=1`);
-    await page.waitForFunction(
-      () => (window as any).__replayLab?.state().ready === true,
-    );
-    await page.evaluate((size) => {
-      const stage = document.querySelector<HTMLElement>("#stage")!;
-      stage.style.cssText = `position:fixed;left:0;top:0;width:${size.width}px;height:${size.height}px;z-index:2147483647;flex:none;min-height:0;overflow:hidden;border:0;border-radius:0;box-sizing:content-box`;
-      document.body.style.overflow = "hidden";
-      const style = document.createElement("style");
-      style.textContent =
-        "#viewport{left:0!important;top:0!important;transform:none!important}#selection-box,#hover-box,#agent-target,#comment-pins,.canvas-label,.replayer-mouse{display:none!important}";
-      document.head.append(style);
-    }, bundle.project.viewport);
-    await page.evaluate(() => (window as any).__replayLab.scenesReady());
-    await page.evaluate(async () => {
-      const doc =
-        document.querySelector<HTMLIFrameElement>(
-          "#replay iframe",
-        )?.contentDocument;
-      await doc?.fonts.ready;
-      await Promise.all(
-        [...(doc?.images ?? [])].map((img) => img.decode().catch(() => {})),
+    const page = await context.newPage();
+    const prepare = async () => {
+      await page.goto(`${preview.url}/?render=1`);
+      await page.waitForFunction(
+        () => (window as any).__replayLab?.state().ready === true,
       );
-    });
+      await page.evaluate((size) => {
+        const stage = document.querySelector<HTMLElement>("#stage")!;
+        stage.style.cssText = `position:fixed;left:0;top:0;width:${size.width}px;height:${size.height}px;z-index:2147483647;flex:none;min-height:0;overflow:hidden;border:0;border-radius:0;box-sizing:content-box`;
+        document.body.style.overflow = "hidden";
+        const style = document.createElement("style");
+        style.textContent =
+          "#viewport{left:0!important;top:0!important;transform:none!important}#selection-box,#hover-box,#agent-target,#comment-pins,.canvas-label,.replayer-mouse{display:none!important}";
+        document.head.append(style);
+      }, bundle.project.viewport);
+      await page.evaluate(() => (window as any).__replayLab.scenesReady());
+      await page.evaluate(async () => {
+        const doc =
+          document.querySelector<HTMLIFrameElement>(
+            "#replay iframe",
+          )?.contentDocument;
+        await doc?.fonts.ready;
+        await Promise.all(
+          [...(doc?.images ?? [])].map((img) => img.decode().catch(() => {})),
+        );
+      });
+    };
+    await prepare();
     return {
-      bundle,
+      get bundle() {
+        return bundle;
+      },
       page,
+      /** Load the project again in the same page (after an edit): much
+       * cheaper than a new browser. */
+      reload: async () => {
+        bundle = await loadBundle(dir);
+        await page.setViewportSize({
+          width: bundle.project.viewport.width,
+          height: bundle.project.viewport.height,
+        });
+        await prepare();
+      },
       frame: async (
         outputMs: number,
         shot: { format?: "png" | "jpeg"; quality?: number } = {},
@@ -119,14 +150,10 @@ export async function openReplayRenderer(
             "The project changed while rendering. Retry for a consistent revision.",
           );
       },
-      close: async () => {
-        await browser?.close();
-        await preview.close();
-      },
+      close: closeAll,
     };
   } catch (error) {
-    await browser?.close();
-    await preview.close();
+    await closeAll();
     throw error;
   }
 }

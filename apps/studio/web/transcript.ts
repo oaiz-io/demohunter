@@ -1,11 +1,6 @@
 import { projectUrl } from "./transport.js";
-import {
-  audioIsCurrent,
-  clipDuration,
-  narrationStart,
-  type ReplayBundle,
-  type NarrationSegment,
-} from "../model.js";
+import { audioIsCurrent, clipDuration, narrationStart } from "../timeline-math.js";
+import type { ReplayBundle, NarrationSegment } from "../model.js";
 
 export type ScriptPatch = Partial<Pick<NarrationSegment, "text" | "title">>;
 type Draft = {

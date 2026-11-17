@@ -147,11 +147,10 @@ describe.skipIf(!runnable)("desktop app", () => {
     await cp(fixture.dir, demo, { recursive: true });
     // The fixture has no recorded frames to render; seed its poster in a
     // private cache (Studio keeps posters outside projects).
-    const { loadBundle } = await import("../studio/storage.js");
     const cacheHome = await tmp("dh-desktop-cache-");
     const previous = process.env.XDG_CACHE_HOME;
     process.env.XDG_CACHE_HOME = cacheHome;
-    const { projectCacheFolder } = await import("../studio/poster.js");
+    const { projectCacheFolder, posterCacheRecord } = await import("../studio/poster.js");
     // The app opens this untrusted folder restricted, which caches apart.
     const { restrictFolder } = await import("../studio/trust.js");
     restrictFolder(feature);
@@ -160,7 +159,7 @@ describe.skipIf(!runnable)("desktop app", () => {
     if (previous === undefined) delete process.env.XDG_CACHE_HOME;
     else process.env.XDG_CACHE_HOME = previous;
     await writeFile(path.join(folder, "poster.png"), await readFile(path.join(here, "build/icon.png")));
-    await writeFile(path.join(folder, "poster.json"), JSON.stringify({ revision: (await loadBundle(demo)).revision, rendererVersion: 3 }));
+    await writeFile(path.join(folder, "poster.json"), JSON.stringify(await posterCacheRecord(demo)));
     const { page } = await launch(userData, [repo], { XDG_CACHE_HOME: cacheHome });
     await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45_000 });
     await page.locator(".recording-card").first().waitFor();

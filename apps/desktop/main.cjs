@@ -162,13 +162,15 @@ function hasBrowser() {
     r.code !== 0 ? undefined : r.out.trim().endsWith("yes"),
   );
 }
-function ensureBrowser(dir) {
+/** `show()`: whether the download message may replace the window's page
+ * (not over an error that came first). */
+function ensureBrowser(dir, show = () => true) {
   return (browserReady ??= (async () => {
     // When even the check fails, Studio's own startup error says more.
     if ((await hasBrowser()) !== false) return;
     const cliPath = playwrightCli();
     if (!cliPath) return;
-    if (dir) await showStatus(dir, undefined, false, "Downloading the browser Studio renders with (first run, about 270 MB)…");
+    if (dir && show()) await showStatus(dir, undefined, false, "Downloading the browser Studio renders with (first run, about 270 MB)…");
     const result = await run([cliPath, "install", "chromium"]);
     if (result.code !== 0) {
       browserReady = undefined;
@@ -254,16 +256,28 @@ async function openRepository(dir, returnTo) {
   window.setTitle(`${path.basename(dir)} — ${NAME}`);
   window.setRepresentedFilename(dir);
   buildMenus();
+  let failed = false;
   try {
-    await showStatus(dir);
-    await ensureBrowser(dir);
-    const url = await startStudio(dir);
+    // The status page, the browser check and the service start together;
+    // the window shows Studio once all three are done.
+    const studio = startStudio(dir);
+    const child = server;
+    const [, , url] = await Promise.all([
+      showStatus(dir),
+      ensureBrowser(dir, () => !failed && workspace === dir).catch((error) => {
+        // No renderer: stop the service this call started, as before.
+        if (server === child) stopStudio();
+        throw error;
+      }),
+      studio,
+    ]);
     if (workspace === dir) {
       studioOrigin = new URL(url).origin;
       // After a restart (e.g. Trust Folder), come back to the same page.
       await window.loadURL(returnTo ? new URL(returnTo, url).toString() : url);
     }
   } catch (error) {
+    failed = true;
     if (workspace === dir) await showStatus(dir, String(error.message ?? error));
   }
 }

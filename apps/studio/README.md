@@ -21,6 +21,29 @@ bun run studio capture demos/example.tour.ts --project .demohunter/replays/my-de
 bun run studio list
 ```
 
+### Films without a recording
+
+Explainers, essays, data stories and shorts have no app to record. Start them with `new`:
+
+```sh
+bun run studio new .demohunter/replays/tides --title "Why tides turn" --size 1080x1920
+```
+
+The project has only HTML scene clips. `--size` takes any `WxH` from 100 to 8192 (default 1920x1080; for example 1080x1920 or 1080x1080). `new` writes the project files, the scene kit in `scenes/kit/`, a plain starter scene `scenes/opening.html` and a `PLAN.md` to fill in. The destination must be new. It prints JSON with the project path and the next commands. Add scenes and overlays in `edits.json` or through MCP, add music with `kit --mood …`, check the film with `sheet` and export it as usual. Tools that need a recording (`lift`, edits on recorded elements) refuse with a clear message; MCP element reads return empty results.
+
+### Contact sheets
+
+`sheet` shows the whole film in a few images, so an agent can look at it:
+
+```sh
+bun run studio sheet .demohunter/replays/tides              # start and middle of every clip and overlay
+bun run studio sheet .demohunter/replays/tides --cuts       # frames −200 … +200 ms across every seam
+bun run studio sheet .demohunter/replays/tides --at 0,4200,9000 --phone
+bun run studio sheet .demohunter/replays/tides --every 2000 --output .context/sheets
+```
+
+Frames come from the same renderer as export and `get_screenshot`, in one browser. Each tile has its time and its clip and overlay ids under the picture. Tiles are about 480 px (portrait films: 480 px tall); `--phone` renders each frame 360 px wide and shows it 1:1. A sheet holds at most 30 tiles; more tiles make more numbered JPEGs. Sheets go to `--output` (a new folder) or to a new folder under the project's git-ignored `.studio/sheets/`. The command prints JSON with the sheet files and each tile's time, clip, overlays and position. A 2-minute film takes about 3 seconds. MCP `get_film_sheet` takes the same options and returns the images and the tile list; it only reads.
+
 `demo` creates a realistic four-scene invoice workflow with local sample speech when FFmpeg flite is available; --sample fractions creates a math lesson. Captures stop the built-in source app before playback. Capture uses DemoHunter's current two-pass tour runtime and rrweb; it does not record pixels or invoke a speech provider. The capture destination must be new.
 
 ## Work with your agent
@@ -62,11 +85,13 @@ bun run studio resolve .demohunter/replays/my-demo '<copied-element-link>'
 bun run studio contract
 ```
 
-An MCP agent can inspect selection/HTML/styles, edit elements, clips/camera/highlights/animations, add HTML intro/outro scenes and overlays, music and sound effects, handle comments, edit/regenerate narration, render screenshots and undo. Direct file changes refresh too, but cannot be attributed to an agent automatically.
+An MCP agent can inspect selection/HTML/styles, edit elements, clips/camera/highlights/animations, add HTML intro/outro scenes and overlays, music and sound effects, handle comments, edit/regenerate narration, render screenshots and contact sheets, and undo. Direct file changes refresh too, but cannot be attributed to an agent automatically.
 
 ## Scenes, music and sound
 
 Intros, outros and chapter cards are HTML pages in the demo's `scenes/` folder, placed in the timeline like clips; overlays sit on top of the recording. Studio drives every animation from the timeline, so preview and export are frame-exact. `lift` copies a real element of the recording (a card, a button) into `scenes/lifts/` (a revision-checked scene-file write, like `write_project_file`; MCP `lift_element` takes `expectedRevision`) so an overlay can pick it up from the page, bring it to the camera and animate it while the page blurs behind it. `kit` adds the scene helper (`scenes/kit/motion.js`) and a generated, license-free score with sound effects in the same key; the timeline's Sound track shows the music bed and every effect, including sounds a scene declares. Export mixes narration, music (ducked under the voice) and effects and normalises loudness to −16 LUFS. It renders in parallel (one browser per four cores, up to four; `--workers` to change) and joins the segments without re-encoding: a 67 s 1080p film exports in under 30 seconds.
+
+The kit's `motion.js` lists its helpers at the top. Three help with films: `fitText(element, {max, min})` sets and returns the largest font size (px) at which the text fits the element's box (measured again once fonts load); `readTime(text)` gives the milliseconds a line must stay settled to be read (500 + 300 per word, at least 800); `kenBurns(element, {from, to, at, dur, easing})` is a seekable pan and zoom (`from`/`to` are `{x, y, scale}`; without `dur` it runs to the end of the scene).
 
 The [agent skill](../../.agents/skills/demohunter-replay/SKILL.md) and each new project's AGENTS.md explain file editing. The browser holds the last valid preview through partial writes. UI/MCP edits check revisions. Narration cards autosave and preserve same-field conflicts for an explicit choice.
 
@@ -108,7 +133,7 @@ This is an application workspace under apps/studio. The macOS desktop app (apps/
 
 Replay captures visible DOM rather than the JavaScript heap/backend. Original app scripts do not execute. Text edits do not recompute calculations. Captured HTML does not identify original React/HTML source unless the app supplied provenance. Refs survive edits, not recapture. HTML/SVG work best; canvas/WebGL, cross-origin frames and native media have fidelity limits. Captured assets have a 10 MB resource limit. Text the tour types is recorded as shown; fields that look secret are masked (passwords, one-time codes, card fields, names like token or API key, and anything inside `data-dh-mask`). Keep demo data appropriate for sharing.
 
-Clips use source milliseconds; effects use output milliseconds. Speech follows clip IDs. Fitting speech extends holds and does not move absolute effects. Source dimensions stay fixed; camera zoom does not reflow. Space plays, arrows seek, Escape exits selection, Focus enlarges preview.
+Clips use source milliseconds; effects use output milliseconds. Speech follows clip IDs. Fitting speech extends holds and does not move absolute effects. Source dimensions stay fixed; camera zoom does not reflow. A camera window that starts where the one before it ends travels from that framing to its own and does not return to the full frame between them. Space plays, arrows seek, Escape exits selection, Focus enlarges preview.
 
 ## Check
 

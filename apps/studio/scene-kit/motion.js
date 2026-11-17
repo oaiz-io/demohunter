@@ -9,6 +9,12 @@
 //     values that change between frames; use seeded random() instead.
 //   - Create every element up front (hidden is fine), not on the fly.
 // Opened directly in a browser, the page plays in real time for authoring.
+//
+// Helpers: onSeek, lift, ease/easeFn, spring, animate, stagger, split,
+// typewriter, counter, random, progress, and for films:
+//   fitText(el, { max, min })  largest font size (px) at which the text fits
+//   readTime(text)             ms a line must stay settled to be read
+//   kenBurns(el, { from, to, at, dur, easing })  seekable pan and zoom
 
 const handlers = [];
 /** Run fn(ms) on every frame with the scene's local time in milliseconds. */
@@ -222,4 +228,95 @@ export function random(seed = 1) {
 /** Progress of a time window, eased: 0 before `at`, 1 after `at + dur`. */
 export function progress(ms, at, dur, easing = easeFn.out) {
   return easing(Math.min(1, Math.max(0, (ms - at) / dur)));
+}
+
+/**
+ * Set the largest font size (px, whole numbers from `min` to `max`) at which
+ * the element's text fits its box, and return it. Measured in the page, so
+ * it does not depend on time.
+ *
+ * The box is the element's content box: it must be laid out (a block or
+ * inline-block with a width; hidden with opacity is fine, display:none is
+ * not). If the box has a fixed height, the text may wrap but must not
+ * overflow it. If the height follows the content, the text keeps the lines
+ * it has (one, or one per <br>) and must not overflow the width.
+ *
+ * Fonts change the measure: the size is measured now and again once
+ * document.fonts.ready resolves (Studio waits for that before the first
+ * frame). Read element.style.fontSize after `await document.fonts.ready` if
+ * you need the final value in your own code. If nothing fits, `min` is set.
+ */
+export function fitText(element, { max, min = 12 } = {}) {
+  if (!(max >= min)) throw new Error("fitText needs { max } at least min.");
+  const fit = () => {
+    const style = element.style;
+    const saved = { size: style.fontSize, space: style.whiteSpace };
+    const at = (px) => {
+      style.fontSize = `${px}px`;
+      return element.clientHeight;
+    };
+    // A box whose height does not follow the text is fixed.
+    const fixed = at(min) === at(max);
+    const fits = (px) => {
+      at(px);
+      if (fixed)
+        return (
+          element.scrollWidth <= element.clientWidth &&
+          element.scrollHeight <= element.clientHeight
+        );
+      style.whiteSpace = "nowrap";
+      const ok = element.scrollWidth <= element.clientWidth;
+      style.whiteSpace = saved.space;
+      return ok;
+    };
+    let low = Math.ceil(min),
+      high = Math.floor(max),
+      best = Math.ceil(min);
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      if (fits(mid)) {
+        best = mid;
+        low = mid + 1;
+      } else high = mid - 1;
+    }
+    style.whiteSpace = saved.space;
+    style.fontSize = `${best}px`;
+    return best;
+  };
+  const size = fit();
+  if (document.fonts && document.fonts.status !== "loaded") {
+    pending.push(document.fonts.ready.then(fit));
+    settle();
+  }
+  return size;
+}
+
+/**
+ * Milliseconds a line must stay fully settled to be read:
+ * 500 + 300 per word, at least 800. Pure.
+ */
+export function readTime(text) {
+  const words = String(text ?? "").trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(800, 500 + 300 * words);
+}
+
+/**
+ * A slow pan and zoom on an image or video (or any element), seekable like
+ * every kit move. x and y are px offsets, scale a factor; the move runs from
+ * `at` for `dur` ms (default: to the end of the scene) and holds after.
+ * Give the element's parent overflow:hidden so the zoom stays in frame.
+ */
+export function kenBurns(element, { from = {}, to = {}, at = 0, dur, easing = ease.inOut } = {}) {
+  const start = { x: 0, y: 0, scale: 1, ...from };
+  const end = { x: 0, y: 0, scale: 1.12, ...to };
+  const length = Number(
+    document.querySelector('meta[name="demohunter:duration"]')?.content ?? 6000,
+  );
+  const transform = (p) => `translate(${p.x}px, ${p.y}px) scale(${p.scale})`;
+  element.style.transformOrigin = "50% 50%";
+  return animate(element, [{ transform: transform(start) }, { transform: transform(end) }], {
+    at,
+    dur: dur ?? Math.max(1, length - at),
+    easing,
+  });
 }

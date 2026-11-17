@@ -37,7 +37,7 @@ test("skills install into the repository, are kept current, and never write thro
     await mkdir(path.join(root, ".agents/skills/demohunter-replay"), { recursive: true });
     await writeFile(path.join(root, ".agents/skills/demohunter-replay/SKILL.md"), "mine");
     const written = await installSkills(root);
-    expect(written).toEqual([".agents/skills/demohunter", ".agents/skills/demohunter-commercial"]);
+    expect(written).toEqual([".agents/skills/demohunter", ".agents/skills/demohunter-film"]);
     expect(await readFile(path.join(outside, "SKILL.md"), "utf8").catch(() => "none")).toBe("none");
     expect(existsSync(path.join(outside, "skills"))).toBe(false);
     expect(await readFile(path.join(root, ".agents/skills/demohunter-replay/SKILL.md"), "utf8")).toBe("mine");

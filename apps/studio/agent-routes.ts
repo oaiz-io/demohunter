@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -64,7 +65,7 @@ export async function handleAgentRoute(
         return { dir, root, trusted: scenesTrusted(root) };
       }
       if (typeof input.root !== "string") throw new Error("Missing project.");
-      if (!library.roots.includes(input.root)) await library.scan();
+      if (!library.roots.includes(input.root)) await library.refresh();
       if (!library.roots.includes(input.root))
         throw Object.assign(new Error("That folder isn't part of this library."), { status: 404 });
       // A worktree the scan just found is as restricted as the library.
@@ -83,18 +84,22 @@ export async function handleAgentRoute(
     const target = { project: z.string().optional(), root: z.string().max(4096).optional() };
     if (req.method === "GET" && url.pathname === "/api/agents") {
       const { root, trusted } = await where(query());
-      return (
-        json({
-          root,
-          // Where agents run: the repository checkout or worktree of this demo.
-          place: await place(root, trusted),
-          trusted,
-          kinds: hub.kinds(),
-          sessions: hub.list(root, url.searchParams.get("purpose") === "create" ? "create" : undefined),
-          settings: await readAgentSettings(root),
-        }),
-        true
-      );
+      const text = JSON.stringify({
+        root,
+        // Where agents run: the repository checkout or worktree of this demo.
+        place: await place(root, trusted),
+        trusted,
+        kinds: hub.kinds(),
+        sessions: hub.list(root, url.searchParams.get("purpose") === "create" ? "create" : undefined),
+        settings: await readAgentSettings(root),
+      });
+      // The panel polls this: an unchanged list is a bodiless 304 (the tag
+      // hashes the list computed now).
+      const tag = `"${createHash("sha1").update(text).digest("base64url")}"`;
+      res.setHeader("ETag", tag);
+      if (req.headers["if-none-match"] === tag) return res.writeHead(304).end(), true;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(text), true;
     }
     // New demo: tours written since the page started, with their storyboards.
     if (req.method === "GET" && url.pathname === "/api/agents/tours") {

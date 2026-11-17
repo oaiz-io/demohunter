@@ -11,19 +11,8 @@ import { MotionAudio } from "./motion-audio.js";
 import { snapshotElement, type Snapshot } from "./snapshot.js";
 import { projectUrl } from "./transport.js";
 import { AgentFeedback } from "./feedback.js";
-import {
-  audioIsCurrent,
-  clipDuration,
-  narrationStart,
-  outputToSource,
-  totalDuration,
-  sourceToOutput,
-  clipStart,
-  sampleAnimation,
-  sceneAt,
-  type ReplayBundle,
-  type Target,
-} from "../model.js";
+import { audioIsCurrent, clipDuration, narrationStart, outputToSource, totalDuration, sourceToOutput, clipStart, sampleAnimation, sceneAt, cameraPose } from "../timeline-math.js";
+import type { ReplayBundle, Target } from "../model.js";
 import type { Replayer, eventWithTime } from "rrweb";
 import { TranscriptEditor, type ScriptPatch } from "./transcript.js";
 import { AgentWorkbench, toast, type WorkspaceData } from "./workbench.js";
@@ -349,23 +338,45 @@ function pauseAudio(): void {
   narrationPlayback.pause();
   motionAudio.pause();
 }
-function setPlaying(value: boolean): void {
+/** `seekNext`: a seek follows at once, so pausing does not seek the
+ * replay to the old position (and run update()) first. */
+function setPlaying(value: boolean, options: { seekNext?: boolean } = {}): void {
   if (!bundle) return;
   if (value && position >= totalDuration(bundle.edits) - 1) position = 0;
   playing = value;
   audioNeedsSeek = true;
   $("#select-layer").hidden = playing;
   lastTick = performance.now();
+  wake();
   $("#play")
     .querySelector("use")!
     .setAttribute("href", playing ? "#i-pause" : "#i-play");
   $("#play").setAttribute("aria-label", playing ? "Pause" : "Play");
   lastSource = -1;
   if (!playing) {
-    replayer?.pause(replaySource());
+    if (!options.seekNext) replayer?.pause(replaySource());
     pauseAudio();
   }
-  update();
+  if (!options.seekNext) update();
+}
+/** Pause and go to `ms`: one replay seek, one update. */
+function pauseAndSeek(ms: number): void {
+  setPlaying(false, { seekNext: true });
+  seek(ms);
+}
+/** Timeline scrubs: pointer moves come faster than frames, and a backward
+ * seek can rebuild the whole recording, so seek once per animation frame,
+ * to the latest position. */
+let scrubTarget: number | undefined;
+function scrub(ms: number): void {
+  const scheduled = scrubTarget !== undefined;
+  scrubTarget = ms;
+  if (scheduled) return;
+  requestAnimationFrame(() => {
+    const target = scrubTarget;
+    scrubTarget = undefined;
+    if (target !== undefined) pauseAndSeek(target);
+  });
 }
 function seek(ms: number): void {
   position = Math.max(0, Math.min(totalDuration(bundle.edits), ms));
@@ -489,39 +500,53 @@ function applyOverrides(): void {
 function drawEffects(): void {
   if (!bundle) return;
   feedback.draw();
+  // Read every box first, then write: a style write between two reads
+  // forces another layout.
+  const viewport = bundle.project.viewport;
+  const camera = cameraPose(bundle.edits.camera, position, (effect) => {
+    const box = effect.target ? boxOf(effect.target) : undefined;
+    return {
+      x: box ? box.x + box.width / 2 : (effect.x ?? viewport.width / 2),
+      y: box ? box.y + box.height / 2 : (effect.y ?? viewport.height / 2),
+    };
+  });
+  const rings: { box: DOMRect; padding: number; color: string }[] = [];
+  for (const highlight of bundle.edits.highlights) {
+    if (position < highlight.startMs || position >= highlight.endMs) continue;
+    const box = boxOf(highlight.target);
+    if (box) rings.push({ box, ...highlight });
+  }
+  const box = selection ? boxOf(selectionTarget()) : undefined;
+  const hoverBox = hoverRef ? boxOf({ ref: hoverRef }) : undefined;
+  const pins: {
+    thread: ReplayBundle["comments"]["threads"][number];
+    i: number;
+    target: DOMRect;
+  }[] = [];
+  if (!renderMode)
+    for (const [i, thread] of bundle.comments.threads.entries()) {
+      if (
+        thread.status !== "open" ||
+        !thread.elementRef ||
+        Math.abs(position - thread.timeMs) > 3000
+      )
+        continue;
+      const target = boxOf({ ref: thread.elementRef });
+      if (target) pins.push({ thread, i, target });
+    }
   cameraScale = 1;
   cameraX = 0;
   cameraY = 0;
-  const camera = bundle.edits.camera.findLast(
-    (effect) => position >= effect.startMs && position < effect.endMs,
-  );
   if (camera) {
-    const box = camera.target ? boxOf(camera.target) : undefined;
-    const x = box
-      ? box.x + box.width / 2
-      : (camera.x ?? bundle.project.viewport.width / 2);
-    const y = box
-      ? box.y + box.height / 2
-      : (camera.y ?? bundle.project.viewport.height / 2);
-    // Short eased entry/exit; camera motion never changes layout inside the replay.
-    const ease = Math.max(
-      1,
-      Math.min(camera.easeMs ?? 300, (camera.endMs - camera.startMs) / 2),
-    );
-    const edge = Math.min(
-      1,
-      (position - camera.startMs) / ease,
-      (camera.endMs - position) / ease,
-    );
-    const blend = edge * edge * (3 - 2 * edge);
-    cameraScale = 1 + (camera.scale - 1) * blend;
+    // Camera motion never changes layout inside the replay.
+    cameraScale = camera.scale;
     cameraX = Math.max(
-      bundle.project.viewport.width * (1 - cameraScale),
-      Math.min(0, bundle.project.viewport.width / 2 - x * cameraScale),
+      viewport.width * (1 - cameraScale),
+      Math.min(0, viewport.width / 2 - camera.x * cameraScale),
     );
     cameraY = Math.max(
-      bundle.project.viewport.height * (1 - cameraScale),
-      Math.min(0, bundle.project.viewport.height / 2 - y * cameraScale),
+      viewport.height * (1 - cameraScale),
+      Math.min(0, viewport.height / 2 - camera.y * cameraScale),
     );
   }
   // Skip identical style writes: they still cost a style recalculation.
@@ -537,12 +562,6 @@ function drawEffects(): void {
     $("#camera").style.setProperty("--unscale", unscale);
   }
   // Highlight rings are reused in place while the frame moves.
-  const rings: { box: DOMRect; padding: number; color: string }[] = [];
-  for (const highlight of bundle.edits.highlights) {
-    if (position < highlight.startMs || position >= highlight.endMs) continue;
-    const box = boxOf(highlight.target);
-    if (box) rings.push({ box, ...highlight });
-  }
   const effects = $("#effects");
   while (effects.children.length > rings.length)
     effects.lastElementChild!.remove();
@@ -561,7 +580,6 @@ function drawEffects(): void {
       borderColor: color,
     });
   });
-  const box = selection ? boxOf(selectionTarget()) : undefined;
   setHidden(
     $("#selection-box"),
     !selection || !box || !$("#panel-edit").hidden,
@@ -578,22 +596,7 @@ function drawEffects(): void {
       `${selection!.tag} · ${selection!.elementRef ?? `node ${selection!.nodeId}`}`,
     );
   }
-  elementEditor?.draw(!$("#panel-edit").hidden && !playing && !renderMode);
-  placeToolbar(
-    (!!box || !!elementEditor?.rect()) &&
-      !playing &&
-      !renderMode &&
-      !elementEditor?.editingText,
-  );
-  const hoverBox = hoverRef ? boxOf({ ref: hoverRef }) : undefined;
-  setHidden($("#hover-box"), !hoverBox);
-  if (hoverBox)
-    Object.assign($("#hover-box").style, {
-      left: `${hoverBox.x}px`,
-      top: `${hoverBox.y}px`,
-      width: `${hoverBox.width}px`,
-      height: `${hoverBox.height}px`,
-    });
+  placeHover(hoverBox);
   // Keep pin nodes between preview frames so pointer/keyboard clicks can finish.
   const pinContainer = $("#comment-pins");
   const previousPins = new Map(
@@ -601,40 +604,57 @@ function drawEffects(): void {
       (pin) => [pin.dataset.threadId!, pin] as const,
     ),
   );
-  if (!renderMode)
-    for (const [i, thread] of bundle.comments.threads.entries()) {
-      if (
-        thread.status !== "open" ||
-        !thread.elementRef ||
-        Math.abs(position - thread.timeMs) > 3000
-      )
-        continue;
-      const target = boxOf({ ref: thread.elementRef });
-      if (!target) continue;
-      let pin = previousPins.get(thread.id);
-      previousPins.delete(thread.id);
-      if (!pin) {
-        pin = document.createElement("button");
-        pin.dataset.threadId = thread.id;
-        pin.onclick = () => workbench.openThread(thread.id);
-        pinContainer.append(pin);
-      }
-      pin.className = `comment-pin${thread.elementRef === selection?.elementRef ? " active" : ""}`;
-      pin.textContent = String(i + 1);
-      pin.title = thread.body;
-      pin.setAttribute(
-        "aria-label",
-        `Note ${i + 1}: ${thread.body.slice(0, 100)}`,
-      );
-      // Pins sit at the element's top-right; near the top edge they hang below.
-      const below = (cameraY + target.y * cameraScale) * baseScale < 28;
-      pin.classList.toggle("below", below);
-      Object.assign(pin.style, {
-        left: `${target.x + target.width + 2}px`,
-        top: `${below ? target.y + target.height - 6 : target.y + 6}px`,
-      });
+  for (const { thread, i, target } of pins) {
+    let pin = previousPins.get(thread.id);
+    previousPins.delete(thread.id);
+    if (!pin) {
+      pin = document.createElement("button");
+      pin.dataset.threadId = thread.id;
+      pin.onclick = () => workbench.openThread(thread.id);
+      pinContainer.append(pin);
     }
+    pin.className = `comment-pin${thread.elementRef === selection?.elementRef ? " active" : ""}`;
+    pin.textContent = String(i + 1);
+    pin.title = thread.body;
+    pin.setAttribute(
+      "aria-label",
+      `Note ${i + 1}: ${thread.body.slice(0, 100)}`,
+    );
+    // Pins sit at the element's top-right; near the top edge they hang below.
+    const below = (cameraY + target.y * cameraScale) * baseScale < 28;
+    pin.classList.toggle("below", below);
+    Object.assign(pin.style, {
+      left: `${target.x + target.width + 2}px`,
+      top: `${below ? target.y + target.height - 6 : target.y + 6}px`,
+    });
+  }
   for (const pin of previousPins.values()) pin.remove();
+  // The editor and the toolbar measure what was just written.
+  elementEditor?.draw(!$("#panel-edit").hidden && !playing && !renderMode);
+  placeToolbar(
+    (!!box || !!elementEditor?.rect()) &&
+      !playing &&
+      !renderMode &&
+      !elementEditor?.editingText,
+  );
+}
+function placeHover(box: DOMRect | undefined): void {
+  setHidden($("#hover-box"), !box);
+  if (box)
+    Object.assign($("#hover-box").style, {
+      left: `${box.x}px`,
+      top: `${box.y}px`,
+      width: `${box.width}px`,
+      height: `${box.height}px`,
+    });
+}
+/** The pointer moved over a paused frame: move the hover box (and the
+ * editor's pointer marks), nothing else. */
+function drawHover(): void {
+  placeHover(hoverRef ? boxOf({ ref: hoverRef }) : undefined);
+  if (elementEditor?.pointer || !$("#panel-edit").hidden)
+    elementEditor?.draw(!$("#panel-edit").hidden && !playing && !renderMode);
+  drawnKeys.hover = hoverKey();
 }
 /** What drawEffects last wrote, to skip identical writes. */
 const drawn = { camera: "", unscale: "" };
@@ -700,37 +720,60 @@ function restoreAnimations(): void {
   animated.clear();
 }
 function applyAnimations(): void {
+  // Read every computed style first, then write.
+  const work: {
+    node: HTMLElement;
+    sampled: NonNullable<ReturnType<typeof sampleAnimation>>;
+    transform: string;
+    opacity: number;
+  }[] = [];
   for (const effect of bundle.edits.animations ?? []) {
     const sampled = sampleAnimation(effect, position);
     if (!sampled) continue;
     for (const element of findTargets(effect.target)) {
       const node = element as HTMLElement;
-      let original = animated.get(node);
-      if (!original) {
-        original = {
-          transform: node.style.transform,
-          opacity: node.style.opacity,
-          transformPriority: node.style.getPropertyPriority("transform"),
-          opacityPriority: node.style.getPropertyPriority("opacity"),
-          lastTransform: "",
-          lastOpacity: "",
-        };
-        animated.set(node, original);
-      }
       const computed = node.ownerDocument.defaultView!.getComputedStyle(node);
-      node.style.setProperty(
-        "transform",
-        `${computed.transform === "none" ? "" : computed.transform} translate(${sampled.x}px, ${sampled.y}px) scale(${sampled.scale}) rotate(${sampled.rotate}deg)`,
-        "important",
-      );
-      node.style.setProperty(
-        "opacity",
-        String(sampled.opacity * Number(computed.opacity)),
-        "important",
-      );
-      original.lastTransform = node.style.transform;
-      original.lastOpacity = node.style.opacity;
+      work.push({
+        node,
+        sampled,
+        transform: computed.transform,
+        opacity: Number(computed.opacity),
+      });
     }
+  }
+  const written = new Set<HTMLElement>();
+  for (let { node, sampled, transform, opacity } of work) {
+    // Two effects on one node compose: the second reads the first's write.
+    if (written.has(node)) {
+      const computed = node.ownerDocument.defaultView!.getComputedStyle(node);
+      transform = computed.transform;
+      opacity = Number(computed.opacity);
+    }
+    written.add(node);
+    let original = animated.get(node);
+    if (!original) {
+      original = {
+        transform: node.style.transform,
+        opacity: node.style.opacity,
+        transformPriority: node.style.getPropertyPriority("transform"),
+        opacityPriority: node.style.getPropertyPriority("opacity"),
+        lastTransform: "",
+        lastOpacity: "",
+      };
+      animated.set(node, original);
+    }
+    node.style.setProperty(
+      "transform",
+      `${transform === "none" ? "" : transform} translate(${sampled.x}px, ${sampled.y}px) scale(${sampled.scale}) rotate(${sampled.rotate}deg)`,
+      "important",
+    );
+    node.style.setProperty(
+      "opacity",
+      String(sampled.opacity * opacity),
+      "important",
+    );
+    original.lastTransform = node.style.transform;
+    original.lastOpacity = node.style.opacity;
   }
 }
 function syncAudio(): void {
@@ -747,39 +790,62 @@ function syncAudio(): void {
 /** Paused frames are redrawn only when something they show has changed. */
 let frameUpdates = 0,
   frameDirty = true,
-  frameKeyDrawn = "",
   frameDrawnAt = 0;
+/** What the last frame showed, by what each part depends on. */
+const drawnKeys = { full: "", effects: "", hover: "", overrides: "" };
 const markDirty = () => {
   frameDirty = true;
+  wake();
 };
 /** Re-measure at least this often even when nothing reported a change:
  * images and fonts finishing inside the recording move boxes silently. */
 const HEARTBEAT_MS = 250;
 /** Longest step playback takes in one frame; a stalled tab must not jump. */
 const MAX_FRAME_MS = 250;
-function frameKey(): string {
-  const stage = $("#stage"),
-    pointer = elementEditor?.pointer,
-    agent = feedback.current();
+/** Frames come at most at 60 Hz; faster displays skip every other frame. */
+const MIN_FRAME_MS = 1000 / 60 - 2;
+/** Time, files and layout: a change needs a full update(). */
+function fullKey(): string {
+  const stage = $("#stage");
   return [
     position,
     bundle.revision,
-    selection?.elementRef ?? selection?.nodeId ?? "",
-    hoverRef ?? "",
     sceneLayer.generation,
     stage.clientWidth,
     stage.clientHeight,
     baseScale,
+    transcript.dirtyCount + (elementEditor?.dirtyCount ?? 0),
+  ].join("|");
+}
+/** Selection and agent marks (and the timeline's agent stripes). */
+function effectsKey(): string {
+  const agent = feedback.current();
+  return [
+    selection?.elementRef ?? selection?.nodeId ?? "",
     agent?.id ?? "",
     agent?.status ?? "",
-    pointer ? `${pointer.x},${pointer.y}` : "",
-    transcript.dirtyCount + (elementEditor?.dirtyCount ?? 0),
     elementEditor?.selected?.target.ref ??
       elementEditor?.selected?.target.selector ??
       "",
   ].join("|");
 }
-function update(): void {
+/** The pointer: a change moves the hover box only. */
+function hoverKey(): string {
+  const pointer = elementEditor?.pointer;
+  return `${hoverRef ?? ""}|${pointer ? `${pointer.x},${pointer.y}` : ""}`;
+}
+/** What the DOM overrides depend on, besides replay events (which re-apply
+ * them in the event-cast handler). */
+function overridesKey(): string {
+  return `${bundle.revision}|${sceneLayer.generation}|${elementEditor?.dirtyCount ?? 0}`;
+}
+/**
+ * Explicit callers (seek, edits, reload) get the full update. The frame loop
+ * passes `overrides: false` while playing when nothing the overrides depend
+ * on changed: rrweb's event-cast handler already re-applies them after each
+ * replayed event.
+ */
+function update(options: { overrides?: boolean } = {}): void {
   if (!bundle || !replayer) return;
   const source = replaySource();
   if (playing) {
@@ -804,9 +870,20 @@ function update(): void {
   }
   lastSource = source;
   restoreAnimations();
-  elementOverrides.restore();
+  let refresh =
+    options.overrides !== false ||
+    overridesKey() !== drawnKeys.overrides ||
+    sceneTargets();
+  if (refresh) elementOverrides.restore();
   sceneLayer.update(position, totalDuration(bundle.edits));
-  applyOverrides();
+  if (!refresh && overridesKey() !== drawnKeys.overrides) {
+    refresh = true;
+    elementOverrides.restore();
+  }
+  if (refresh) {
+    applyOverrides();
+    drawnKeys.overrides = overridesKey();
+  }
   applyAnimations();
   const backdrop = sceneLayer.backdrop(bundle, position);
   const filter =
@@ -837,8 +914,17 @@ function update(): void {
   }
   frameUpdates++;
   frameDirty = false;
-  frameKeyDrawn = frameKey();
+  drawnKeys.full = fullKey();
+  drawnKeys.effects = effectsKey();
+  drawnKeys.hover = hoverKey();
   frameDrawnAt = performance.now();
+}
+/** Scene pages run their own scripts and can re-render the targets of
+ * scene edits at any time, so those overrides are re-applied every frame. */
+function sceneTargets(): boolean {
+  return (elementEditor?.edits() ?? bundle.edits.elements).some(
+    (edit) => edit.target.scene,
+  );
 }
 /** Which scene an agent call is changing, for the timeline stripes. */
 function sceneOfActivity(activity: AgentActivity): string | undefined {
@@ -943,6 +1029,10 @@ async function runReload(): Promise<void> {
         showWarning: false,
         mouseTail: false,
         pauseAnimation: true,
+        // A virtual DOM makes backward seeks about 2x faster, but rrweb then
+        // replays focus and hover against nodes that the final diff replaces:
+        // seeked frames lose focus rings and hover states that a recording
+        // shows. Keep it off.
         useVirtualDom: false,
       });
       replayer.on("event-cast", () => {
@@ -1028,10 +1118,7 @@ async function runReload(): Promise<void> {
     };
     timeline ??= new Timeline({
       bundle: () => bundle,
-      seek: (ms) => {
-        setPlaying(false);
-        seek(ms);
-      },
+      seek: scrub,
       openThread: (id) => workbench.openThread(id),
       frameUrl: (ms) =>
         renderMode
@@ -1145,10 +1232,12 @@ function selectRef(ref: string, time?: number): void {
     report(new Error("This element is not part of this capture."));
     return;
   }
-  setPlaying(false);
-  if (time !== undefined) seek(time);
-  else if (!findTargets({ ref }).length)
-    seek(sourceToOutput(bundle.edits, record.firstSeenMs + 2) ?? 0);
+  if (time !== undefined) pauseAndSeek(time);
+  else {
+    setPlaying(false);
+    if (!findTargets({ ref }).length)
+      seek(sourceToOutput(bundle.edits, record.firstSeenMs + 2) ?? 0);
+  }
   const node = findTargets({ ref })[0];
   selection = {
     nodeId: record.nodeId,
@@ -1334,13 +1423,13 @@ function showElement(ref: string): void {
   const record = recordOf(ref);
   if (!record) return;
   if (!findTargets({ ref }).length) {
-    setPlaying(false);
-    seek(sourceToOutput(bundle.edits, record.firstSeenMs + 2) ?? position);
+    pauseAndSeek(sourceToOutput(bundle.edits, record.firstSeenMs + 2) ?? position);
   }
   hoverRef = ref;
   drawEffects();
   setTimeout(() => {
     if (hoverRef === ref) hoverRef = undefined;
+    wake();
   }, 1600);
 }
 // Selection toolbar ---------------------------------------------------------
@@ -1634,30 +1723,91 @@ document.addEventListener("keydown", (event) => {
 new ResizeObserver(resize).observe($("#stage"));
 // The side panel's width is the person's (headless renders keep the default).
 if (!renderMode) resizablePanel($(".inspector"));
+/**
+ * The frame loop. It runs every frame while playing, reloading or rendering;
+ * a paused, clean editor sleeps and wakes on input, on markDirty() and on
+ * the heartbeat.
+ */
+let frameRequested = false,
+  lastFrameAt = -Infinity,
+  heartbeat: ReturnType<typeof setTimeout> | undefined;
+function wake(): void {
+  if (frameRequested) return;
+  frameRequested = true;
+  requestAnimationFrame(tick);
+}
 function tick(now: number): void {
+  frameRequested = false;
+  if (now - lastFrameAt < MIN_FRAME_MS) {
+    wake();
+    return;
+  }
+  lastFrameAt = now;
   if (playing && bundle && !reloading && !narrationPlayback.buffering) {
-    position += Math.min(now - lastTick, MAX_FRAME_MS);
+    position += Math.max(0, Math.min(now - lastTick, MAX_FRAME_MS));
     if (position >= totalDuration(bundle.edits)) {
       position = totalDuration(bundle.edits);
       setPlaying(false);
     }
   }
   lastTick = now;
-  if (
-    !reloading &&
-    bundle &&
-    (playing ||
+  if (!reloading && bundle) {
+    if (
+      playing ||
       frameDirty ||
-      now - frameDrawnAt > HEARTBEAT_MS ||
-      frameKey() !== frameKeyDrawn)
-  )
-    update();
-  requestAnimationFrame(tick);
+      fullKey() !== drawnKeys.full ||
+      effectsKey() !== drawnKeys.effects
+    )
+      update({ overrides: false });
+    else if (now - frameDrawnAt > HEARTBEAT_MS) redraw();
+    else if (hoverKey() !== drawnKeys.hover) drawHover();
+  }
+  clearTimeout(heartbeat);
+  if (playing || reloading || renderMode || !bundle) wake();
+  else heartbeat = setTimeout(wake, HEARTBEAT_MS);
 }
+/** Marks only: the frame itself did not change. */
+function redraw(): void {
+  drawEffects();
+  drawnKeys.effects = effectsKey();
+  drawnKeys.hover = hoverKey();
+  frameDrawnAt = performance.now();
+}
+for (const type of [
+  "pointermove",
+  "pointerdown",
+  "pointerup",
+  "pointerleave",
+  "keydown",
+  "keyup",
+  "wheel",
+  "input",
+  "focusin",
+])
+  document.addEventListener(type, wake, { capture: true, passive: true });
 let lastExportState = "";
+/** The last status body this page applied, by its ETag: an unchanged
+ * state comes back as a bodiless 304 and nothing is redrawn. */
+let statusTag = "";
+let pollTimer: ReturnType<typeof setTimeout> | undefined,
+  pollRunning = false;
+/** A hidden page polls only to stay present for agents (the service drops
+ * a viewer after 90 s); showing it polls at once. */
+const POLL_MS = 800,
+  HIDDEN_POLL_MS = 15_000;
 async function poll(): Promise<void> {
+  clearTimeout(pollTimer);
+  if (pollRunning) return;
+  pollRunning = true;
   try {
-    const status = await api<{
+    const response = await fetch(
+      projectUrl(`/api/status?focused=${document.hasFocus() ? 1 : 0}`),
+      statusTag ? { headers: { "If-None-Match": statusTag } } : undefined,
+    );
+    if (response.status === 304) return;
+    if (!response.ok) throw new Error(`Status ${response.status}`);
+    const tag = response.headers.get("ETag") ?? "";
+    const status = (await response.json()) as {
       revision?: string;
       error?: string;
       narrating: boolean;
@@ -1673,7 +1823,7 @@ async function poll(): Promise<void> {
         error?: string;
         directory?: string;
       };
-    }>(`/api/status?focused=${document.hasFocus() ? 1 : 0}`);
+    };
     fileError = status.error
       ? `Project files need attention; showing the last valid version. ${status.error}`
       : "";
@@ -1734,13 +1884,25 @@ async function poll(): Promise<void> {
     }
     initialLink = false;
     showErrors();
+    // Only a fully applied state may be skipped next time.
+    statusTag = tag;
   } catch (error) {
+    statusTag = "";
     fileError = `Preview disconnected: ${error instanceof Error ? error.message : String(error)}`;
     renderSaveState("Disconnected");
     showErrors();
+  } finally {
+    pollRunning = false;
+    pollTimer = setTimeout(
+      () => void poll(),
+      document.hidden ? HIDDEN_POLL_MS : POLL_MS,
+    );
   }
-  setTimeout(() => void poll(), 800);
 }
+if (!renderMode)
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && bundle) void poll();
+  });
 let initialLink = !!location.hash;
 function applyLocation(): void {
   if (!location.hash || !workspaceData) return;
@@ -1909,7 +2071,7 @@ void reload()
       ) ?? "";
     if (!renderMode) chooseTool("select");
     applyLocation();
-    requestAnimationFrame(tick);
+    wake();
     if (!renderMode) {
       void poll();
       void publishPreview();

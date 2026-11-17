@@ -20,7 +20,7 @@ import { loadAuthoredModule } from "../../packages/cli/src/utils/load-authored-m
 import { captureReplay } from "./capture.js";
 import { createDemo } from "./demo.js";
 import { regenerateNarration } from "./narration.js";
-import { atomicWrite, ensureRealFolders, loadBundle } from "./storage.js";
+import { ensureRealFolders, loadBundle } from "./storage.js";
 import { totalDuration, audioIsCurrent } from "./model.js";
 import type { DemoHunterTour } from "@demohunter/sdk";
 import { runReplayMcp } from "./mcp.js";
@@ -28,12 +28,17 @@ import { restrictFolder } from "./trust.js";
 import { listWorktrees } from "./git.js";
 import { ReplayWorkspace } from "./workspace.js";
 import { createInvoiceDemo } from "./invoice-demo.js";
+import { createFilm, installSceneKit } from "./film.js";
+import { writeSheets } from "./sheet.js";
 
 const help = `DemoHunter Studio — local-first demo workspace
 
 bun run studio [workspace-directory] [--port 4310] [--host 127.0.0.1] [--restricted]
     Open Studio with every demo in the workspace (default: current directory).
 
+bun run studio new <new-project-dir> [--title "<title>"] [--size 1920x1080]
+    A film with no recording: HTML scene clips only (any WxH, for example
+    1080x1920 or 1080x1080). Adds the scene kit, scenes/opening.html and PLAN.md.
 bun run studio capture <tour.ts> [--project <new-dir>]
 bun run studio demo [--sample invoices|fractions] [--project <new-dir>]
 bun run studio narrate <project-dir> [--fit] [--cache-dir <dir>]
@@ -45,6 +50,11 @@ bun run studio kit <project-dir> [--mood calm|bright|cinematic] [--seed 1]
 bun run studio lift <project-dir> --at <output-ms> (--ref <element-ref> | --selector <css>) --name <name>
     Copy a recorded element, as it looks then, into scenes/lifts/<name>.html
     so a scene can pick it up from the page and animate it.
+bun run studio sheet <project-dir> [--at <ms,ms,…> | --every <ms> | --cuts] [--phone]
+    [--output <new-dir>]   Contact sheets (JPEG) of the edited film: by default
+    a tile a few frames into and in the middle of every clip and overlay.
+    --cuts: a strip of frames across every seam. --phone: frames 360 px wide.
+    Prints JSON with the sheet files and each tile's time, clip and position.
 bun run studio export <project-dir> --output <new-directory> [--fps 24] [--strict-audio]
     [--lufs -16] [--crf 18] [--workers 4]   (YouTube: --fps 30 --lufs -14 --crf 16)
 bun run studio list [workspace-directory]    JSON library discovery for agents/CI
@@ -59,6 +69,8 @@ uses the project's TTS settings, environment credentials, and existing cache.
 Saved demos can be exported without the source application.`;
 
 const commands = new Set([
+  "new",
+  "sheet",
   "capture",
   "pack",
   "demo",
@@ -98,7 +110,7 @@ export async function main(args: string[]): Promise<void> {
   const flags = new Map<string, string>();
   for (let i = 0; i < rest.length; i++) {
     const value = rest[i]!;
-    if (["--fit", "--strict-audio", "--restricted"].includes(value)) {
+    if (["--fit", "--strict-audio", "--restricted", "--cuts", "--phone"].includes(value)) {
       flags.set(value.slice(2), "true");
       continue;
     }
@@ -121,6 +133,9 @@ export async function main(args: string[]): Promise<void> {
           "--ref",
           "--selector",
           "--name",
+          "--title",
+          "--size",
+          "--every",
         ].includes(value) ||
         !rest[i + 1] ||
         rest[i + 1]!.startsWith("--")
@@ -224,6 +239,41 @@ export async function main(args: string[]): Promise<void> {
     );
     return;
   }
+  if (command === "new") {
+    console.log(
+      JSON.stringify(
+        await createFilm(target, {
+          title: flags.get("title"),
+          size: flags.get("size"),
+        }),
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+  if (command === "sheet") {
+    const number = (value: string) => {
+      const n = Number(value.trim());
+      if (!value.trim() || !Number.isFinite(n))
+        throw new Error(`Not a number of milliseconds: ${value}`);
+      return n;
+    };
+    console.log(
+      JSON.stringify(
+        await writeSheets(target, {
+          at: flags.has("at") ? flags.get("at")!.split(",").map(number) : undefined,
+          every: flags.has("every") ? number(flags.get("every")!) : undefined,
+          cuts: flags.has("cuts"),
+          phone: flags.has("phone"),
+          output: flags.get("output"),
+        }),
+        null,
+        2,
+      ),
+    );
+    return;
+  }
   if (command === "capture") {
     const loadedConfig = await loadConfig(process.cwd());
     const loaded = await loadAuthoredModule(target);
@@ -306,18 +356,7 @@ export async function main(args: string[]): Promise<void> {
       throw new Error("Choose --mood calm, bright or cinematic.");
     const seed = Number(flags.get("seed") ?? 1);
     // The whole kit: motion.js (timing) and show.js/show.css (proven moves).
-    // No symlinked folder on the way, and atomic writes replace a link
-    // committed at a kit name instead of writing through it.
-    const kitTarget = await ensureRealFolders(target, "scenes/kit");
-    const kitDir = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "scene-kit",
-    );
-    for (const name of await readdir(kitDir))
-      await atomicWrite(
-        path.join(kitTarget, name),
-        await readFile(path.join(kitDir, name)),
-      );
+    await installSceneKit(target);
 
     // Music resolves on the tonic at the end of the edited timeline.
     const total = Math.round(totalDuration(bundle.edits));

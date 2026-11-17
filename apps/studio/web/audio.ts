@@ -1,4 +1,5 @@
-import { audioIsCurrent, narrationStart, type ReplayBundle } from "../model.js";
+import { audioIsCurrent, narrationStart } from "../timeline-math.js";
+import type { ReplayBundle } from "../model.js";
 import { projectUrl } from "./transport.js";
 
 type Track = {

@@ -1,4 +1,4 @@
-import { elementKey, type ElementEdit } from "../element-edit.js";
+import { elementKey, type ElementEdit } from "../element-edit-core.js";
 type Styled = HTMLElement | SVGElement;
 type StyleUndo = {
   node: Styled;

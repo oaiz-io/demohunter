@@ -1,10 +1,5 @@
-import {
-  audioIsCurrent,
-  clipDuration,
-  narrationStart,
-  totalDuration,
-  type ReplayBundle,
-} from "../model.js";
+import { audioIsCurrent, clipDuration, narrationStart, totalDuration } from "../timeline-math.js";
+import type { ReplayBundle } from "../model.js";
 import type { AgentActivity } from "../contract.js";
 
 export type AgentMark = { timeMs: number; title: string };
@@ -59,7 +54,14 @@ export class Timeline {
    * stays on screen while a fresher one loads. */
   private thumbs = new Map<
     string,
-    { el: HTMLElement; at: number; visual: string; token: number }
+    {
+      el: HTMLElement;
+      at: number;
+      visual: string;
+      token: number;
+      /** The image still loading for this scene. */
+      image?: HTMLImageElement;
+    }
   >();
   /** Frames already fetched, by clip, time and visual state. */
   private thumbUrls = new Map<string, string>();
@@ -342,6 +344,9 @@ export class Timeline {
       this.thumbs.set(clipId, state);
     }
     if (state.at === at && state.visual === visual) return state.el;
+    // A scene that already shows a thumbnail waits until edits stop (an
+    // element drag saves several revisions); the first one loads at once.
+    const update = !!state.visual;
     state.at = at;
     state.visual = visual;
     const cacheKey = `${clipId}:${at}:${visual}`;
@@ -351,12 +356,21 @@ export class Timeline {
       state.el.style.backgroundImage = `url("${cached}")`;
       return state.el;
     }
+    // A newer frame replaces one that is still loading.
+    if (state.image) state.image.src = "";
+    state.image = undefined;
     const url = this.hooks.frameUrl(at);
-    if (url) this.loadThumb(state, token, cacheKey, url);
+    if (url) {
+      if (!update) this.loadThumb(state, token, cacheKey, url);
+      else
+        setTimeout(() => {
+          if (state!.token === token) this.loadThumb(state!, token, cacheKey, url);
+        }, THUMB_SETTLE_MS);
+    }
     return state.el;
   }
   private loadThumb(
-    state: { el: HTMLElement; token: number; visual?: string },
+    state: { el: HTMLElement; token: number; visual?: string; image?: HTMLImageElement },
     token: number,
     cacheKey: string,
     url: string,
@@ -365,9 +379,11 @@ export class Timeline {
       // Superseded by a newer frame for this scene, or the scene is gone.
       if (state.token !== token) return;
       const image = new Image();
+      state.image = image;
       image.src = url;
       try {
         await image.decode();
+        if (state.image === image) state.image = undefined;
         if (this.thumbUrls.size > 200) this.thumbUrls.clear();
         this.thumbUrls.set(cacheKey, url);
         if (state.token === token)
@@ -426,6 +442,8 @@ export class Timeline {
     }
   }
 }
+/** Quiet time after the last edit before changed thumbnails load again. */
+const THUMB_SETTLE_MS = 1200;
 /** What a rendered frame depends on; comments, narration text and audio do not.
  * Scene pages count only when the project has scenes or overlays. */
 function visualKey(bundle: ReplayBundle): string {

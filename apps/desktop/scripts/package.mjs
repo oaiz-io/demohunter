@@ -51,7 +51,7 @@ function copyTree(from, to, base = from) {
 // in the checkout never end up in a download.
 // The agent guide (MCP get_guide) and the skills Studio installs in a
 // repository for a new demo ship with Studio.
-const tracked = execFileSync("git", ["ls-files", "-z", "--", "apps/studio", "packages", ".agents/skills/demohunter-replay", ".agents/skills/demohunter-commercial"], { cwd: repo })
+const tracked = execFileSync("git", ["ls-files", "-z", "--", "apps/studio", "packages", ".agents/skills/demohunter-replay", ".agents/skills/demohunter-film"], { cwd: repo })
   .toString()
   .split("\0")
   .filter((rel) => rel && !skip(rel) && fs.existsSync(path.join(repo, rel)));

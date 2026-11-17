@@ -446,9 +446,9 @@ test("Create new demo: the agent is briefed, the tour and recording show as they
     await page.waitForSelector('.agent-msg.agent:has-text("Skills: yes")');
     expect(await page.textContent(".agent-notice")).toContain("Added DemoHunter's skills to this repository");
     for (const home of [".claude/skills", ".agents/skills"])
-      for (const skill of ["demohunter", "demohunter-commercial", "demohunter-replay"])
+      for (const skill of ["demohunter", "demohunter-film", "demohunter-replay"])
         expect(await readFile(path.join(root, home, skill, "SKILL.md"), "utf8")).toContain("Installed by DemoHunter Studio");
-    expect(existsSync(path.join(root, ".claude/skills/demohunter-commercial/references/storyboard.md"))).toBe(true);
+    expect(existsSync(path.join(root, ".claude/skills/demohunter-film/references/story.md"))).toBe(true);
     // The storyboard grows as the file is written.
     await page.waitForSelector('.nd-item.narrate:has-text("This is where a new account begins.")');
     await page.waitForSelector('.nd-item.step:has-text("Fill in the form")');

@@ -30,6 +30,8 @@ import { loadBundle, mutationAuthor, safeFile } from "./storage.js";
 import { regenerateNarration } from "./narration.js";
 import { renderReplayFrame } from "./render.js";
 import { liftElement } from "./lift.js";
+import { NO_RECORDING } from "./film.js";
+import { renderSheets } from "./sheet.js";
 import { parseReference } from "./links.js";
 import { elementPatchSchema } from "./element-edit.js";
 
@@ -78,6 +80,42 @@ const describeTarget = (t: ProjectTarget) => ({
   source: t.source,
   ...(t.url ? { url: t.url } : {}),
 });
+
+/** A screenshot from the running Studio service at `url` (from the session
+ * file), or undefined to render locally. Only a loopback Studio URL is used,
+ * and only an answer for the revision on disk now is accepted, so a session
+ * file in a repository cannot make the agent see another project. */
+async function serviceScreenshot(
+  url: string | undefined,
+  dir: string,
+  outputMs: number,
+  expectedRevision?: string,
+): Promise<{ bytes: Buffer; revision: string } | undefined> {
+  if (!url) return undefined;
+  try {
+    const base = new URL(url);
+    if (
+      base.protocol !== "http:" ||
+      !["127.0.0.1", "localhost", "[::1]"].includes(base.hostname) ||
+      !/^\/(projects\/[a-f0-9]{16}\/)?$/.test(base.pathname)
+    )
+      return undefined;
+    const query = new URLSearchParams({ t: String(outputMs) });
+    if (expectedRevision) query.set("expectedRevision", expectedRevision);
+    const res = await fetch(new URL(`api/screenshot?${query}`, base), {
+      signal: AbortSignal.timeout(45_000),
+      redirect: "error",
+    });
+    if (!res.ok || res.headers.get("content-type") !== "image/png") return undefined;
+    const bytes = Buffer.from(await res.arrayBuffer());
+    const revision = res.headers.get("x-demohunter-revision");
+    if (!revision || bytes.subarray(1, 4).toString() !== "PNG") return undefined;
+    if (revision !== (await loadBundle(dir)).revision) return undefined;
+    return { bytes, revision };
+  } catch {
+    return undefined;
+  }
+}
 
 export function createReplayMcp(
   scope: ProjectTargets | ReplayWorkspace,
@@ -293,6 +331,8 @@ export function createReplayMcp(
     "Read live computed styles for the selected element when its browser preview is connected. Use set_selection first for another element, then wait for the preview to acknowledge it.",
     z.object({ elementRef: ref }),
     async ({ elementRef }, t) => {
+      if (!t.workspace.recording)
+        return { available: false, instruction: NO_RECORDING };
       t.workspace.element(elementRef);
       const state = await t.workspace.previewState();
       return state?.elementRef === elementRef
@@ -319,11 +359,23 @@ export function createReplayMcp(
     }),
     async ({ outputMs, expectedRevision, elementRef }, t) => {
       if (elementRef) t.workspace.element(elementRef);
-      const result = await renderReplayFrame(t.dir, {
-        outputMs,
-        expectedRevision,
-        elementRef,
-      });
+      // The Studio service showing this demo has a warm renderer (about
+      // 0.1–0.2 s instead of starting Chromium for 1–2 s).
+      const live =
+        t.url ??
+        (await (await targets)
+          .studio()
+          .then(
+            (s) => (s.status === "open" && s.dir === t.dir ? s.session.url : undefined),
+            () => undefined,
+          ));
+      const result =
+        (await serviceScreenshot(live, t.dir, outputMs, expectedRevision)) ??
+        (await renderReplayFrame(t.dir, {
+          outputMs,
+          expectedRevision,
+          elementRef,
+        }));
       return [
         {
           type: "image" as const,
@@ -337,6 +389,40 @@ export function createReplayMcp(
             revision: result.revision,
             outputMs,
             source: "edited replay",
+          }),
+        },
+      ];
+    },
+    { content: true },
+  );
+  tool(
+    "get_film_sheet",
+    "Render contact sheets of the edited film as JPEG images, plus the tile list (time, clip, overlays, sheet/row/column). Default: a tile a few frames into and in the middle of every clip and overlay. `at`: tiles at these output ms. `every`: a tile every N ms. `cuts`: a strip of frames (-200, -100, -33, +33, +100, +200 ms) across every clip boundary and overlay start/end, one row per seam. `phone`: each frame 360 px wide, shown 1:1. Uses the same renderer as export; does not move the user's playhead or write files.",
+    z.object({
+      at: z.array(time).min(1).max(600).optional(),
+      every: z.number().finite().min(1).optional(),
+      cuts: z.boolean().default(false),
+      phone: z.boolean().default(false),
+      expectedRevision: revision.optional(),
+    }),
+    async ({ at, every, cuts, phone, expectedRevision }, t) => {
+      const result = await renderSheets(t.dir, { at, every, cuts, phone, expectedRevision });
+      return [
+        ...result.sheets.map((bytes) => ({
+          type: "image" as const,
+          mimeType: "image/jpeg",
+          data: bytes.toString("base64"),
+        })),
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            project: t.title,
+            revision: result.revision,
+            durationMs: result.durationMs,
+            size: result.size,
+            tile: result.tile,
+            sheets: result.sheets.length,
+            tiles: result.tiles,
           }),
         },
       ];

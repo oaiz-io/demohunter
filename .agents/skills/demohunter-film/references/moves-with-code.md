@@ -355,7 +355,7 @@ Every word on screen comes from the beat sheet or the claims ledger. Use ≤ 3 s
 |---|---|---|
 | Focus-in | Headlines, promises | Per word: opacity 0→1, y 16→0 px, blur 14→0 px; 800 ms `E.out`; every 80–120 ms |
 | Mask rise | Wordmarks, product name | Chars in an `overflow: hidden` line; `translateY(110%)→0`; 700 ms `E.out`; every 40–60 ms |
-| Beat slam | Punchy hook words, one per beat | Binary opacity on, scale 1.6→1, blur 6→0; 160 ms `E.out4`; on beats (§ sound-design) |
+| Beat slam | Punchy hook words, one per beat | Binary opacity on, scale 1.6→1, blur 6→0; 160 ms `E.out4`; on beats (see `sound-procedure.md`) |
 | Waterfall entry | Title cards, segment openers | Binary opacity on; y offset anchor 60–80 / word 40–50 / light 30–48 px; 160–200 / 130–160 / 100–130 ms `E.out4`; next starts 1–2 frames before the previous settles |
 | Typewriter | Prompts, search boxes, commands | `typewriter(el, text, {at, cps: 14–20})`; caret blink `steps(1)`, finite iterations |
 | Keyword glow | The word the VO stresses | color → accent + `text-shadow 0 0 24px` accent at 40%; 250 ms attack, hold, 600 ms decay |

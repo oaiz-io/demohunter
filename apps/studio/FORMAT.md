@@ -24,6 +24,8 @@ revision. It writes and validates the bundle, commits the v2 manifest, then
 removes loose capture files and derived `sources/`. Older Studio readers reject
 v2 instead of treating it as a damaged v1 project. New captures use v2.
 
+A film made with `studio new` has no recording. Its capture is a normal v2 bundle of one blank page at the film's size, with an empty element index, so readers need no special case. Its timeline holds only scene clips. A `PLAN.md` beside the project files is the author's plan; Studio does not read it.
+
 A project without studio.json is a supported legacy capture. First open adds the manifest without changing its content revision or rewriting captured events. Manifest creation is atomic across cooperating processes. Unknown major versions and malformed files fail before content mutation. There is no automatic lossy downgrade. Compatible readers must preserve v1 field meanings; new semantics requiring new reader behavior require explicit version/capability negotiation. Recapturing creates a new capture/project, never overwrites edited data.
 
 DOM events currently use pinned rrweb 2.1.7. A different incompatible event encoding requires a format revision or explicit migration. This is a documented v1 contract for Studio, separate from DemoHunter's existing video-output manifest format.
@@ -46,7 +48,7 @@ Copied references use `demohunter://capture/<captureId>/element/<ref>?t=<output-
 
 Comment references use `demohunter://capture/<captureId>/comment/<threadId>?t=<output-ms>`. HTTP note links add `comment=<threadId>` to the fragment and open that exact thread, including resolved notes. `resolve_reference` also accepts a bare `comment-…` ID within its bound project. It returns the current thread, replies, status and output time, plus captured HTML when the note has an element. Comment identity takes priority over an optional element in the same link.
 
-Runtime files are not canonical: selection.json, preview-state.json, preview-command.json, lock files, .history/, .studio/ (activity), and exports/. Studio's per-worktree state in `.demohunter/studio/` (seen.json for new/updated badges, agents.json for in-app agent preferences) is git-ignored runtime state too. Runtime/derived writes do not alter content revision. They may be discarded when moving a project. Keep audio/ and bundled assets for portable playback.
+Runtime files are not canonical: selection.json, preview-state.json, preview-command.json, lock files, .history/, .studio/ (activity, contact sheets), and exports/. Studio's per-worktree state in `.demohunter/studio/` (seen.json for new/updated badges, agents.json for in-app agent preferences) is git-ignored runtime state too. Runtime/derived writes do not alter content revision. They may be discarded when moving a project. Keep audio/ and bundled assets for portable playback.
 
 ## Time and mutations
 
