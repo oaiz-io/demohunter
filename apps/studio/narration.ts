@@ -10,6 +10,13 @@ import {
   mutateProject,
 } from "./storage.js";
 import { clipDuration, narrationRequestKey } from "./model.js";
+import {
+  isSpeechProvider,
+  missingSpeechKeyMessage,
+  resolveSpeechKey,
+  speechKeyStore,
+  type SpeechKeyStore,
+} from "./speech-keys.js";
 
 export async function regenerateNarration(
   dir: string,
@@ -19,6 +26,8 @@ export async function regenerateNarration(
     segmentIds?: string[];
     resolve?: typeof resolveNarrationSegment;
     onProgress?: (message: string) => void;
+    /** Where saved speech keys live (default: the person's Keychain or key file). */
+    speechKeys?: SpeechKeyStore;
   } = {},
 ): Promise<{ generated: number; skipped: number }> {
   // A crashed run's lock (dead pid, or silent for 30 s) is taken over.
@@ -31,6 +40,13 @@ export async function regenerateNarration(
         throw new Error(`Unknown narration segment: ${id}`);
     let generated = 0,
       skipped = 0;
+    const provider = initial.project.tts.provider;
+    // Read only when a segment is not cached, so offline cache hits never
+    // touch the Keychain. The saved key wins; the environment is the fallback.
+    let keyLookup: Promise<string | undefined> | undefined;
+    const resolveApiKey = isSpeechProvider(provider)
+      ? () => (keyLookup ??= resolveSpeechKey(provider, options.speechKeys ?? speechKeyStore()))
+      : undefined;
     for (const segment of initial.narration.segments) {
       if (
         (options.segmentIds && !options.segmentIds.includes(segment.id)) ||
@@ -41,6 +57,7 @@ export async function regenerateNarration(
       options.onProgress?.(`Resolving ${segment.id}`);
       const requestKey = narrationRequestKey(initial.project, segment);
       const resolved = await (options.resolve ?? resolveNarrationSegment)({
+        resolveApiKey,
         event: {
           kind: "narrate",
           text: segment.text,
@@ -60,6 +77,12 @@ export async function regenerateNarration(
             tts: initial.project.tts,
           },
         },
+      }).catch((error: unknown) => {
+        // The provider names only its environment variable; Studio also has
+        // a saved key. (Never the key itself: there is none to show.)
+        if (isSpeechProvider(provider) && error instanceof Error && /_API_KEY is required/.test(error.message))
+          throw new Error(missingSpeechKeyMessage(provider), { cause: error });
+        throw error;
       });
       // Provider formats name the cache file (".mp3_44100_128"); keep the
       // container so players and the browser recognise it.

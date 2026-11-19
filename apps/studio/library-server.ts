@@ -14,6 +14,8 @@ import { contract } from "./contract.js";
 import { fontFile } from "./fonts.js";
 import { createHash, randomUUID } from "node:crypto";
 import { loadBundle } from "./storage.js";
+import { handleSpeechKeyRoute } from "./speech-key-routes.js";
+import { speechKeyStore, type SpeechKeyStore } from "./speech-keys.js";
 import {
   clearStudioSession,
   libraryProjectId,
@@ -30,6 +32,8 @@ export async function serveLibrary(
     host?: string;
     /** Opened without being trusted (desktop app): scene scripts stay off. */
     restricted?: boolean;
+    /** Saved speech API keys (default: the person's Keychain or key file). */
+    speechKeys?: SpeechKeyStore;
   } = {},
 ) {
   const library = await LocalLibrary.open(root, { restricted: options.restricted, live: true });
@@ -40,7 +44,7 @@ export async function serveLibrary(
   const agents = new AgentHub();
   const here = path.dirname(fileURLToPath(import.meta.url)),
     html = await readFile(path.join(here, "web/library.html")),
-    css = await readFile(path.join(here, "web/library.css"));
+    css = Buffer.concat([await readFile(path.join(here, "web/library.css")), await readFile(path.join(here, "web/speech-keys.css"))]);
   const bundle = async (entry: string) =>
     (
       await build({
@@ -205,6 +209,7 @@ export async function serveLibrary(
         return send(body, "application/json");
       }
       if (await handleAgentRoute(req, res, url, library, agents, options.restricted)) return;
+      if (await handleSpeechKeyRoute(req, res, url, options.speechKeys ?? speechKeyStore())) return;
       if (req.method === "POST" && url.pathname === "/api/seen") {
         // The library and the editor mark a demo as looked at.
         let body = "";
@@ -266,6 +271,7 @@ export async function serveLibrary(
             library: true,
             // Agents connect in the worktree that holds the demo.
             workspaceRoot: library.rootOf(dir) ?? library.root,
+            speechKeys: options.speechKeys,
           });
           handlers.set(id, handler);
           handler.catch(() => handlers.delete(id));

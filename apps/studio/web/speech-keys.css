@@ -1,0 +1,193 @@
+/* Speech keys dialog, shared by the library and the editor. Appended to both
+ * stylesheets, so it uses only their common tokens and copies the editor's
+ * dialog, button and field measurements (.dialog, .button.small, .field). */
+.speech-keys-dialog {
+  width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font: 400 13px / 20px var(--font-sans);
+  box-shadow:
+    0 0 0 1px var(--color-line),
+    0 24px 64px rgba(17, 17, 17, 0.12);
+}
+.speech-keys-dialog::backdrop {
+  background: rgba(17, 17, 17, 0.28);
+}
+.speech-keys-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 24px 14px;
+}
+.speech-keys-head h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.speech-keys-close {
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-graphite);
+  cursor: default;
+}
+.speech-keys-close:hover {
+  background: var(--color-desk);
+  color: var(--color-ink);
+}
+.speech-keys-close svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+}
+.speech-keys-lead {
+  margin: 0;
+  padding: 0 24px 4px;
+  color: var(--color-graphite);
+}
+.speech-keys-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px 24px 22px;
+}
+.speech-key {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+.speech-key-name {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.speech-key-name strong {
+  font-weight: 600;
+}
+.speech-key-state {
+  color: var(--color-graphite);
+  font: 11px / 16px var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.speech-key-state.none {
+  color: var(--color-correction);
+}
+.speech-key-actions {
+  display: flex;
+  gap: 8px;
+}
+.speech-key-actions input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 6px;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font: 12px / 1 var(--font-mono);
+}
+.speech-key-actions input:focus {
+  border-color: var(--color-ink);
+  outline: none;
+}
+.speech-key-actions button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 6px;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font: 500 13px / 1 var(--font-sans);
+  white-space: nowrap;
+  cursor: default;
+}
+.speech-key-actions button:hover:not(:disabled) {
+  border-color: var(--color-graphite);
+}
+.speech-key-actions button.speech-key-save {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: #fff;
+}
+.speech-key-actions button.speech-key-save:hover:not(:disabled) {
+  background: #2b2b2b;
+}
+.speech-key-actions button:disabled {
+  opacity: 0.5;
+}
+.speech-key-error {
+  margin: 0;
+  color: var(--color-correction);
+  font-size: 12px;
+}
+.speech-key-error:empty {
+  display: none;
+}
+.speech-keys-foot {
+  margin: 0;
+  padding: 14px 24px;
+  border-top: 1px solid var(--color-line);
+  border-radius: 0 0 16px 16px;
+  background: #fafaf9;
+  color: var(--color-graphite);
+  font: 11px / 16px var(--font-mono);
+  overflow-wrap: anywhere;
+}
+/* Library title bar: same as the library's "Open another project" button. */
+.speech-keys-open {
+  height: 26px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 6px;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font: 500 12px / 1 var(--font-sans);
+  white-space: nowrap;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+.speech-keys-open:hover {
+  border-color: var(--color-ink);
+}
+/* Editor Script panel: one line under the transcript summary. */
+.speech-key-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 20px 8px;
+  color: var(--color-graphite);
+  font-size: 12px;
+}
+.speech-key-line #speech-key-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.speech-key-line.none #speech-key-text {
+  color: var(--color-correction);
+}
+.speech-key-line button {
+  flex-shrink: 0;
+}

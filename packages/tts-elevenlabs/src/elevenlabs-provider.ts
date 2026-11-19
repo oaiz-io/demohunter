@@ -1,5 +1,6 @@
 import {
   createNarrationRequest,
+  type NarrationApiKeyResolver,
   type NarrationProvider,
   type NarrationRequest,
   type NarrationSynthesisResult,
@@ -17,6 +18,9 @@ export type ElevenLabsVoiceSettings = {
 
 export type ElevenLabsNarrationProviderOptions = {
   fetch?: typeof globalThis.fetch;
+  /** Gives the API key (for example a key saved in Studio). Without one, the
+   * key comes from ELEVENLABS_API_KEY. */
+  resolveApiKey?: NarrationApiKeyResolver;
 };
 
 export function createElevenLabsNarrationProvider(
@@ -36,7 +40,7 @@ export function createElevenLabsNarrationProvider(
 
       const normalizedRequest = createNarrationRequest(request);
 
-      const apiKey = process.env.ELEVENLABS_API_KEY;
+      const apiKey = (await options.resolveApiKey?.()) || process.env.ELEVENLABS_API_KEY;
 
       if (!apiKey) {
         throw new Error("ELEVENLABS_API_KEY is required to synthesize narration with ElevenLabs.");

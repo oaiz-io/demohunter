@@ -15,6 +15,28 @@ afterEach(() => {
 });
 
 describe("createElevenLabsNarrationProvider", () => {
+  test("prefers the resolved API key and falls back to ELEVENLABS_API_KEY", async () => {
+    process.env.ELEVENLABS_API_KEY = "environment-key";
+    const sent: string[] = [];
+    const fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(new Headers(init?.headers).get("xi-api-key") ?? "");
+      return new Response(new Uint8Array([1]), { status: 200 });
+    };
+    let lookups = 0;
+    await createElevenLabsNarrationProvider({
+      fetch,
+      resolveApiKey: async () => {
+        lookups += 1;
+        return "saved-key";
+      },
+    }).synthesize(createRequest({ text: "Explain billing" }));
+    await createElevenLabsNarrationProvider({ fetch, resolveApiKey: () => undefined }).synthesize(
+      createRequest({ text: "Explain billing" }),
+    );
+    assert.deepEqual(sent, ["saved-key", "environment-key"]);
+    assert.equal(lookups, 1);
+  });
+
   test("throws only when synthesis is attempted without ELEVENLABS_API_KEY", async () => {
     delete process.env.ELEVENLABS_API_KEY;
     let fetchCalls = 0;

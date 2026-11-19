@@ -13,6 +13,7 @@ import { loadBundle, readProjectFile, safeFile, writeJson } from "./storage.js";
 import { targetSchema, validateBundle } from "./model.js";
 import { elementPatchSchema } from "./element-edit.js";
 import { regenerateNarration } from "./narration.js";
+import type { SpeechKeyStore } from "./speech-keys.js";
 import { ReplayWorkspace, readOptional } from "./workspace.js";
 import { readActivity } from "./activity.js";
 import { contract } from "./contract.js";
@@ -95,7 +96,10 @@ function browserAssets() {
     return {
       js: compiled.outputFiles[0]!.contents,
       html: await readFile(path.join(here, "web/index.html"), "utf8"),
-      css: await readFile(path.join(here, "web/style.css")),
+      css: Buffer.concat([
+        await readFile(path.join(here, "web/style.css")),
+        await readFile(path.join(here, "web/speech-keys.css")),
+      ]),
     };
   })();
   // A failed build (e.g. a syntax error while developing) is retried.
@@ -112,6 +116,8 @@ export async function createReplayHandler(
     workspaceRoot?: string;
     /** The --host the service listens on (loopback names are always allowed). */
     host?: string;
+    /** Saved speech API keys (default: the person's Keychain or key file). */
+    speechKeys?: SpeechKeyStore;
   } = {},
 ) {
   const basePath = options.basePath ?? "";
@@ -544,6 +550,7 @@ export async function createReplayHandler(
         const job = regenerateNarration(dir, {
           fit: true,
           segmentIds: request.segmentIds,
+          speechKeys: options.speechKeys,
           onProgress: (text) => {
             narrationMessage = text;
           },

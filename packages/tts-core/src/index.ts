@@ -1,6 +1,7 @@
 export {
   DEFAULT_ELEVENLABS_NARRATION_MODEL,
   DEFAULT_OPENAI_NARRATION_MODEL,
+  NARRATION_PROVIDER_API_KEY_ENV,
   OPENAI_NARRATION_MODELS,
   createNarrationRequest,
   normalizeNarrationText,
@@ -21,6 +22,7 @@ export {
   pruneNarrationCache,
 } from "./cache/cache-maintenance.js";
 export type {
+  NarrationApiKeyResolver,
   NarrationProvider,
   NarrationProviderName,
   NarrationProviderOptions,
