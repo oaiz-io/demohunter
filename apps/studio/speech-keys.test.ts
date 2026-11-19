@@ -94,7 +94,8 @@ describe("file store", () => {
 
   test("ignores unknown providers and malformed values", async () => {
     const file = path.join(dir, "speech-keys.json");
-    await writeFile(file, JSON.stringify({ version: 1, keys: { openai: "bad key", other: OPENAI, __proto__: { elevenlabs: ELEVEN } } }), { mode: 0o600 });
+    // A raw "__proto__" key: JSON.parse makes it an own property.
+    await writeFile(file, `{"version":1,"keys":{"openai":"bad key","other":"${OPENAI}","__proto__":{"elevenlabs":"${ELEVEN}"}}}`, { mode: 0o600 });
     const store = fileSpeechKeyStore(file);
     expect(await store.get("openai")).toBeUndefined();
     expect(await store.get("elevenlabs")).toBeUndefined();

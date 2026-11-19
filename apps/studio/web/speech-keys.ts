@@ -23,7 +23,7 @@ export const speechKeysStatus = (): Promise<SpeechKeysStatus | undefined> => req
 export function describeSpeechKey(state: SpeechKeyState): string {
   if (state.active === "studio") return `saved key ${state.hint ?? ""}`.trim();
   if (state.active === "environment") return `key from ${state.envVar}`;
-  return state.error ?? "no API key";
+  return state.error ? "cannot read the saved key" : "no API key";
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) => {
@@ -92,7 +92,17 @@ function row(state: SpeechKeyState): HTMLElement {
   const name = el("div", "speech-key-name");
   const now = el("span", `speech-key-state ${state.active}`, describeSpeechKey(state));
   now.title = now.textContent ?? "";
-  name.append(el("strong", undefined, state.label), now);
+  const status = el("span", "speech-key-status");
+  status.append(now);
+  // Remove sits with the status, so every row's field has the same width.
+  if (state.saved) {
+    const remove = el("button", "speech-key-remove", "Remove");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove the saved ${state.label} key`);
+    remove.onclick = () => void change(item, { provider: state.id, remove: true });
+    status.append(remove);
+  }
+  name.append(el("strong", undefined, state.label), status);
   const input = el("input");
   input.type = "password";
   input.name = `${state.id}-api-key`;
@@ -105,14 +115,10 @@ function row(state: SpeechKeyState): HTMLElement {
   save.type = "submit";
   const message = el("p", "speech-key-error");
   message.setAttribute("role", "alert");
+  // A store that cannot be read says why under the field, in full.
+  if (state.error) message.textContent = state.error;
   const actions = el("div", "speech-key-actions");
   actions.append(input, save);
-  if (state.saved) {
-    const remove = el("button", "speech-key-remove", "Remove");
-    remove.type = "button";
-    remove.onclick = () => void change(item, { provider: state.id, remove: true });
-    actions.append(remove);
-  }
   item.onsubmit = (event) => {
     event.preventDefault();
     void change(item, { provider: state.id, key: input.value });

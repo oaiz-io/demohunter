@@ -86,7 +86,7 @@ The UI saves transcript drafts automatically and protects same-field conflicts w
 bun run studio narrate <project-directory> --fit
 ```
 
-This uses environment API keys and the existing validated narration cache. `--fit` extends end holds where speech exceeds its clip; it does not recapture the app. Complete cache hits work offline. The invoice demo may contain audio.origin local-demo from a local flite voice; do not claim it came from OpenAI/ElevenLabs. Regeneration can cost provider credits on misses; run it when the user requests audio generation. For visual/text edits alone, leave audio draft or stale. If another agent edits text during synthesis, that result is skipped rather than overwriting the new script.
+This uses the speech key the person saved in Studio (Speech keys), else the environment API key, and the existing validated narration cache. Never ask for, print or save an API key yourself; if a key is missing, ask the person to add it under Speech keys. `--fit` extends end holds where speech exceeds its clip; it does not recapture the app. Complete cache hits work offline. The invoice demo may contain audio.origin local-demo from a local flite voice; do not claim it came from OpenAI/ElevenLabs. Regeneration can cost provider credits on misses; run it when the user requests audio generation. For visual/text edits alone, leave audio draft or stale. If another agent edits text during synthesis, that result is skipped rather than overwriting the new script.
 
 ## Verify
 

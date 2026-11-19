@@ -80,6 +80,28 @@
 .speech-key-name strong {
   font-weight: 600;
 }
+.speech-key-status {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.speech-key-remove {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-ink);
+  font: 500 12px / 16px var(--font-sans);
+  cursor: default;
+}
+.speech-key-remove:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.speech-key-remove:disabled {
+  opacity: 0.5;
+}
 .speech-key-state {
   color: var(--color-graphite);
   font: 11px / 16px var(--font-mono);
