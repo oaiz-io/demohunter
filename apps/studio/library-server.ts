@@ -6,7 +6,7 @@ import path from "node:path";
 import { build } from "esbuild";
 import { LocalLibrary } from "./library.js";
 import { SeenDemos } from "./seen.js";
-import { AgentHub } from "./agents.js";
+import { AGENT_HIDDEN_ENV, AgentHub } from "./agents.js";
 import { handleAgentRoute } from "./agent-routes.js";
 import { hostAllowed, restrictFolder } from "./trust.js";
 import { createReplayHandler, sendTagged } from "./server.js";
@@ -15,7 +15,7 @@ import { fontFile } from "./fonts.js";
 import { createHash, randomUUID } from "node:crypto";
 import { loadBundle } from "./storage.js";
 import { handleSpeechKeyRoute } from "./speech-key-routes.js";
-import { speechKeyStore, type SpeechKeyStore } from "./speech-keys.js";
+import { SpeechKeyStatus, speechKeyStore, type SpeechKeyStore } from "./speech-keys.js";
 import {
   clearStudioSession,
   libraryProjectId,
@@ -42,6 +42,8 @@ export async function serveLibrary(
   const seen = new SeenDemos(library.root);
   // Coding agents the person starts from the editor (one per worktree).
   const agents = new AgentHub();
+  // Saved speech keys: read once, then kept current by the dialog's changes.
+  const speechKeys = new SpeechKeyStatus(options.speechKeys ?? speechKeyStore(), process.env, AGENT_HIDDEN_ENV);
   const here = path.dirname(fileURLToPath(import.meta.url)),
     html = await readFile(path.join(here, "web/library.html")),
     css = Buffer.concat([await readFile(path.join(here, "web/library.css")), await readFile(path.join(here, "web/speech-keys.css"))]);
@@ -209,7 +211,7 @@ export async function serveLibrary(
         return send(body, "application/json");
       }
       if (await handleAgentRoute(req, res, url, library, agents, options.restricted)) return;
-      if (await handleSpeechKeyRoute(req, res, url, options.speechKeys ?? speechKeyStore())) return;
+      if (await handleSpeechKeyRoute(req, res, url, speechKeys)) return;
       if (req.method === "POST" && url.pathname === "/api/seen") {
         // The library and the editor mark a demo as looked at.
         let body = "";
@@ -271,7 +273,7 @@ export async function serveLibrary(
             library: true,
             // Agents connect in the worktree that holds the demo.
             workspaceRoot: library.rootOf(dir) ?? library.root,
-            speechKeys: options.speechKeys,
+            speechKeys: speechKeys.store,
           });
           handlers.set(id, handler);
           handler.catch(() => handlers.delete(id));

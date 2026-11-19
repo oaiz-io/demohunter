@@ -65,7 +65,7 @@ bun run studio resolve <project-dir> <element-link>
 bun run studio contract
 
 Capture uses draft narration timing and needs no API key. Narrate explicitly
-uses the project's TTS settings, environment credentials, and existing cache.
+uses the project's TTS settings, the speech key saved in Studio (else the environment), and existing cache.
 Saved demos can be exported without the source application.`;
 
 const commands = new Set([

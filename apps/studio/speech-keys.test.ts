@@ -9,6 +9,8 @@ import { serveLibrary } from "./library-server.js";
 import { regenerateNarration } from "./narration.js";
 import {
   SPEECH_PROVIDERS,
+  SpeechKeyStatus,
+  defaultSpeechKeysFile,
   fileSpeechKeyStore,
   keychainSpeechKeyStore,
   normalizeSpeechKey,
@@ -54,7 +56,18 @@ describe("speech key validation", () => {
   });
 });
 
+describe("test isolation", () => {
+  test("the test preload points the default store at a temporary file", () => {
+    expect(process.env.DEMOHUNTER_SPEECH_KEYS_FILE).toContain(tmpdir());
+  });
+});
+
 describe("file store", () => {
+  test("a relative DEMOHUNTER_SPEECH_KEYS_FILE is ignored", () => {
+    expect(defaultSpeechKeysFile({ DEMOHUNTER_SPEECH_KEYS_FILE: "keys.json", XDG_CONFIG_HOME: "/cfg" })).toBe("/cfg/demohunter/speech-keys.json");
+    expect(defaultSpeechKeysFile({ DEMOHUNTER_SPEECH_KEYS_FILE: "/abs/keys.json" })).toBe("/abs/keys.json");
+  });
+
   test("saves keys in a 0600 file inside a 0700 folder and removes them", async () => {
     const file = path.join(dir, "config", "demohunter", "speech-keys.json");
     const store = fileSpeechKeyStore(file);
@@ -183,13 +196,86 @@ describe("which key Studio uses", () => {
     expect(JSON.stringify(status)).not.toContain(ELEVEN);
     expect(JSON.stringify(status)).not.toContain("env-openai-key");
     expect(status.providers).toEqual([
-      { id: "openai", label: "OpenAI", envVar: "OPENAI_API_KEY", saved: false, environment: true, active: "environment" },
-      { id: "elevenlabs", label: "ElevenLabs", envVar: "ELEVENLABS_API_KEY", saved: true, hint: "…EVEN", environment: false, active: "studio" },
+      { id: "openai", label: "OpenAI", envVar: "OPENAI_API_KEY", saved: false, environment: true, active: "environment", agents: true },
+      { id: "elevenlabs", label: "ElevenLabs", envVar: "ELEVENLABS_API_KEY", saved: true, hint: "…EVEN", environment: false, active: "studio", agents: true },
     ]);
   });
 });
 
+describe("status for the dialog and the Script tab", () => {
+  function counting(store: SpeechKeyStore, fail?: string) {
+    const reads: string[] = [];
+    return {
+      reads,
+      store: {
+        ...store,
+        get: async (p) => {
+          reads.push(p);
+          if (fail) throw new Error(fail);
+          return store.get(p);
+        },
+      } as SpeechKeyStore,
+    };
+  }
+
+  test("reads the store once, then follows saves and removals; refresh reads again", async () => {
+    const file = fileSpeechKeyStore(path.join(dir, "keys.json"));
+    await file.set("openai", OPENAI);
+    const { store, reads } = counting(file);
+    const status = new SpeechKeyStatus(store, {});
+    expect((await status.status()).providers[0]).toMatchObject({ saved: true, hint: "…ENAI" });
+    await status.status();
+    expect(reads).toEqual(["openai", "elevenlabs"]);
+    expect((await status.set("elevenlabs", ` ${ELEVEN} `)).providers[1]).toMatchObject({ saved: true, hint: "…EVEN" });
+    expect((await status.remove("openai")).providers[0]).toMatchObject({ saved: false, active: "none" });
+    expect(reads).toHaveLength(2);
+    expect(await file.get("elevenlabs")).toBe(ELEVEN);
+    await status.status(true);
+    expect(reads).toHaveLength(4);
+  });
+
+  test("a store that cannot be read is asked once, not once per provider", async () => {
+    const { store, reads } = counting(fileSpeechKeyStore(path.join(dir, "keys.json")), "Keychain is locked (status 51).");
+    const providers = (await new SpeechKeyStatus(store, {}).status()).providers;
+    expect(reads).toEqual(["openai"]);
+    expect(providers.map((p) => p.error)).toEqual(["Keychain is locked (status 51).", "Keychain is locked (status 51)."]);
+  });
+
+  test("says when agents cannot use an environment key", async () => {
+    const status = new SpeechKeyStatus(fileSpeechKeyStore(path.join(dir, "keys.json")), {
+      OPENAI_API_KEY: "env-openai-key-0123456789",
+      ELEVENLABS_API_KEY: "env-eleven-key-0123456789",
+    }, ["OPENAI_API_KEY"]);
+    expect((await status.status()).providers.map((p) => [p.active, p.agents])).toEqual([
+      ["environment", false],
+      ["environment", true],
+    ]);
+    expect((await status.set("openai", OPENAI)).providers[0]).toMatchObject({ active: "studio", agents: true });
+  });
+});
+
 describe("narration uses the saved key", () => {
+  test("through Studio's default provider wiring", async () => {
+    const { root, dir: demo } = await projectFixture();
+    const store = fileSpeechKeyStore(path.join(dir, "keys.json"));
+    await store.set("openai", OPENAI);
+    const sent: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      sent.push(`${String(url)} ${new Headers(init?.headers).get("authorization")}`);
+      return new Response(new Uint8Array(wavBytes()));
+    }) as typeof fetch;
+    try {
+      const result = await regenerateNarration(demo, { cacheDir: path.join(root, "cache"), speechKeys: store });
+      expect(result.generated).toBe(1);
+      expect(sent).toEqual([`https://api.openai.com/v1/audio/speech Bearer ${OPENAI}`]);
+    } finally {
+      globalThis.fetch = realFetch;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+
   test("on a cache miss only, and names Studio when no key exists", async () => {
     const { root, dir: demo } = await projectFixture();
     const sent: string[] = [];

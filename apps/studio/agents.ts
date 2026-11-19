@@ -60,14 +60,14 @@ const script = (file: string, ...args: string[]) => [process.execPath, ...bunArg
 /** Keys and tokens never reach an agent: it runs on the login the person
  * made with `claude` / `codex` (their subscription), never on an account a
  * repository's .env or a key in the environment names. */
-const API_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"];
+export const AGENT_HIDDEN_ENV = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"];
 /** The person's own CLI on PATH: what they run in a terminal, with its login. */
 const ownCli = (kind: AgentKind) => onPath(kind === "claude" ? "claude" : "codex", process.env);
 /** The person's environment for an agent, running their own `claude` or
  * `codex` (the adapter's bundled copy only when they have none). */
 function agentEnv(kind: AgentKind): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  for (const key of API_KEYS) delete env[key];
+  for (const key of AGENT_HIDDEN_ENV) delete env[key];
   const key = kind === "claude" ? "CLAUDE_CODE_EXECUTABLE" : "CODEX_PATH";
   const own = ownCli(kind);
   if (own) env[key] ??= own;

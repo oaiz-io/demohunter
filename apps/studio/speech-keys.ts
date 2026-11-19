@@ -113,14 +113,20 @@ export function keychainSpeechKeyStore(run: SecurityRunner = runSecurity): Speec
 
 // ---------------------------------------------------------------- file
 
+/** Absolute paths only: Studio, `studio narrate` and an agent's MCP server
+ * run in different folders and must all find the same file. */
 export function defaultSpeechKeysFile(env: NodeJS.ProcessEnv = process.env): string {
-  if (env.DEMOHUNTER_SPEECH_KEYS_FILE) return path.resolve(env.DEMOHUNTER_SPEECH_KEYS_FILE);
+  const chosen = env.DEMOHUNTER_SPEECH_KEYS_FILE;
+  if (chosen && path.isAbsolute(chosen)) return chosen;
   const base = env.XDG_CONFIG_HOME && path.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : path.join(homedir(), ".config");
   return path.join(base, "demohunter", "speech-keys.json");
 }
 
 type KeyFile = { version: 1; keys: Partial<Record<SpeechProvider, string>> };
 
+/** Writes are serialized within one process. Two Studio processes saving
+ * different providers at the same instant can lose one save (the file is
+ * replaced whole); the Keychain store (macOS) has no such limit. */
 export function fileSpeechKeyStore(file = defaultSpeechKeysFile()): SpeechKeyStore {
   file = path.resolve(file);
   let queue: Promise<unknown> = Promise.resolve();
@@ -206,8 +212,9 @@ let defaultStore: SpeechKeyStore | undefined;
 /** The macOS Keychain on a Mac, otherwise (or with DEMOHUNTER_SPEECH_KEYS_FILE)
  * the per-user file. */
 export function speechKeyStore(): SpeechKeyStore {
+  const file = process.env.DEMOHUNTER_SPEECH_KEYS_FILE;
   return (defaultStore ??=
-    process.platform === "darwin" && !process.env.DEMOHUNTER_SPEECH_KEYS_FILE
+    process.platform === "darwin" && !(file && path.isAbsolute(file))
       ? keychainSpeechKeyStore()
       : fileSpeechKeyStore(defaultSpeechKeysFile()));
 }
@@ -244,36 +251,93 @@ export type SpeechKeyState = {
   environment: boolean;
   /** Which key synthesis uses. */
   active: "studio" | "environment" | "none";
+  /** Agents Studio starts (and their MCP narration) can use the key. False
+   * when only the environment has it and Studio keeps that variable from
+   * agents (OPENAI_API_KEY: Codex would sign in with it). */
+  agents: boolean;
   error?: string;
 };
 export type SpeechKeysStatus = { store: SpeechKeyStore["kind"]; location: string; providers: SpeechKeyState[] };
 
-export async function speechKeysStatus(
-  store: SpeechKeyStore = speechKeyStore(),
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<SpeechKeysStatus> {
-  const providers = await Promise.all(
-    SPEECH_PROVIDERS.map(async ({ id, label, envVar }): Promise<SpeechKeyState> => {
-      let saved: string | undefined, error: string | undefined;
-      try {
-        saved = await store.get(id);
-      } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+type Known = { hint?: string; error?: string };
+
+/**
+ * What the Speech keys dialog and the Script tab show, read from the store
+ * once and then kept up to date by the saves and removals made through it.
+ * Reading a saved key from a locked Keychain asks the person to unlock it, so
+ * Studio reads again only when the person opens the dialog (`refresh`), and
+ * stops at the first failure instead of asking once per provider.
+ */
+export class SpeechKeyStatus {
+  private known = new Map<SpeechProvider, Known>();
+  private reading: Promise<void> | undefined;
+  constructor(
+    readonly store: SpeechKeyStore = speechKeyStore(),
+    private env: NodeJS.ProcessEnv = process.env,
+    /** Environment variables Studio removes before it starts an agent. */
+    private hiddenFromAgents: readonly string[] = [],
+  ) {}
+
+  async status(refresh = false): Promise<SpeechKeysStatus> {
+    if (refresh || this.known.size < SPEECH_PROVIDERS.length) await (this.reading ??= this.read().finally(() => (this.reading = undefined)));
+    return this.snapshot();
+  }
+  async set(provider: SpeechProvider, key: string): Promise<SpeechKeysStatus> {
+    key = normalizeSpeechKey(key);
+    await this.store.set(provider, key);
+    this.known.set(provider, { hint: hintOf(key) });
+    return this.status();
+  }
+  async remove(provider: SpeechProvider): Promise<SpeechKeysStatus> {
+    await this.store.remove(provider);
+    this.known.set(provider, {});
+    return this.status();
+  }
+
+  private async read(): Promise<void> {
+    let failure: string | undefined;
+    // One at a time: a locked Keychain asks once, not once per provider.
+    for (const { id } of SPEECH_PROVIDERS) {
+      if (failure) {
+        this.known.set(id, { error: failure });
+        continue;
       }
-      const environment = !!env[envVar]?.trim();
+      try {
+        const saved = await this.store.get(id);
+        this.known.set(id, saved ? { hint: hintOf(saved) } : {});
+      } catch (error) {
+        failure = error instanceof Error ? error.message : String(error);
+        this.known.set(id, { error: failure });
+      }
+    }
+  }
+  private snapshot(): SpeechKeysStatus {
+    const providers = SPEECH_PROVIDERS.map(({ id, label, envVar }): SpeechKeyState => {
+      const known = this.known.get(id) ?? {};
+      const environment = !!this.env[envVar]?.trim();
+      const active = known.hint ? "studio" : environment ? "environment" : "none";
       return {
         id,
         label,
         envVar,
-        saved: !!saved,
-        ...(saved ? { hint: hintOf(saved) } : {}),
+        saved: !!known.hint,
+        ...(known.hint ? { hint: known.hint } : {}),
         environment,
-        active: saved ? "studio" : environment ? "environment" : "none",
-        ...(error ? { error } : {}),
+        active,
+        agents: active === "studio" || (active === "environment" && !this.hiddenFromAgents.includes(envVar)),
+        ...(known.error ? { error: known.error } : {}),
       };
-    }),
-  );
-  return { store: store.kind, location: store.location, providers };
+    });
+    return { store: this.store.kind, location: this.store.location, providers };
+  }
+}
+
+/** A one-off status (reads every saved key). */
+export function speechKeysStatus(
+  store: SpeechKeyStore = speechKeyStore(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<SpeechKeysStatus> {
+  return new SpeechKeyStatus(store, env).status();
 }
 
 /** Studio's narration message when a provider has no key anywhere. */

@@ -38,3 +38,36 @@ No HIGH or MEDIUM findings.
   an agent with a shell has the person's rights anyway.
 - A trusted folder's scene scripts run same-origin with the editor (existing
   design), so they can replace or remove a key, but cannot read it.
+
+## Second review (before merge)
+
+A second independent security review (branch at b3873d9) found **no
+findings at confidence 8 or above**. The later code-review fixes below only
+cache the status (the `?refresh=1` read passes the same guards and returns
+the same fields), change the dialog markup, and isolate tests; they add no
+new input to the store and no new output of a key. It re-checked the
+Host-name fix, Host parsing edge cases (`localhost.`, `foo.localhost`,
+`127.0.0.2`, missing Host), IPv4-mapped addresses, the Electron `app://`
+origin, `Origin: null` from sandboxed scenes, the `/projects/<id>/` editor
+paths, the MCP and `studio narrate` paths, every error path, provider
+endpoints, the file store and prototype pollution.
+
+Notes below the threshold, handled:
+
+- MCP `regenerate_narration` and `studio` help still said "environment
+  credentials": fixed.
+- Studio keeps `OPENAI_API_KEY` from the agents it starts, so an environment
+  OpenAI key does not reach agent narration: the dialog and Script tab now
+  say "(not for agents)".
+- Same-user processes can read the Keychain item without a prompt: accepted
+  (see above).
+
+Hardening from the code review that also reduces exposure:
+
+- Tests can no longer reach the developer's real Keychain or key file: a
+  test preload (`tests/helpers/isolate-speech-keys.ts`) points the default
+  store at a temporary file.
+- The key field is a masked text field outside a `<form>`, so browsers do
+  not offer to save the key in a (possibly synced) password manager.
+- The service reads saved keys once and only again when the person opens the
+  dialog, so a locked Keychain asks once and not on every page load.

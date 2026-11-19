@@ -36,3 +36,24 @@ date: 2026-11-19
 - Browser check of both dialogs, save, remove and error states.
 - Security review: no HIGH/MEDIUM; one LOW fixed. See
   `261119-luj-SECURITY-REVIEW.md`.
+
+## Critical review before merge (second pass)
+
+Independent code review: no blockers. Fixed:
+
+- Status is read once per service and kept current by saves and removals;
+  only opening the dialog reads again (`?refresh=1`), one provider at a time,
+  stopping at the first failure. The editor no longer re-reads on window
+  focus. (A locked Keychain asked to unlock on every page load and focus.)
+- Test preload isolates the default store (no test touches the real
+  Keychain or `~/.config`).
+- Key field: masked text field, no `<form>` (no password-manager save).
+- Saving or removing one row keeps keys typed in other rows; result is
+  announced (`role=status`); focus returns to the row.
+- "(not for agents)" when only `OPENAI_API_KEY` from the environment
+  provides the key (Studio hides it from agents).
+- Relative `DEMOHUNTER_SPEECH_KEYS_FILE` is ignored (processes run in
+  different folders).
+- End-to-end test of the default provider wiring (stubbed fetch).
+- Docs: README, replay skill, CHANGELOG, MCP tool text, `studio` help.
+- Design: Remove moved next to the status, so all fields line up.

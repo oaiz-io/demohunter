@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { SPEECH_PROVIDERS, isSpeechProvider, speechKeysStatus, type SpeechKeyStore } from "./speech-keys.js";
+import { SPEECH_PROVIDERS, isSpeechProvider, type SpeechKeyStatus } from "./speech-keys.js";
 
 const loopback = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -16,7 +16,9 @@ const changeSchema = z.union([
 
 /**
  * GET  /api/speech-keys  → which providers have a saved key (last 4 characters
- *                          only) and which key synthesis uses.
+ *                          only) and which key synthesis uses. Read from the
+ *                          store once; `?refresh=1` (the dialog opening)
+ *                          reads it again.
  * POST /api/speech-keys  → { provider, key } saves; { provider, remove: true }
  *                          removes.
  *
@@ -32,7 +34,7 @@ export async function handleSpeechKeyRoute(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
-  store: SpeechKeyStore,
+  keys: SpeechKeyStatus,
 ): Promise<boolean> {
   if (url.pathname !== "/api/speech-keys") return false;
   const json = (value: unknown, status = 200) => {
@@ -41,7 +43,7 @@ export async function handleSpeechKeyRoute(
   };
   if (!loopback.has(req.socket.remoteAddress ?? "") || !loopbackHosts.has(hostName(req.headers.host)))
     return json({ error: "Speech keys can be changed only on this computer." }, 403), true;
-  if (req.method === "GET") return json(await speechKeysStatus(store)), true;
+  if (req.method === "GET") return json(await keys.status(url.searchParams.get("refresh") === "1")), true;
   if (req.method !== "POST") return json({ error: "Method not allowed." }, 405), true;
   // A cross-site form cannot send application/json without a CORS preflight,
   // which Studio never answers.
@@ -61,11 +63,9 @@ export async function handleSpeechKeyRoute(
   }
   const provider = change.provider as (typeof SPEECH_PROVIDERS)[number]["id"];
   try {
-    if ("key" in change) await store.set(provider, change.key);
-    else await store.remove(provider);
+    return json("key" in change ? await keys.set(provider, change.key) : await keys.remove(provider)), true;
   } catch (error) {
     // Store errors are written to name no key (see speech-keys.ts).
     return json({ error: error instanceof Error ? error.message : "Could not change the speech key." }, 400), true;
   }
-  return json(await speechKeysStatus(store)), true;
 }

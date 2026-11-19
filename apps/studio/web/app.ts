@@ -2099,9 +2099,9 @@ void reload()
     applyLocation();
     wake();
     if (!renderMode) {
+      // The service's known status: no Keychain read (and no unlock prompt)
+      // on page load. Changes in the dialog update it.
       void refreshSpeechKeys();
-      // A key added in another window or the environment shows on return.
-      window.addEventListener("focus", () => void refreshSpeechKeys());
       void poll();
       void publishPreview();
       setInterval(() => void publishPreview(), 1200);

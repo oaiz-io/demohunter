@@ -117,6 +117,8 @@
   gap: 8px;
 }
 .speech-key-actions input {
+  /* Shown as dots, but not a password field (no password manager). */
+  -webkit-text-security: disc;
   flex: 1;
   min-width: 0;
   height: 28px;
@@ -161,7 +163,22 @@
   color: var(--color-correction);
   font-size: 12px;
 }
-.speech-key-error:empty {
+.speech-key-error:empty,
+.speech-key-note:empty {
+  display: none;
+}
+.speech-key-note {
+  margin: 0;
+  color: var(--color-graphite);
+  font-size: 12px;
+}
+.speech-keys-announce {
+  margin: 0;
+  padding: 0 24px 14px;
+  color: var(--color-graphite);
+  font-size: 12px;
+}
+.speech-keys-announce:empty {
   display: none;
 }
 .speech-keys-foot {
