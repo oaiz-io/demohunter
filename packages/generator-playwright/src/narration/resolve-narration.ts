@@ -2,6 +2,7 @@ import {
   createNarrationRequest,
   normalizeNarrationText,
   resolveNarrationFromCache,
+  type NarrationApiKeyResolver,
   type NarrationProvider,
 } from "@demohunter/tts-core";
 import { createElevenLabsNarrationProvider } from "@demohunter/tts-elevenlabs";
@@ -20,24 +21,28 @@ export type ResolveNarrationSegmentInput = {
   event: NarrationRuntimeEvent;
   loadedConfig: SmokeGenerateInput["loadedConfig"];
   context?: NarrationResolverContext;
+  /** Supplies the provider API key on a cache miss (Studio's saved key). The
+   * provider's environment variable is the fallback. */
+  resolveApiKey?: NarrationApiKeyResolver;
 };
 
 type ResolveNarrationSegmentDependencies = {
   createProvider: (
     loadedConfig: SmokeGenerateInput["loadedConfig"],
+    resolveApiKey?: NarrationApiKeyResolver,
   ) => NarrationProvider;
   resolveNarrationFromCache: typeof resolveNarrationFromCache;
 };
 
 const defaultDependencies: ResolveNarrationSegmentDependencies = {
-  createProvider: (loadedConfig) => {
+  createProvider: (loadedConfig, resolveApiKey) => {
     const providerName = loadedConfig.config.tts.provider;
 
     switch (providerName) {
       case "openai":
-        return createOpenAINarrationProvider();
+        return createOpenAINarrationProvider({ resolveApiKey });
       case "elevenlabs":
-        return createElevenLabsNarrationProvider();
+        return createElevenLabsNarrationProvider({ resolveApiKey });
       default:
         throw new Error(`Unsupported narration provider: ${String(providerName)}`);
     }
@@ -69,7 +74,7 @@ export async function resolveNarrationSegment(
   try {
     const { entry } = await resolvedDependencies.resolveNarrationFromCache({
       cacheDir: config.cacheDir,
-      provider: resolvedDependencies.createProvider(input.loadedConfig),
+      provider: resolvedDependencies.createProvider(input.loadedConfig, input.resolveApiKey),
       request,
     });
 

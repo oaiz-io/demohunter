@@ -4,6 +4,7 @@ import type {
   LibraryWorktree,
 } from "../library.js";
 import type { GitStatus } from "../git.js";
+import { openSpeechKeys } from "./speech-keys.js";
 
 const $ = <T extends HTMLElement = HTMLElement>(q: string) =>
   document.querySelector<T>(q)!;
@@ -561,3 +562,4 @@ void refresh();
 setInterval(() => {
   if (!document.hidden) void refresh();
 }, 4000);
+$("#speech-keys-open").onclick = () => void openSpeechKeys();

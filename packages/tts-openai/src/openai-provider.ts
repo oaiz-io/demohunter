@@ -1,5 +1,6 @@
 import {
   createNarrationRequest,
+  type NarrationApiKeyResolver,
   type NarrationProvider,
   type NarrationRequest,
   type NarrationSynthesisResult,
@@ -14,6 +15,9 @@ const OPENAI_SUPPORTED_NARRATION_MODELS = [
 
 export type OpenAINarrationProviderOptions = {
   fetch?: typeof globalThis.fetch;
+  /** Gives the API key (for example a key saved in Studio). Without one, the
+   * key comes from OPENAI_API_KEY. */
+  resolveApiKey?: NarrationApiKeyResolver;
 };
 
 export function createOpenAINarrationProvider(
@@ -31,7 +35,7 @@ export function createOpenAINarrationProvider(
 
       assertSupportedModel(normalizedRequest.model);
 
-      const apiKey = process.env.OPENAI_API_KEY;
+      const apiKey = (await options.resolveApiKey?.()) || process.env.OPENAI_API_KEY;
 
       if (!apiKey) {
         throw new Error("OPENAI_API_KEY is required to synthesize narration with OpenAI.");

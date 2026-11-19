@@ -10,6 +10,18 @@ export const DEFAULT_ELEVENLABS_NARRATION_MODEL = "eleven_multilingual_v2";
 
 export type NarrationProviderName = "openai" | "elevenlabs";
 
+/** The environment variable each provider reads its API key from. A new
+ * provider must name one here (Studio lists providers from this table). */
+export const NARRATION_PROVIDER_API_KEY_ENV: Readonly<Record<NarrationProviderName, string>> = {
+  openai: "OPENAI_API_KEY",
+  elevenlabs: "ELEVENLABS_API_KEY",
+};
+
+/** Supplies an API key on demand (for example from a saved credential). It is
+ * called only when speech must be synthesized, never for cache hits. When it
+ * gives no key, the provider reads its environment variable. */
+export type NarrationApiKeyResolver = () => string | undefined | Promise<string | undefined>;
+
 export type NarrationProviderOptions = Record<string, unknown>;
 
 export type NarrationRequest = {

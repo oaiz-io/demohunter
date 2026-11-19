@@ -11,7 +11,7 @@ DemoHunter is an OAIZ Labs open-source TypeScript CLI and SDK maintained by OAIZ
 
 - **Tech stack**: Bun workspace, TypeScript 5+, ESM-first, Playwright `>=1.61`, and ffmpeg-backed media generation.
 - **Product boundary**: OSS must stand on its own and work entirely locally - cloud features cannot leak into the default flow.
-- **Provider boundary**: TTS reads `OPENAI_API_KEY` or `ELEVENLABS_API_KEY` from the environment only. DemoHunter does not store credentials.
+- **Provider boundary**: The CLI and SDK read `OPENAI_API_KEY` or `ELEVENLABS_API_KEY` from the environment only and store no credentials. Studio can also keep a key the person adds (Speech keys): in the macOS Keychain, or elsewhere in a private per-user file (`apps/studio/speech-keys.ts`). A saved key is used before the environment variable. A key never goes into project files, the cache, generated output, logs, HTTP responses, child process environments or MCP tools.
 - **Output contract**: `.demohunter/` must be portable and versioned so Cloud can ingest it later without source-repo access.
 - **Reliability**: Narration caching is mandatory, including offline regeneration behavior and corrupt-cache recovery.
 <!-- GSD:project-end -->

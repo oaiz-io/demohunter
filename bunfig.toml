@@ -1,3 +1,6 @@
 [install]
 linker = "isolated"
 minimumReleaseAge = 259200
+
+[test]
+preload = ["./tests/helpers/isolate-speech-keys.ts"]

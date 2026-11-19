@@ -8,7 +8,7 @@ A native macOS window around the same local Studio service as `bun run studio`. 
 
 1. Open the `.dmg` and drag **DemoHunter Studio** to Applications.
 2. It is signed ad hoc, not notarized: the first time, right-click the app → **Open** → **Open** (or System Settings → Privacy & Security → **Open Anyway**).
-3. First launch downloads Chromium for rendering (about 270 MB, once). Export needs ffmpeg (`brew install ffmpeg`). Narration reads `OPENAI_API_KEY` / `ELEVENLABS_API_KEY` from your login shell.
+3. First launch downloads Chromium for rendering (about 270 MB, once). Export needs ffmpeg (`brew install ffmpeg`). For narration, add your OpenAI or ElevenLabs key once under **Speech keys** (Demos page, or the Script tab); Studio keeps it in your macOS Keychain. `OPENAI_API_KEY` / `ELEVENLABS_API_KEY` from your login shell still work when no key is saved.
 
 ## From source
 

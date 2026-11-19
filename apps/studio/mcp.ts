@@ -795,7 +795,7 @@ export function createReplayMcp(
   );
   tool(
     "regenerate_narration",
-    "Explicitly generate speech for requested segments using environment credentials and the validated local provider cache. May incur provider charges on a cache miss; use only when the user requests audio generation. No app recapture or video recording.",
+    "Explicitly generate speech for requested segments using the person's speech key (saved in Studio, else the environment) and the validated local provider cache. The key is never shown to you; if it is missing, ask the person to add it under Speech keys. May incur provider charges on a cache miss; use only when the user requests audio generation. No app recapture or video recording.",
     z.object({
       segmentIds: z.array(ref).min(1).optional(),
       fit: z.boolean().default(true),

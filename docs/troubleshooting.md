@@ -25,7 +25,7 @@ DemoHunter uses `ffmpeg` to mux audio into video and capture poster frames.
 
 ## `OPENAI_API_KEY is not set` or `ELEVENLABS_API_KEY is not set`
 
-DemoHunter only needs a provider API key when generating *uncached* narration.
+DemoHunter only needs a provider API key when generating *uncached* narration. In DemoHunter Studio, add the key once under **Speech keys** (Demos page or Script tab) instead; the CLI reads the environment only.
 
 - If every narration string is already in `.demohunter/cache/`, generation runs offline.
 - For new OpenAI strings, export:

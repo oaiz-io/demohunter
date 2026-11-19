@@ -22,6 +22,8 @@ import { Timeline, clockMs } from "./timeline.js";
 import { resizablePanel } from "./panel-resize.js";
 import type { HistoryItem } from "./agent.js";
 import type { AgentActivity } from "../contract.js";
+import type { SpeechKeysStatus } from "../speech-keys.js";
+import { describeSpeechKey, openSpeechKeys, speechKeysStatus } from "./speech-keys.js";
 
 declare global {
   interface Window {
@@ -1464,6 +1466,28 @@ $("#toolbar-copy").onclick = () => {
     .then(() => toast("Element context copied"))
     .catch(report);
 };
+// Speech key for this demo's provider ------------------------------------------
+let speechKeys: SpeechKeysStatus | undefined,
+  segmentsNeedingAudio = 0;
+function renderSpeechKey(): void {
+  const state = speechKeys?.providers.find((p) => p.id === bundle?.project.tts.provider);
+  setHidden($("#speech-key-line"), !state);
+  if (!state) return;
+  // A missing key is a problem only when some speech still has to be made.
+  $("#speech-key-line").classList.toggle("none", state.active === "none" && segmentsNeedingAudio > 0);
+  $("#speech-key-text").textContent = `${state.label}: ${describeSpeechKey(state)}`;
+  $("#speech-key-text").title = $("#speech-key-text").textContent;
+  $("#speech-key-open").textContent = state.active === "none" ? "Add key" : "Speech keys";
+}
+async function refreshSpeechKeys(): Promise<void> {
+  speechKeys = await speechKeysStatus();
+  renderSpeechKey();
+}
+$("#speech-key-open").onclick = () =>
+  void openSpeechKeys((status) => {
+    speechKeys = status;
+    renderSpeechKey();
+  });
 // Script audio status ----------------------------------------------------------
 function renderScriptStatus(): void {
   const segments = bundle.narration.segments.filter(
@@ -1474,6 +1498,8 @@ function renderScriptStatus(): void {
   );
   const draft = segments.filter((s) => !s.audio);
   const missing = stale.length + draft.length;
+  segmentsNeedingAudio = missing;
+  renderSpeechKey();
   $("#script-dot").hidden = !missing;
   $("#audio-status").hidden = !segments.length;
   $("#audio-status").classList.toggle("ok", !missing);
@@ -2073,6 +2099,9 @@ void reload()
     applyLocation();
     wake();
     if (!renderMode) {
+      // The service's known status: no Keychain read (and no unlock prompt)
+      // on page load. Changes in the dialog update it.
+      void refreshSpeechKeys();
       void poll();
       void publishPreview();
       setInterval(() => void publishPreview(), 1200);

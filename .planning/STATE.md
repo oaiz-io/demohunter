@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: none — milestone archived
 Plan: none
 Status: v1.0 complete
-Last activity: 2026-11-17 -- Quick tasks 261117-m45 (product assessment research), 261117-spd (Studio speed fixes) and 261117-flm (film tools and the film skill)
+Last activity: 2026-11-19 - Completed quick task 261119-luj: Studio speech keys
 Progress: [██████████] 100%
 
 ## Performance Metrics
@@ -43,6 +43,7 @@ Progress: [██████████] 100%
 
 | Date | ID | Task | Summary |
 | --- | --- | --- | --- |
+| 2026-11-19 | 261119-luj | Studio speech keys | Speech keys dialog (Demos page, Script tab): OpenAI/ElevenLabs keys saved once in the macOS Keychain (0600 file elsewhere), used before the environment by editor, `studio narrate` and MCP. Key read only on cache miss; never in responses, argv, child env or MCP. Loopback-only JSON routes. Security review: no HIGH/MEDIUM, one LOW fixed. Critical review (no blockers; all fixed). Tests: 519 pass + desktop 7 pass; typecheck clean. |
 | 2026-11-17 | 261117-flm | General film tools for agents | `studio new` (scene-only film on a blank v2 capture, kit, starter scene, PLAN.md), `studio sheet` and MCP `get_film_sheet` (labelled contact sheets; default sheet of a 2-minute film about 2.5 s), kit `fitText`, `readTime`, `kenBurns`. New → edit → sheet → export of a 116.5 s film: 1920x1080 export 30 s, 1080x1920 19 s. Tests: studio 190 pass, desktop 7 pass; typecheck clean. |
 | 2026-11-17 | 261117-spd | Studio speed fixes | Eight measured fixes: incremental library scan (cold 2,341 -> 271 ms), warm renderer and visual-key thumbnails, lazy capture reads, HTTP caching and smaller bundles, one seek per action, lighter frame loop, 304 polls, parallel desktop start. `useVirtualDom` and `checkoutEveryNms` not adopted (replay correctness). Tests: studio 178 pass, desktop 7 pass. |
 | 2026-11-17 | 261117-m45 | Product assessment research | Measured causes of Studio slowness, comparison with open-source video tools, four Rust spikes with prototypes, and a work plan in `thoughts/research/2026-11-17-product-assessment/`. Verdict: TypeScript fixes first, no Rust now. Documents only. |
