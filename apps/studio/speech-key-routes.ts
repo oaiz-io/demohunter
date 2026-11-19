@@ -3,6 +3,10 @@ import { z } from "zod";
 import { SPEECH_PROVIDERS, isSpeechProvider, speechKeysStatus, type SpeechKeyStore } from "./speech-keys.js";
 
 const loopback = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+/** The Host header's name, without the port. */
+const hostName = (header = "") =>
+  (header.startsWith("[") ? header.slice(0, header.indexOf("]") + 1) : header.replace(/:\d+$/, "")).toLowerCase();
 const MAX_BODY = 4096;
 
 const changeSchema = z.union([
@@ -17,10 +21,12 @@ const changeSchema = z.union([
  *                          removes.
  *
  * The full key is never sent back. Only this computer may call these routes,
- * even when Studio listens on a network (--host 0.0.0.0): a person on the
- * network must not be able to replace or remove the person's keys. The
- * library service has already refused unknown Host names (DNS rebinding),
- * cross-site requests and cross-origin writes.
+ * by a loopback name, even when Studio listens on a network (--host
+ * 0.0.0.0): a person on the network, or a web page that rebinds its own
+ * domain to 127.0.0.1 (which --host 0.0.0.0 lets through the library's Host
+ * check), must not be able to replace or remove the person's keys. The
+ * library service has already refused cross-site requests and cross-origin
+ * writes.
  */
 export async function handleSpeechKeyRoute(
   req: IncomingMessage,
@@ -33,7 +39,7 @@ export async function handleSpeechKeyRoute(
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(value));
   };
-  if (!loopback.has(req.socket.remoteAddress ?? ""))
+  if (!loopback.has(req.socket.remoteAddress ?? "") || !loopbackHosts.has(hostName(req.headers.host)))
     return json({ error: "Speech keys can be changed only on this computer." }, 403), true;
   if (req.method === "GET") return json(await speechKeysStatus(store)), true;
   if (req.method !== "POST") return json({ error: "Method not allowed." }, 405), true;

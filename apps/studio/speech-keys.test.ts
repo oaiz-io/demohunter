@@ -295,4 +295,24 @@ describe("/api/speech-keys", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("a network-wide service still takes key changes only by a loopback name", async () => {
+    const { root } = await projectFixture();
+    const store = fileSpeechKeyStore(path.join(dir, "keys.json"));
+    const app = await serveLibrary(root, { port: 0, host: "0.0.0.0", speechKeys: store });
+    const port = new URL(app.url).port;
+    const api = `http://127.0.0.1:${port}/api/speech-keys`;
+    try {
+      // DNS rebinding: an outside domain resolved to 127.0.0.1.
+      const rebound = await post(api, { provider: "openai", key: OPENAI }, { host: `evil.example:${port}` });
+      expect(rebound.status).toBe(403);
+      expect((await call(api, { headers: { host: `evil.example:${port}` } })).status).toBe(403);
+      expect(await store.get("openai")).toBeUndefined();
+      expect((await post(api, { provider: "openai", key: OPENAI }, { host: `localhost:${port}` })).status).toBe(200);
+      expect(await store.get("openai")).toBe(OPENAI);
+    } finally {
+      await app.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
