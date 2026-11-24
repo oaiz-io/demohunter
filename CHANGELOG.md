@@ -7,6 +7,7 @@ All notable changes to DemoHunter are documented here. Format follows [Keep a Ch
 ### Added
 
 - DemoHunter Studio (alpha): **Speech keys**. Add an OpenAI or ElevenLabs API key once (Demos page or a demo's Script tab); every demo, `studio narrate` and the MCP `regenerate_narration` tool use it before `OPENAI_API_KEY` / `ELEVENLABS_API_KEY`. Keys are kept in the macOS Keychain, or elsewhere in a private per-user file. The CLI still reads the environment only.
+- Kokoro narration provider (`tts.provider: "kokoro"`). It runs the Kokoro-82M model locally on the CPU with no API key. Install `kokoro-js` in your project to use it.
 
 ### Changed
 

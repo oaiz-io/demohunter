@@ -38,7 +38,7 @@ npx demohunter generate demos/sample.tour.ts
 open .demohunter/sample-smoke/video.mp4
 ```
 
-Set `OPENAI_API_KEY` before you generate uncached OpenAI narration. For ElevenLabs, select that provider in the config and set `ELEVENLABS_API_KEY`. The CLI does not store these keys. DemoHunter Studio can keep them for you: add each key once under **Speech keys** (see [Studio](apps/studio/README.md)).
+Set `OPENAI_API_KEY` before you generate uncached OpenAI narration. For ElevenLabs, select that provider in the config and set `ELEVENLABS_API_KEY`. The CLI does not store these keys. DemoHunter Studio can keep them for you: add each key once under **Speech keys** (see [Studio](apps/studio/README.md)). To narrate locally without an API key, use the Kokoro provider (see [Getting started](docs/getting-started.md#local-narration-with-kokoro)).
 
 ```sh
 export OPENAI_API_KEY=sk-...

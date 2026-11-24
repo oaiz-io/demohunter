@@ -15,9 +15,9 @@ import { spawn } from "node:child_process";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { NARRATION_PROVIDER_API_KEY_ENV, type NarrationProviderName } from "../../packages/tts-core/src/contracts.js";
+import { NARRATION_PROVIDER_API_KEY_ENV, type ApiKeyNarrationProviderName } from "../../packages/tts-core/src/contracts.js";
 
-export type SpeechProvider = NarrationProviderName;
+export type SpeechProvider = ApiKeyNarrationProviderName;
 
 const LABELS: Record<SpeechProvider, string> = { openai: "OpenAI", elevenlabs: "ElevenLabs" };
 export const SPEECH_PROVIDERS = (Object.keys(NARRATION_PROVIDER_API_KEY_ENV) as SpeechProvider[]).map((id) => ({

@@ -21,6 +21,7 @@
     { "path": "../media-ffmpeg" },
     { "path": "../tts-core" },
     { "path": "../tts-elevenlabs" },
+    { "path": "../tts-kokoro" },
     { "path": "../tts-openai" }
   ]
 }

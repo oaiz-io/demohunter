@@ -55,7 +55,7 @@ const voiceSettings = z
   .strict();
 export const ttsSchema = z
   .object({
-    provider: z.enum(["openai", "elevenlabs"]),
+    provider: z.enum(["openai", "elevenlabs", "kokoro"]),
     model: z.string().min(1),
     voice: z.string().min(1),
     format: z.string().min(1),
