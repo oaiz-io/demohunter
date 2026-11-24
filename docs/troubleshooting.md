@@ -42,6 +42,16 @@ export ELEVENLABS_API_KEY=...
 
 DemoHunter does not store credentials.
 
+## `Kokoro narration requires the "kokoro-js" package`
+
+Install it in the project that holds `demohunter.config.ts`:
+
+```sh
+npm install kokoro-js
+```
+
+DemoHunter loads `kokoro-js` from your project, so other providers never download it.
+
 ## `DemoHunter could not reach baseURL`
 
 The CLI tried to load your app and got `ERR_CONNECTION_REFUSED` or a similar network error.

@@ -6,6 +6,7 @@ import {
   DEFAULT_COOKIE_BANNER_CONFIG,
   DEFAULT_CURSOR_CONFIG,
   DEFAULT_ELEVENLABS_TTS_CONFIG,
+  DEFAULT_KOKORO_TTS_CONFIG,
   DEFAULT_OUTPUT_CONFIG,
   DEFAULT_RECORD_CONFIG,
   DEFAULT_TTS_CONFIG,
@@ -257,6 +258,13 @@ function resolveProjectPath(projectRoot: string, authoredPath: string): string {
 }
 
 function resolveTTSConfig(authoredTTS: DemoHunterUserConfig["tts"]): ResolvedDemoHunterConfig["tts"] {
+  if (authoredTTS?.provider === "kokoro") {
+    return {
+      ...DEFAULT_KOKORO_TTS_CONFIG,
+      ...authoredTTS,
+    };
+  }
+
   if (authoredTTS?.provider === "elevenlabs") {
     return {
       ...DEFAULT_ELEVENLABS_TTS_CONFIG,

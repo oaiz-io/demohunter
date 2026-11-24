@@ -20,6 +20,9 @@
       "path": "./packages/tts-elevenlabs"
     },
     {
+      "path": "./packages/tts-kokoro"
+    },
+    {
       "path": "./packages/tts-openai"
     }
   ]

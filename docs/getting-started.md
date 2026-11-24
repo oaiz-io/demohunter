@@ -7,7 +7,7 @@ This guide shows how to install DemoHunter, create a starter tour, and generate 
 - Node.js 20+
 - `ffmpeg` and `ffprobe` on your `PATH`
 - A Playwright Chromium runtime (installed once: `npx playwright install chromium`)
-- `OPENAI_API_KEY` or `ELEVENLABS_API_KEY` only when generating uncached narration
+- `OPENAI_API_KEY` or `ELEVENLABS_API_KEY` only when generating uncached narration, or `kokoro-js` in your project for local narration
 
 ## Install
 
@@ -106,6 +106,28 @@ export default {
 ```
 
 Use `tts.language` for the narration language. Use an ISO 639-1 code such as `sv` for Swedish. A `narrate()` or `narrateWhile()` call can override the voice, model, format, language, or ElevenLabs voice settings. DemoHunter does not infer the narration language from locale environment variables such as `DEMO_LOCALE`.
+
+### Local narration with Kokoro
+
+Kokoro runs the Kokoro-82M model on your machine. It needs no API key and no network after the first model download.
+
+Install `kokoro-js` in your project, then select the provider:
+
+```sh
+npm install kokoro-js
+```
+
+```ts
+export default {
+  baseURL: "http://localhost:3000",
+  tts: {
+    provider: "kokoro",
+    voice: "af_heart",
+  },
+};
+```
+
+Kokoro runs on the CPU and writes `wav` audio only. New lines take about as long to generate as they take to play. The first run downloads the model once. Generated lines are cached like any other provider, so later runs work offline.
 
 ## Polish and social outputs
 

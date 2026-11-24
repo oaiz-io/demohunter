@@ -22,6 +22,7 @@ export {
   pruneNarrationCache,
 } from "./cache/cache-maintenance.js";
 export type {
+  ApiKeyNarrationProviderName,
   NarrationApiKeyResolver,
   NarrationProvider,
   NarrationProviderName,

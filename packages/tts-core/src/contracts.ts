@@ -8,11 +8,15 @@ export const DEFAULT_OPENAI_NARRATION_MODEL = "gpt-4o-mini-tts";
 
 export const DEFAULT_ELEVENLABS_NARRATION_MODEL = "eleven_multilingual_v2";
 
-export type NarrationProviderName = "openai" | "elevenlabs";
+/** Providers that call a hosted API and need a key. */
+export type ApiKeyNarrationProviderName = "openai" | "elevenlabs";
+
+/** Local providers, such as kokoro, run on the machine and need no key. */
+export type NarrationProviderName = ApiKeyNarrationProviderName | "kokoro";
 
 /** The environment variable each provider reads its API key from. A new
- * provider must name one here (Studio lists providers from this table). */
-export const NARRATION_PROVIDER_API_KEY_ENV: Readonly<Record<NarrationProviderName, string>> = {
+ * provider that needs a key must name one here (Studio lists providers from this table). */
+export const NARRATION_PROVIDER_API_KEY_ENV: Readonly<Record<ApiKeyNarrationProviderName, string>> = {
   openai: "OPENAI_API_KEY",
   elevenlabs: "ELEVENLABS_API_KEY",
 };

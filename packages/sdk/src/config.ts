@@ -90,7 +90,7 @@ export type GenerateOverrides = {
   outputFormats?: OutputFormatRequest[];
 };
 
-export type TTSProviderName = "openai" | "elevenlabs";
+export type TTSProviderName = "openai" | "elevenlabs" | "kokoro";
 
 export type ElevenLabsVoiceSettings = {
   stability?: number;
@@ -119,11 +119,21 @@ export type ElevenLabsTTSConfig = {
   voiceSettings?: ElevenLabsVoiceSettings;
 };
 
-export type TTSConfig = OpenAITTSConfig | ElevenLabsTTSConfig;
+export type KokoroTTSConfig = {
+  provider: "kokoro";
+  model: string;
+  voice: string;
+  format: string;
+  instructions: string;
+  language?: string;
+};
+
+export type TTSConfig = OpenAITTSConfig | ElevenLabsTTSConfig | KokoroTTSConfig;
 
 export type DemoHunterUserTTSConfig =
   | (Partial<Omit<OpenAITTSConfig, "provider">> & { provider?: "openai" })
-  | (Partial<Omit<ElevenLabsTTSConfig, "provider">> & { provider: "elevenlabs" });
+  | (Partial<Omit<ElevenLabsTTSConfig, "provider">> & { provider: "elevenlabs" })
+  | (Partial<Omit<KokoroTTSConfig, "provider">> & { provider: "kokoro" });
 
 export type DemoHunterUserConfig = {
   baseURL: string;
@@ -208,6 +218,14 @@ export const DEFAULT_ELEVENLABS_TTS_CONFIG: ElevenLabsTTSConfig = {
     similarityBoost: 0.75,
     useSpeakerBoost: true,
   },
+};
+
+export const DEFAULT_KOKORO_TTS_CONFIG: KokoroTTSConfig = {
+  provider: "kokoro",
+  model: "onnx-community/Kokoro-82M-v1.0-ONNX",
+  voice: "af_heart",
+  format: "wav",
+  instructions: "",
 };
 
 export const DEFAULT_DEMOHUNTER_CONFIG: Omit<ResolvedDemoHunterConfig, "baseURL"> = {

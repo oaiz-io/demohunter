@@ -6,6 +6,7 @@ import {
   type NarrationProvider,
 } from "@demohunter/tts-core";
 import { createElevenLabsNarrationProvider } from "@demohunter/tts-elevenlabs";
+import { createKokoroNarrationProvider } from "@demohunter/tts-kokoro";
 import { createOpenAINarrationProvider } from "@demohunter/tts-openai";
 
 import type {
@@ -43,6 +44,8 @@ const defaultDependencies: ResolveNarrationSegmentDependencies = {
         return createOpenAINarrationProvider({ resolveApiKey });
       case "elevenlabs":
         return createElevenLabsNarrationProvider({ resolveApiKey });
+      case "kokoro":
+        return createKokoroNarrationProvider({ projectRoot: loadedConfig.projectRoot });
       default:
         throw new Error(`Unsupported narration provider: ${String(providerName)}`);
     }
